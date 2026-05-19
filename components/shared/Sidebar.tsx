@@ -1,0 +1,177 @@
+'use client';
+
+import Link from 'next/link';
+import { usePathname } from 'next/navigation';
+import { useState } from 'react';
+import { useAuth } from '@/context/AuthContext';
+import { cn } from '@/lib/utils';
+import {
+  LayoutDashboard, Package, Tags, Truck, PackagePlus, PackageMinus,
+  ArrowLeftRight, ShoppingCart, Receipt, Users, FileText, ClipboardList,
+  FileCheck, CreditCard, BarChart3, Settings, UserCog, ChevronDown,
+  ChevronRight, PackageCheck,Warehouse,
+} from 'lucide-react';
+
+interface NavItem {
+  label: string;
+  href?: string;
+  icon: React.ElementType;
+  roles?: string[];
+  children?: NavItem[];
+}
+
+const NAV: NavItem[] = [
+  {
+    label: 'Dashboard',
+    href: '/',
+    icon: LayoutDashboard,
+  },
+  {
+    label: 'Inventario',
+    icon: Package,
+    children: [
+      { label: 'Productos',    href: '/productos',   icon: Package },
+      { label: 'Categorías',   href: '/categorias',  icon: Tags },
+      { label: 'Bodegas',      href: '/bodegas',     icon: Warehouse },   // ← nuevo
+      { label: 'Proveedores',  href: '/proveedores', icon: Truck },
+      { label: 'Entradas',     href: '/entradas',    icon: PackagePlus },
+      { label: 'Despachos',    href: '/despachos',   icon: PackageMinus },
+      { label: 'Movimientos',  href: '/movimientos', icon: ArrowLeftRight },
+    ],
+  },
+  {
+    label: 'Ventas',
+    icon: ShoppingCart,
+    children: [
+      { label: 'Punto de Venta',   href: '/ventas/pos',       icon: ShoppingCart },
+      { label: 'Historial',        href: '/ventas/historial', icon: Receipt },
+      { label: 'Clientes',         href: '/clientes',         icon: Users },
+    ],
+  },
+  {
+    label: 'Facturación SRI',
+    icon: FileText,
+    children: [
+      { label: 'Emitir Comprobante', href: '/facturacion/emitir',       icon: FileText },
+      { label: 'Comprobantes',       href: '/facturacion/comprobantes', icon: ClipboardList },
+    ],
+  },
+  {
+    label: 'Cuentas por Pagar',
+    icon: CreditCard,
+    children: [
+      { label: 'Facturas Proveedores', href: '/cuentas-por-pagar/facturas', icon: FileCheck },
+      { label: 'Pagos Pendientes',     href: '/cuentas-por-pagar/pagos',    icon: CreditCard },
+    ],
+  },
+  {
+    label: 'Reportes',
+    href: '/reportes',
+    icon: BarChart3,
+  },
+  {
+    label: 'Usuarios',
+    href: '/usuarios',
+    icon: UserCog,
+    roles: ['admin'],
+  },
+  {
+    label: 'Configuración',
+    href: '/configuracion',
+    icon: Settings,
+    roles: ['admin'],
+  },
+];
+
+function NavItemComponent({ item, depth = 0 }: { item: NavItem; depth?: number }) {
+  const pathname         = usePathname();
+  const { hasRole }      = useAuth();
+  const [open, setOpen]  = useState(() => {
+    if (!item.children) return false;
+    return item.children.some((c) => c.href && pathname.startsWith(c.href));
+  });
+
+  // Ocultar si el item tiene restricción de rol
+  if (item.roles && !hasRole(item.roles as any)) return null;
+
+  const Icon = item.icon;
+
+  if (item.children) {
+    return (
+      <div>
+        <button
+          onClick={() => setOpen(!open)}
+          className={cn(
+            'w-full flex items-center gap-2.5 px-3 py-2 rounded-md text-sm font-medium transition-colors',
+            'text-slate-300 hover:text-white hover:bg-slate-700/60',
+            open && 'text-white'
+          )}
+        >
+          <Icon className="h-4 w-4 shrink-0" />
+          <span className="flex-1 text-left">{item.label}</span>
+          {open ? (
+            <ChevronDown className="h-3.5 w-3.5" />
+          ) : (
+            <ChevronRight className="h-3.5 w-3.5" />
+          )}
+        </button>
+
+        {open && (
+          <div className="ml-4 mt-0.5 border-l border-slate-700 pl-3 space-y-0.5">
+            {item.children.map((child) => (
+              <NavItemComponent key={child.label} item={child} depth={depth + 1} />
+            ))}
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  const isActive = item.href === '/'
+    ? pathname === '/'
+    : pathname.startsWith(item.href!);
+
+  return (
+    <Link
+      href={item.href!}
+      className={cn(
+        'flex items-center gap-2.5 px-3 py-2 rounded-md text-sm font-medium transition-colors',
+        isActive
+          ? 'bg-slate-700 text-white'
+          : 'text-slate-300 hover:text-white hover:bg-slate-700/60'
+      )}
+    >
+      <Icon className="h-4 w-4 shrink-0" />
+      {item.label}
+    </Link>
+  );
+}
+
+export default function Sidebar() {
+  return (
+    <aside className="w-60 min-h-screen bg-slate-900 flex flex-col shrink-0">
+      {/* Logo */}
+      <div className="flex items-center gap-2.5 px-4 h-16 border-b border-slate-700/60">
+        <div className="bg-slate-700 p-1.5 rounded-lg">
+          <PackageCheck className="h-5 w-5 text-white" />
+        </div>
+        <div>
+          <p className="text-white font-bold text-sm leading-none">InventaPro</p>
+          <p className="text-slate-400 text-[10px] mt-0.5">Inventario & Ventas</p>
+        </div>
+      </div>
+
+      {/* Navigation */}
+      <nav className="flex-1 px-3 py-4 space-y-0.5 overflow-y-auto">
+        {NAV.map((item) => (
+          <NavItemComponent key={item.label} item={item} />
+        ))}
+      </nav>
+
+      {/* Version */}
+      <div className="px-4 py-3 border-t border-slate-700/60">
+        <p className="text-slate-500 text-[10px]">v1.0.0 — Sprint 1</p>
+      </div>
+    </aside>
+  );
+}

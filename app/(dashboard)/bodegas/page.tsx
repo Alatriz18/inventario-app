@@ -29,17 +29,15 @@ import { Bodega } from '@/types';
 import { subscribeToBodegas, createBodega, updateBodega, deleteBodega } from '@/lib/firebase/bodegas';
 
 const schema = z.object({
-  codigo:           z.string().min(1, 'El código es requerido').max(10),
-  nombre:           z.string().min(1, 'El nombre es requerido'),
-  direccion:        z.string().optional(),
-  responsable:      z.string().optional(),
-  esPrincipal:      z.boolean().default(false),
-  // Cuentas contables (opcionales)
-  cuentaInventario: z.string().optional(),
-  cuentaCostoVentas:z.string().optional(),
-  activa:           z.boolean().default(true),
+  codigo:            z.string().min(1, 'El código es requerido').max(10),
+  nombre:            z.string().min(1, 'El nombre es requerido'),
+  direccion:         z.string().optional(),
+  responsable:       z.string().optional(),
+  esPrincipal:       z.boolean(),
+  cuentaInventario:  z.string().optional(),
+  cuentaCostoVentas: z.string().optional(),
+  activa:            z.boolean(),
 });
-
 type BodegaForm = z.infer<typeof schema>;
 
 export default function BodegasPage() {

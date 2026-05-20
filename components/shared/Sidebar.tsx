@@ -11,21 +11,19 @@ import {
   FileCheck, CreditCard, BarChart3, Settings, UserCog, ChevronDown,
   ChevronRight, PackageCheck, Warehouse, BookOpen, Scale, FileSpreadsheet,
   Calculator, TrendingUp, BookMarked, Landmark, FileMinus, FilePlus,
-  FileSearch, Coins, ReceiptText,
+  FileSearch, Coins, ReceiptText, X,
 } from 'lucide-react';
 
 interface NavItem {
-  label:   string;
-  href?:   string;
-  icon:    React.ElementType;
-  roles?:  string[];
+  label:     string;
+  href?:     string;
+  icon:      React.ElementType;
+  roles?:    string[];
   children?: NavItem[];
 }
 
 const NAV: NavItem[] = [
   { label: 'Dashboard', href: '/', icon: LayoutDashboard },
-
-  // ── INVENTARIO ──────────────────────────────────────────────────────────
   {
     label: 'Inventario', icon: Package,
     children: [
@@ -38,8 +36,6 @@ const NAV: NavItem[] = [
       { label: 'Movimientos', href: '/movimientos', icon: ArrowLeftRight },
     ],
   },
-
-  // ── VENTAS ──────────────────────────────────────────────────────────────
   {
     label: 'Ventas', icon: ShoppingCart,
     children: [
@@ -48,18 +44,14 @@ const NAV: NavItem[] = [
       { label: 'Clientes',       href: '/clientes',         icon: Users },
     ],
   },
-
-  // ── FACTURACIÓN SRI ─────────────────────────────────────────────────────
   {
     label: 'Facturación SRI', icon: FileText,
     children: [
-      { label: 'Emitir Comprobante', href: '/facturacion/emitir',         icon: FileText },
-      { label: 'Comprobantes',       href: '/facturacion/comprobantes',   icon: ClipboardList },
-      { label: 'Configuración SRI',  href: '/facturacion/configuracion',  icon: Settings, roles: ['admin'] },
+      { label: 'Emitir Comprobante', href: '/facturacion/emitir',        icon: FileText },
+      { label: 'Comprobantes',       href: '/facturacion/comprobantes',  icon: ClipboardList },
+      { label: 'Configuración SRI',  href: '/facturacion/configuracion', icon: Settings, roles: ['admin'] },
     ],
   },
-
-  // ── CUENTAS POR PAGAR ───────────────────────────────────────────────────
   {
     label: 'Cuentas por Pagar', icon: CreditCard,
     children: [
@@ -67,52 +59,47 @@ const NAV: NavItem[] = [
       { label: 'Pagos Pendientes',     href: '/cuentas-por-pagar/pagos',    icon: CreditCard },
     ],
   },
-
-  // ── CONTABILIDAD ────────────────────────────────────────────────────────
   {
     label: 'Contabilidad', icon: BookOpen,
     children: [
-      { label: 'Plan de Cuentas',        href: '/contabilidad/plan-cuentas',    icon: BookMarked },
-      { label: 'Centros de Costo',       href: '/contabilidad/centros-costo',   icon: Landmark },
-      { label: 'Config. Contable',       href: '/contabilidad/configuracion',   icon: Settings, roles: ['admin', 'contador'] },
-      { label: 'Asientos Contables',     href: '/contabilidad/asientos',        icon: BookOpen },
-      { label: 'Libro Diario',           href: '/contabilidad/libro-diario',    icon: FileSpreadsheet },
-      { label: 'Libro Mayor',            href: '/contabilidad/libro-mayor',     icon: Scale },
-      { label: 'Balance Comprobación',   href: '/contabilidad/balance-comp',    icon: Calculator },
-      { label: 'Balance General',        href: '/contabilidad/balance-general', icon: TrendingUp },
-      { label: 'Estado de Resultados',   href: '/contabilidad/estado-resultados', icon: BarChart3 },
-      { label: 'Períodos Contables',     href: '/contabilidad/periodos',        icon: Receipt, roles: ['admin', 'contador'] },
+      { label: 'Plan de Cuentas',      href: '/contabilidad/plan-cuentas',     icon: BookMarked },
+      { label: 'Centros de Costo',     href: '/contabilidad/centros-costo',    icon: Landmark },
+      { label: 'Config. Contable',     href: '/contabilidad/configuracion',    icon: Settings, roles: ['admin','contador'] },
+      { label: 'Asientos Contables',   href: '/contabilidad/asientos',         icon: BookOpen },
+      { label: 'Libro Diario',         href: '/contabilidad/libro-diario',     icon: FileSpreadsheet },
+      { label: 'Libro Mayor',          href: '/contabilidad/libro-mayor',      icon: Scale },
+      { label: 'Balance Comprobación', href: '/contabilidad/balance-comp',     icon: Calculator },
+      { label: 'Balance General',      href: '/contabilidad/balance-general',  icon: TrendingUp },
+      { label: 'Estado Resultados',    href: '/contabilidad/estado-resultados',icon: BarChart3 },
+      { label: 'Períodos Contables',   href: '/contabilidad/periodos',         icon: Receipt, roles: ['admin','contador'] },
     ],
   },
-
-  // ── TRIBUTARIO ──────────────────────────────────────────────────────────
   {
     label: 'Tributario', icon: ReceiptText,
     children: [
-      { label: 'Retenciones',       href: '/tributario/retenciones',   icon: FileMinus },
-      { label: 'ICE',               href: '/tributario/ice',           icon: Coins },
-      { label: 'ATS (DIMM)',        href: '/tributario/ats',           icon: FileSearch },
-      { label: 'Form. 104 – IVA',   href: '/tributario/form-104',      icon: FileSpreadsheet },
-      { label: 'Form. 103 – Ret.',  href: '/tributario/form-103',      icon: FileSpreadsheet },
-      { label: 'Form. 105 – ICE',   href: '/tributario/form-105',      icon: FileSpreadsheet },
+      { label: 'Retenciones',      href: '/tributario/retenciones', icon: FileMinus },
+      { label: 'ICE',              href: '/tributario/ice',         icon: Coins },
+      { label: 'ATS (DIMM)',       href: '/tributario/ats',         icon: FileSearch },
+      { label: 'Form. 104 – IVA', href: '/tributario/form-104',    icon: FileSpreadsheet },
+      { label: 'Form. 103 – Ret.',href: '/tributario/form-103',    icon: FileSpreadsheet },
+      { label: 'Form. 105 – ICE', href: '/tributario/form-105',    icon: FileSpreadsheet },
     ],
   },
-
-  // ── REPORTES ────────────────────────────────────────────────────────────
-  { label: 'Reportes', href: '/reportes', icon: BarChart3 },
-
-  // ── ADMIN ───────────────────────────────────────────────────────────────
-  { label: 'Usuarios',      href: '/usuarios',      icon: UserCog,  roles: ['admin'] },
-  { label: 'Configuración', href: '/configuracion', icon: Settings, roles: ['admin'] },
+  { label: 'Reportes',     href: '/reportes',     icon: BarChart3 },
+  { label: 'Usuarios',     href: '/usuarios',     icon: UserCog,  roles: ['admin'] },
+  { label: 'Configuración',href: '/configuracion',icon: Settings, roles: ['admin'] },
 ];
 
-// ─── Componente de item ────────────────────────────────────────────────────
-function NavItemComponent({ item, depth = 0 }: { item: NavItem; depth?: number }) {
+function NavItemComponent({
+  item, depth = 0, onNavigate,
+}: {
+  item: NavItem; depth?: number; onNavigate: () => void;
+}) {
   const pathname    = usePathname();
   const { hasRole } = useAuth();
   const [open, setOpen] = useState(() => {
     if (!item.children) return false;
-    return item.children.some((c) => c.href && pathname.startsWith(c.href));
+    return item.children.some(c => c.href && pathname.startsWith(c.href));
   });
 
   if (item.roles && !hasRole(item.roles as any)) return null;
@@ -120,10 +107,9 @@ function NavItemComponent({ item, depth = 0 }: { item: NavItem; depth?: number }
   const Icon = item.icon;
 
   if (item.children) {
-    const anyChildActive = item.children.some(
-      (c) => c.href && (c.href === '/' ? pathname === '/' : pathname.startsWith(c.href))
+    const anyActive = item.children.some(
+      c => c.href && (c.href === '/' ? pathname === '/' : pathname.startsWith(c.href))
     );
-
     return (
       <div>
         <button
@@ -131,7 +117,7 @@ function NavItemComponent({ item, depth = 0 }: { item: NavItem; depth?: number }
           className={cn(
             'w-full flex items-center gap-2.5 px-3 py-2 rounded-md text-sm font-medium transition-colors',
             'text-slate-300 hover:text-white hover:bg-slate-700/60',
-            (open || anyChildActive) && 'text-white'
+            (open || anyActive) && 'text-white'
           )}
         >
           <Icon className="h-4 w-4 shrink-0" />
@@ -140,11 +126,10 @@ function NavItemComponent({ item, depth = 0 }: { item: NavItem; depth?: number }
             ? <ChevronDown className="h-3.5 w-3.5 opacity-60" />
             : <ChevronRight className="h-3.5 w-3.5 opacity-60" />}
         </button>
-
         {open && (
           <div className="ml-4 mt-0.5 border-l border-slate-700 pl-3 space-y-0.5">
-            {item.children.map((child) => (
-              <NavItemComponent key={child.label} item={child} depth={depth + 1} />
+            {item.children.map(child => (
+              <NavItemComponent key={child.label} item={child} depth={depth + 1} onNavigate={onNavigate} />
             ))}
           </div>
         )}
@@ -159,6 +144,7 @@ function NavItemComponent({ item, depth = 0 }: { item: NavItem; depth?: number }
   return (
     <Link
       href={item.href!}
+      onClick={onNavigate}
       className={cn(
         'flex items-center gap-2.5 px-3 py-2 rounded-md text-sm font-medium transition-colors',
         isActive
@@ -172,25 +158,38 @@ function NavItemComponent({ item, depth = 0 }: { item: NavItem; depth?: number }
   );
 }
 
-// ─── Sidebar ───────────────────────────────────────────────────────────────
-export default function Sidebar() {
+interface SidebarProps {
+  onClose: () => void;
+}
+
+export default function Sidebar({ onClose }: SidebarProps) {
   return (
-    <aside className="w-64 min-h-screen bg-slate-900 flex flex-col shrink-0">
-      {/* Logo */}
-      <div className="flex items-center gap-2.5 px-4 h-16 border-b border-slate-700/60 shrink-0">
-        <div className="bg-slate-700 p-1.5 rounded-lg">
-          <PackageCheck className="h-5 w-5 text-white" />
+    <aside className="w-64 h-full bg-slate-900 flex flex-col">
+
+      {/* Logo + botón cerrar en móvil */}
+      <div className="flex items-center justify-between px-4 h-16 border-b border-slate-700/60 shrink-0">
+        <div className="flex items-center gap-2.5">
+          <div className="bg-slate-700 p-1.5 rounded-lg">
+            <PackageCheck className="h-5 w-5 text-white" />
+          </div>
+          <div>
+            <p className="text-white font-bold text-sm leading-none">InventaPro</p>
+            <p className="text-slate-400 text-[10px] mt-0.5">Inventario & Ventas</p>
+          </div>
         </div>
-        <div>
-          <p className="text-white font-bold text-sm leading-none">InventaPro</p>
-          <p className="text-slate-400 text-[10px] mt-0.5">Inventario & Ventas</p>
-        </div>
+        {/* Botón cerrar — solo visible en móvil */}
+        <button
+          onClick={onClose}
+          className="lg:hidden p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-700 transition-colors"
+        >
+          <X className="h-4 w-4" />
+        </button>
       </div>
 
       {/* Navigation */}
       <nav className="flex-1 px-3 py-4 space-y-0.5 overflow-y-auto">
-        {NAV.map((item) => (
-          <NavItemComponent key={item.label} item={item} />
+        {NAV.map(item => (
+          <NavItemComponent key={item.label} item={item} onNavigate={onClose} />
         ))}
       </nav>
 

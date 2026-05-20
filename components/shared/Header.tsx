@@ -3,23 +3,18 @@
 import { useAuth } from '@/context/AuthContext';
 import { useRouter } from 'next/navigation';
 import { Button } from '@/components/ui/button';
-import { Badge } from '@/components/ui/badge';
 import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuLabel,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
+  DropdownMenu, DropdownMenuContent, DropdownMenuItem,
+  DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
-import { LogOut, User, ChevronDown } from 'lucide-react';
+import { LogOut, ChevronDown, Menu } from 'lucide-react';
 
 const ROLE_LABELS: Record<string, string> = {
-  admin:      'Administrador',
-  vendedor:   'Vendedor',
-  bodeguero:  'Bodeguero',
-  contador:   'Contador',
+  admin:     'Administrador',
+  vendedor:  'Vendedor',
+  bodeguero: 'Bodeguero',
+  contador:  'Contador',
 };
 
 const ROLE_COLORS: Record<string, string> = {
@@ -30,15 +25,14 @@ const ROLE_COLORS: Record<string, string> = {
 };
 
 function initials(name: string) {
-  return name
-    .split(' ')
-    .slice(0, 2)
-    .map((n) => n[0])
-    .join('')
-    .toUpperCase();
+  return name.split(' ').slice(0, 2).map(n => n[0]).join('').toUpperCase();
 }
 
-export default function Header() {
+interface HeaderProps {
+  onMenuClick: () => void;
+}
+
+export default function Header({ onMenuClick }: HeaderProps) {
   const { user, signOut } = useAuth();
   const router            = useRouter();
 
@@ -50,20 +44,30 @@ export default function Header() {
   if (!user) return null;
 
   return (
-    <header className="h-16 border-b bg-white flex items-center justify-between px-6 shrink-0">
-      <div />
+    <header className="h-16 border-b bg-white flex items-center justify-between px-4 shrink-0">
 
-      <div className="flex items-center gap-3">
-        {/* Role badge */}
-        <span
-          className={`text-xs font-medium px-2.5 py-1 rounded-full ${
-            ROLE_COLORS[user.rol] ?? 'bg-slate-100 text-slate-700'
-          }`}
-        >
+      {/* Hamburger — solo visible en móvil */}
+      <button
+        onClick={onMenuClick}
+        className="lg:hidden p-2 rounded-lg text-slate-500 hover:bg-slate-100 transition-colors"
+        aria-label="Abrir menú"
+      >
+        <Menu className="h-5 w-5" />
+      </button>
+
+      {/* Spacer en desktop */}
+      <div className="hidden lg:block" />
+
+      {/* Derecha — rol + usuario */}
+      <div className="flex items-center gap-2">
+        {/* Badge de rol — oculto en móvil muy pequeño */}
+        <span className={`hidden sm:inline-flex text-xs font-medium px-2.5 py-1 rounded-full ${
+          ROLE_COLORS[user.rol] ?? 'bg-slate-100 text-slate-700'
+        }`}>
           {ROLE_LABELS[user.rol] ?? user.rol}
         </span>
 
-        {/* User menu */}
+        {/* Menú de usuario */}
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
             <Button variant="ghost" className="flex items-center gap-2 h-9 px-2">
@@ -72,16 +76,21 @@ export default function Header() {
                   {initials(user.nombre)}
                 </AvatarFallback>
               </Avatar>
-              <span className="text-sm font-medium max-w-[120px] truncate">
+              <span className="text-sm font-medium max-w-[100px] truncate hidden sm:inline">
                 {user.nombre}
               </span>
-              <ChevronDown className="h-3.5 w-3.5 text-slate-400" />
+              <ChevronDown className="h-3.5 w-3.5 text-slate-400 hidden sm:inline" />
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end" className="w-48">
             <DropdownMenuLabel className="font-normal">
               <p className="font-medium text-sm truncate">{user.nombre}</p>
               <p className="text-xs text-slate-400 truncate">{user.email}</p>
+              <p className={`text-xs mt-1 px-2 py-0.5 rounded-full w-fit ${
+                ROLE_COLORS[user.rol] ?? ''
+              }`}>
+                {ROLE_LABELS[user.rol]}
+              </p>
             </DropdownMenuLabel>
             <DropdownMenuSeparator />
             <DropdownMenuItem onClick={handleSignOut} className="text-red-600 cursor-pointer">

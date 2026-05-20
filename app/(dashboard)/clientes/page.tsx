@@ -43,7 +43,7 @@ const schema = z.object({
   email:              z.string().email('Email inválido').optional().or(z.literal('')),
   telefono:           z.string().optional(),
   pais:               z.string().min(1),
-  codigoPais:         z.string().default('EC'),
+  codigoPais:         z.string(),
   provincia:          z.string().optional(),
   ciudad:             z.string().optional(),
   direccion:          z.string().optional(),
@@ -51,7 +51,7 @@ const schema = z.object({
   diasCredito:        z.coerce.number().min(0).optional(),
   limiteCredito:      z.coerce.number().min(0).optional(),
   cuentaCxC:          z.string().optional(),
-  activo:             z.boolean().default(true),
+  activo:             z.boolean(),
 });
 
 type ClienteForm = z.infer<typeof schema>;
@@ -71,7 +71,8 @@ export default function ClientesPage() {
   const [search,     setSearch]     = useState('');
 
   const { register, handleSubmit, reset, watch, setValue, formState: { errors } } =
-    useForm<ClienteForm>({ resolver: zodResolver(schema) });
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    useForm<ClienteForm>({ resolver: zodResolver(schema) as any });
 
   const tipoPago          = watch('tipoPago');
   const tipoIdentificacion = watch('tipoIdentificacion');
@@ -126,7 +127,7 @@ export default function ClientesPage() {
     try {
       const clean = Object.fromEntries(
         Object.entries(data).map(([k, v]) => [k, v === '' ? undefined : v])
-      ) as Cliente;
+      ) as unknown as Cliente;
       if (editing) {
         await updateCliente(editing.id, clean);
         toast.success('Cliente actualizado');

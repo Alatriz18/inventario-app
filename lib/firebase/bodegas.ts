@@ -16,7 +16,7 @@ export function subscribeToBodegas(
   });
 }
 
-export async function createBodega(data: Omit<Bodega, 'id'>): Promise<void> {
+export async function createBodega(data: Omit<Bodega, 'id' | 'createdAt'>): Promise<void> {
   await addDoc(collection(db, COL), { ...data, createdAt: serverTimestamp() });
 }
 

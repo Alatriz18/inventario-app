@@ -39,7 +39,7 @@ import {
 const schema = z.object({
   nombre:      z.string().min(1, 'El nombre es requerido').max(50),
   descripcion: z.string().max(200).optional(),
-  activo:      z.boolean().default(true),
+  activo:      z.boolean(),
 });
 
 type CategoriaForm = z.infer<typeof schema>;

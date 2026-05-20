@@ -42,7 +42,7 @@ const schema = z.object({
   precioVenta:  z.coerce.number().min(0.01, 'Precio inválido'),
   stockActual:  z.coerce.number().min(0).default(0),
   stockMinimo:  z.coerce.number().min(0).default(0),
-  activo:       z.boolean().default(true),
+  activo:       z.boolean(),
 });
 
 type ProductoForm = z.infer<typeof schema>;
@@ -79,7 +79,8 @@ export default function ProductosPage() {
   const fileRef = useRef<HTMLInputElement>(null);
 
   const { register, handleSubmit, reset, setValue, watch, formState: { errors } } =
-    useForm<ProductoForm>({ resolver: zodResolver(schema) });
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    useForm<ProductoForm>({ resolver: zodResolver(schema) as any });
 
   const precioCompra = watch('precioCompra') || 0;
   const precioVenta  = watch('precioVenta')  || 0;

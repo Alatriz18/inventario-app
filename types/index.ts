@@ -209,7 +209,7 @@ export interface Movimiento {
   cantidad: number;
   stockAnterior: number;
   stockNuevo: number;
-  bodehaId?: string;
+  bodegaId?: string;
   bodegaNombre?: string;
   referencia: string;
   referenciaType: 'venta' | 'entrada' | 'ajuste' | 'devolucion';

@@ -44,7 +44,7 @@ const schema = z.object({
   telefono:           z.string().optional(),
   contacto:           z.string().optional(),
   pais:               z.string().min(1, 'Selecciona un país'),
-  codigoPais:         z.string().default('EC'),
+  codigoPais:         z.string(),
   provincia:          z.string().optional(),
   ciudad:             z.string().optional(),
   direccion:          z.string().optional(),
@@ -54,7 +54,7 @@ const schema = z.object({
   cuentaCxP:          z.string().optional(),
   cuentaGasto:        z.string().optional(),
   cuentaIVACompras:   z.string().optional(),
-  activo:             z.boolean().default(true),
+  activo:             z.boolean(),
   notas:              z.string().optional(),
 });
 
@@ -81,7 +81,8 @@ export default function ProveedoresPage() {
   const [search,      setSearch]      = useState('');
 
   const { register, handleSubmit, reset, watch, setValue, formState: { errors } } =
-    useForm<ProveedorForm>({ resolver: zodResolver(schema) });
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    useForm<ProveedorForm>({ resolver: zodResolver(schema) as any });
 
   const tipoPago     = watch('tipoPago');
   const tipoProveedor = watch('tipoProveedor');
@@ -133,7 +134,7 @@ export default function ProveedoresPage() {
     try {
       const clean = Object.fromEntries(
         Object.entries(data).map(([k, v]) => [k, v === '' ? undefined : v])
-      ) as Proveedor;
+      ) as unknown as Proveedor;
       if (editing) {
         await updateProveedor(editing.id, clean);
         toast.success('Proveedor actualizado');

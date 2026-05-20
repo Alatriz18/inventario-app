@@ -92,7 +92,8 @@ export default function DespachosPage() {
 
   const { register, handleSubmit, reset, watch, setValue, control, formState: { errors } } =
     useForm<DespachoForm>({
-      resolver: zodResolver(schema),
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      resolver: zodResolver(schema) as any,
       defaultValues: {
         fecha:  new Date().toISOString().split('T')[0],
         motivo: 'ajuste',

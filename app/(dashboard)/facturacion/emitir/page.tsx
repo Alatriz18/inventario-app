@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react';
 import { toast } from 'sonner';
 import { FileText, Loader2, CheckCircle, XCircle } from 'lucide-react';
 import { format } from 'date-fns';
-
+import { useSearchParams } from 'next/navigation';
 import PageHeader  from '@/components/shared/PageHeader';
 import { Button }  from '@/components/ui/button';
 import { Label }   from '@/components/ui/label';
@@ -22,7 +22,7 @@ import { generarXMLNotaVenta } from '@/lib/sri/generador-nota-venta';
 import { generarClaveAcceso }  from '@/lib/sri/clave-acceso';
 import { Venta } from '@/types';
 import { useAuth } from '@/context/AuthContext';
-
+const searchParams = useSearchParams();
 const FORMA_PAGO_MAP: Record<string, string> = {
   efectivo:      '01',
   tarjeta:       '16',
@@ -50,7 +50,12 @@ export default function EmitirComprobantePage() {
   const ventasSinComp = ventas.filter(
     v => v.estado === 'completada' && !v.comprobanteId
   );
-
+useEffect(() => {
+  const ventaIdParam = searchParams.get('ventaId');
+  const tipoParam    = searchParams.get('tipo');
+  if (ventaIdParam) setVentaId(ventaIdParam);
+  if (tipoParam === 'factura' || tipoParam === 'nota_venta') setTipo(tipoParam);
+}, [searchParams]);
   useEffect(() => {
     return subscribeToVentas((data) => { setVentas(data); setLoading(false); });
   }, []);

@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useCallback } from 'react';
 import { toast } from 'sonner';
-import { Search, Trash2, Plus, Minus, ShoppingCart, User, Banknote, CreditCard, ArrowRightLeft, CheckCircle } from 'lucide-react';
+import { Search, Trash2, Plus, Minus, ShoppingCart, User, Banknote, CreditCard, ArrowRightLeft, CheckCircle, UserPlus  } from 'lucide-react';
 
 import { Button }    from '@/components/ui/button';
 import { Input }     from '@/components/ui/input';
@@ -15,13 +15,15 @@ import {
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle,
 } from '@/components/ui/dialog';
-
+import { useRouter } from 'next/navigation';
+import QuickCreateCliente from '@/components/shared/QuickCreateCliente';
 import { Producto, Cliente, MetodoPago, ItemVenta } from '@/types';
 import { subscribeToProductos }  from '@/lib/firebase/productos';
 import { subscribeToClientes }   from '@/lib/firebase/clientes';
 import { createVenta }           from '@/lib/firebase/ventas';
 import { useAuth }               from '@/context/AuthContext';
-
+const router = useRouter();
+const [quickCliente, setQuickCliente] = useState(false);
 // ─── Consumidor Final por defecto ───────────────────────────────────────────
 const CONSUMIDOR_FINAL: Cliente = {
   id:                 'consumidor_final',
@@ -360,26 +362,34 @@ export default function POSPage() {
       {/* ─── PANEL DERECHO — Cobro ─── */}
       <div className="w-80 flex flex-col gap-3 shrink-0">
 
-        {/* Cliente */}
-        <div className="bg-white rounded-xl border p-4 space-y-2">
-          <div className="flex items-center gap-2 mb-1">
-            <User className="h-4 w-4 text-slate-400" />
-            <Label className="text-sm font-semibold">Cliente</Label>
-          </div>
-          <div
-            className="border rounded-lg px-3 py-2 cursor-pointer hover:border-slate-400 transition-colors"
-            onClick={() => setShowClientes(true)}
-          >
-            <p className="font-medium text-sm">{cliente.nombre}</p>
-            <p className="text-xs text-slate-400">{cliente.identificacion}</p>
-          </div>
-          {cliente.id !== 'consumidor_final' && (
-            <button onClick={() => setCliente(CONSUMIDOR_FINAL)}
-              className="text-xs text-slate-400 hover:text-slate-600 underline">
-              Cambiar a consumidor final
-            </button>
-          )}
-        </div>
+       {/* Cliente */}
+<div className="bg-white rounded-xl border p-4 space-y-2">
+  <div className="flex items-center justify-between mb-1">
+    <div className="flex items-center gap-2">
+      <User className="h-4 w-4 text-slate-400" />
+      <Label className="text-sm font-semibold">Cliente</Label>
+    </div>
+    <button
+      onClick={() => setQuickCliente(true)}
+      className="text-xs text-blue-600 hover:text-blue-700 flex items-center gap-1"
+    >
+      <UserPlus className="h-3 w-3" /> Nuevo
+    </button>
+  </div>
+  <div
+    className="border rounded-lg px-3 py-2 cursor-pointer hover:border-slate-400 transition-colors"
+    onClick={() => setShowClientes(true)}
+  >
+    <p className="font-medium text-sm">{cliente.nombre}</p>
+    <p className="text-xs text-slate-400">{cliente.identificacion}</p>
+  </div>
+  {cliente.id !== 'consumidor_final' && (
+    <button onClick={() => setCliente(CONSUMIDOR_FINAL)}
+      className="text-xs text-slate-400 hover:text-slate-600 underline">
+      Cambiar a consumidor final
+    </button>
+  )}
+</div>
 
         {/* Método de pago */}
         <div className="bg-white rounded-xl border p-4 space-y-3">
@@ -506,38 +516,83 @@ export default function POSPage() {
         </DialogContent>
       </Dialog>
 
-      {/* ─── MODAL VENTA EXITOSA ─── */}
-      <Dialog open={!!successId} onOpenChange={() => setSuccessId(null)}>
-  <DialogContent className="sm:max-w-sm text-center">
+     {/* ─── MODAL VENTA EXITOSA ─── */}
+<Dialog open={!!successId} onOpenChange={() => setSuccessId(null)}>
+  <DialogContent className="sm:max-w-sm">
     <DialogHeader>
-      <DialogTitle className="sr-only">Venta registrada exitosamente</DialogTitle>
+      <DialogTitle className="sr-only">Venta registrada</DialogTitle>
     </DialogHeader>
-    <div className="flex flex-col items-center gap-4 py-4">
-      <CheckCircle className="h-16 w-16 text-green-500" />
-            <div>
-              <h2 className="text-xl font-bold text-slate-900">¡Venta registrada!</h2>
-              <p className="text-sm text-slate-500 mt-1">
-                La venta se completó correctamente y el stock fue actualizado.
-              </p>
-            </div>
-            <div className="bg-slate-50 rounded-xl p-4 w-full text-left space-y-1.5 text-sm">
-              <div className="flex justify-between">
-                <span className="text-slate-500">Total cobrado</span>
-                <span className="font-bold">{currency(total)}</span>
-              </div>
-              {metodoPago === 'efectivo' && Number(montoPagado) > 0 && (
-                <div className="flex justify-between text-green-600">
-                  <span>Cambio entregado</span>
-                  <span className="font-bold">{currency(cambio)}</span>
-                </div>
-              )}
-            </div>
-            <Button className="w-full" onClick={() => setSuccessId(null)}>
-              Nueva Venta
-            </Button>
+    <div className="flex flex-col items-center gap-4 py-2">
+      <CheckCircle className="h-14 w-14 text-green-500" />
+      <div className="text-center">
+        <h2 className="text-xl font-bold text-slate-900">¡Venta completada!</h2>
+        <p className="text-sm text-slate-500 mt-1">Stock actualizado correctamente.</p>
+      </div>
+
+      <div className="bg-slate-50 rounded-xl p-4 w-full space-y-1.5 text-sm">
+        <div className="flex justify-between">
+          <span className="text-slate-500">Total cobrado</span>
+          <span className="font-bold">{currency(total)}</span>
+        </div>
+        {metodoPago === 'efectivo' && Number(montoPagado) > 0 && (
+          <div className="flex justify-between text-green-600">
+            <span>Cambio</span>
+            <span className="font-bold">{currency(cambio)}</span>
           </div>
-        </DialogContent>
-      </Dialog>
+        )}
+      </div>
+
+      {/* Opciones de comprobante */}
+      <div className="w-full space-y-2">
+        <p className="text-xs text-slate-400 text-center font-medium">¿Emitir comprobante?</p>
+        <div className="grid grid-cols-2 gap-2">
+          <Button
+            variant="outline"
+            className="text-xs h-9"
+            onClick={() => {
+              router.push(`/facturacion/emitir?ventaId=${successId}&tipo=factura`);
+              setSuccessId(null);
+            }}
+          >
+            📄 Factura
+          </Button>
+          <Button
+            variant="outline"
+            className="text-xs h-9"
+            onClick={() => {
+              router.push(`/facturacion/emitir?ventaId=${successId}&tipo=nota_venta`);
+              setSuccessId(null);
+            }}
+          >
+            🧾 Nota de Venta
+          </Button>
+        </div>
+        <Button className="w-full" onClick={() => setSuccessId(null)}>
+          Nueva Venta
+        </Button>
+      </div>
+    </div>
+  </DialogContent>
+</Dialog>
+<QuickCreateCliente
+  open={quickCliente}
+  onClose={() => setQuickCliente(false)}
+  onCreated={(c) => {
+    setCliente({
+      id:                 'nuevo',
+      tipoIdentificacion: c.tipoIdentificacion,
+      identificacion:     c.identificacion,
+      nombre:             c.nombre,
+      tipoCliente:        'local',
+      tipoPago:           'contado',
+      pais:               'Ecuador',
+      codigoPais:         'EC',
+      activo:             true,
+      createdAt:          new Date(),
+    });
+    setQuickCliente(false);
+  }}
+/>
     </div>
   );
 }

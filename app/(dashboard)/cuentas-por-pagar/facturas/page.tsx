@@ -94,11 +94,11 @@ export default function FacturasProveedorPage() {
   const [filtroEstado,setFiltroEstado]= useState('todos');
   const xmlRef = useRef<HTMLInputElement>(null);
 
-  const facturaForm = useForm<FacturaForm>({ resolver: zodResolver(facturaSchema) });
-  const pagoForm    = useForm<PagoForm>({
-    resolver: zodResolver(pagoSchema),
-    defaultValues: { metodoPago: 'transferencia' },
-  });
+  const facturaForm = useForm<FacturaForm>({ resolver: zodResolver(facturaSchema) as any });
+const pagoForm    = useForm<PagoForm>({
+  resolver: zodResolver(pagoSchema) as any,
+  defaultValues: { metodoPago: 'transferencia' },
+});
 
   useEffect(() => {
     const u1 = subscribeToFacturasProveedor((d) => { setFacturas(d); setLoading(false); });

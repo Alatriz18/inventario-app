@@ -284,7 +284,7 @@ export default function ReportesPage() {
                   <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
                   <XAxis dataKey="fecha" tick={{ fontSize: 11 }} />
                   <YAxis tick={{ fontSize: 11 }} tickFormatter={v => `$${v}`} />
-                  <Tooltip formatter={(v: number) => currency(v)} />
+                  <Tooltip formatter={(v: any) => typeof v === 'number' ? currency(v) : v} />
                   <Legend />
                   <Area type="monotone" dataKey="ventas"   name="Ventas"   stroke="#2E75B6" fill="url(#colorVentas)"   strokeWidth={2} />
                   <Area type="monotone" dataKey="ganancia" name="Ganancia" stroke="#00A896" fill="url(#colorGanancia)" strokeWidth={2} />
@@ -308,7 +308,7 @@ export default function ReportesPage() {
                     <XAxis type="number" tick={{ fontSize: 10 }} tickFormatter={v => `$${v}`} />
                     <YAxis type="category" dataKey="nombre" tick={{ fontSize: 10 }} width={80}
                       tickFormatter={v => v.length > 12 ? v.slice(0, 12) + '…' : v} />
-                    <Tooltip formatter={(v: number) => currency(v)} />
+                    <Tooltip formatter={(v: any) => typeof v === 'number' ? currency(v) : v} />
                     <Bar dataKey="total" name="Ventas" fill="#1A3C5E" radius={[0, 4, 4, 0]} />
                   </BarChart>
                 </ResponsiveContainer>
@@ -330,7 +330,7 @@ export default function ReportesPage() {
                           <Cell key={i} fill={COLORS[i % COLORS.length]} />
                         ))}
                       </Pie>
-                      <Tooltip formatter={(v: number) => currency(v)} />
+                      <Tooltip formatter={(v: any) => typeof v === 'number' ? currency(v) : v} />
                     </PieChart>
                   </ResponsiveContainer>
                   <div className="space-y-2">
@@ -548,7 +548,7 @@ export default function ReportesPage() {
                   <XAxis dataKey="nombre" tick={{ fontSize: 10 }}
                     tickFormatter={v => v.length > 10 ? v.slice(0, 10) + '…' : v} />
                   <YAxis tick={{ fontSize: 10 }} tickFormatter={v => `$${v}`} />
-                  <Tooltip formatter={(v: number) => currency(v)} />
+                  <Tooltip formatter={(v: any) => typeof v === 'number' ? currency(v) : v} />
                   <Legend />
                   <Bar dataKey="total"    name="Ventas"   fill="#1A3C5E" radius={[4,4,0,0]} />
                   <Bar dataKey="ganancia" name="Ganancia" fill="#00A896" radius={[4,4,0,0]} />

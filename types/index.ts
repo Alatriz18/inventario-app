@@ -360,7 +360,7 @@ export type TipoAsiento =
 
 export interface AsientoContable {
   id:             string;
-  numero:         string;
+  numero?:         string;
   fecha:          Date;
   concepto:       string;
   tipo:           TipoAsiento;

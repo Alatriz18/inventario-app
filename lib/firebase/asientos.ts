@@ -35,7 +35,7 @@ export async function getAsientos(
 }
 
 export async function createAsiento(
-  data: Omit<AsientoContable, 'id'>
+  data: Omit<AsientoContable, 'id' | 'numero'>
 ): Promise<string> {
   // Generar número correlativo
   const snap  = await getDocs(collection(db, COL));

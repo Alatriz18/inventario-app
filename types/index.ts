@@ -317,3 +317,107 @@ export interface FacturaSRIData {
   }>;
   infoAdicional?: Array<{ nombre: string; valor: string }>;
 }
+// ─── CONTABILIDAD ──────────────────────────────────────────────────────────
+
+export type TipoCuenta     = 'activo' | 'pasivo' | 'patrimonio' | 'ingreso' | 'costo' | 'gasto';
+export type NaturalezaCuenta = 'deudora' | 'acreedora';
+
+export interface CuentaContable {
+  id:                 string;
+  codigo:             string;
+  nombre:             string;
+  tipo:               TipoCuenta;
+  naturaleza:         NaturalezaCuenta;
+  nivel:              1 | 2 | 3 | 4 | 5;
+  padreId?:           string;
+  aceptaMovimientos:  boolean;
+  activa:             boolean;
+}
+
+export interface CentroCosto {
+  id:     string;
+  codigo: string;
+  nombre: string;
+  activo: boolean;
+}
+
+export interface AsientoLinea {
+  id:               string;
+  cuentaId:         string;
+  cuentaCodigo:     string;
+  cuentaNombre:     string;
+  centroCostoId?:   string;
+  centroCostoNombre?:string;
+  debe:             number;
+  haber:            number;
+  descripcion?:     string;
+}
+
+export type TipoAsiento =
+  | 'venta_factura' | 'venta_nota' | 'compra_proveedor'
+  | 'pago_proveedor' | 'cobro_cliente' | 'ajuste_inventario'
+  | 'apertura' | 'cierre' | 'manual';
+
+export interface AsientoContable {
+  id:             string;
+  numero:         string;
+  fecha:          Date;
+  concepto:       string;
+  tipo:           TipoAsiento;
+  referenciaId?:  string;
+  referenciaTipo?:string;
+  lineas:         AsientoLinea[];
+  totalDebe:      number;
+  totalHaber:     number;
+  estado:         'borrador' | 'confirmado';
+  usuarioId:      string;
+  usuarioNombre:  string;
+  createdAt:      Date;
+}
+
+export interface ConfigContable {
+  cuentaVentas12:          string;
+  cuentaVentas0:           string;
+  cuentaIVAVentas:         string;
+  cuentaCaja:              string;
+  cuentaBancos:            string;
+  cuentaCxCClientes:       string;
+  cuentaCostoVentas:       string;
+  cuentaInventario:        string;
+  cuentaIVACompras:        string;
+  cuentaCxPProveedores:    string;
+  cuentaRetFuenteClientes: string;
+  cuentaRetIVAClientes:    string;
+}
+
+export interface PeriodoContable {
+  id:       string;
+  anio:     number;
+  mes:      number;
+  nombre:   string;
+  estado:   'abierto' | 'cerrado';
+  creadoAt: Date;
+}
+
+// ─── TRIBUTARIO ────────────────────────────────────────────────────────────
+
+export interface ConfigRetencion {
+  id:          string;
+  tipo:        'fuente_ir' | 'iva';
+  codigo:      string;
+  descripcion: string;
+  porcentaje:  number;
+  aplicaA:     'bienes' | 'servicios' | 'ambos';
+  activo:      boolean;
+}
+
+export interface ConfigICE {
+  id:          string;
+  codigo:      string;
+  descripcion: string;
+  tipoTarifa:  'especifica' | 'ad_valorem' | 'mixta';
+  tarifaEspecifica?: number;
+  tarifaAdValorem?:  number;
+  unidad?:     string;
+  activo:      boolean;
+}

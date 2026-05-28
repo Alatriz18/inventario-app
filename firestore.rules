@@ -2,7 +2,6 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
 
-    // Funciones helper
     function isAuth() {
       return request.auth != null;
     }
@@ -24,13 +23,17 @@ service cloud.firestore {
         getUser().rol in ['admin', 'vendedor', 'bodeguero', 'contador'];
     }
 
+    function isContador() {
+      return isAdmin() || hasRole('contador');
+    }
+
     // Users: solo admin puede gestionar
     match /users/{userId} {
       allow read: if isAuth() && (request.auth.uid == userId || isAdmin());
       allow write: if isAdmin();
     }
 
-    // Productos, categorías, proveedores, clientes
+    // Inventario
     match /productos/{id} {
       allow read: if isStaff();
       allow write: if isAdmin() || hasRole('bodeguero');
@@ -51,8 +54,19 @@ service cloud.firestore {
       allow write: if isStaff();
     }
 
-    // Inventario
+    match /bodegas/{id} {
+      allow read: if isStaff();
+      allow write: if isAdmin();
+    }
+
     match /entradas/{id} {
+      allow read: if isStaff();
+      allow create: if isAdmin() || hasRole('bodeguero');
+      allow update: if isAdmin();
+      allow delete: if isAdmin();
+    }
+
+    match /despachos/{id} {
       allow read: if isStaff();
       allow create: if isAdmin() || hasRole('bodeguero');
       allow update: if isAdmin();
@@ -83,6 +97,45 @@ service cloud.firestore {
     match /facturas_proveedor/{id} {
       allow read: if isStaff();
       allow write: if isAdmin() || hasRole('contador') || hasRole('bodeguero');
+    }
+
+    // Contabilidad
+    match /cuentas_contables/{id} {
+      allow read: if isStaff();
+      allow write: if isContador();
+    }
+
+    match /asientos/{id} {
+      allow read: if isStaff();
+      allow create: if isContador();
+      allow update: if isContador();
+      allow delete: if isAdmin();
+    }
+
+    match /periodos_contables/{id} {
+      allow read: if isStaff();
+      allow write: if isContador();
+    }
+
+    match /centros_costo/{id} {
+      allow read: if isStaff();
+      allow write: if isContador();
+    }
+
+    match /config_contable/{id} {
+      allow read: if isStaff();
+      allow write: if isContador();
+    }
+
+    // Tributario
+    match /retenciones_config/{id} {
+      allow read: if isStaff();
+      allow write: if isContador();
+    }
+
+    match /ice_config/{id} {
+      allow read: if isStaff();
+      allow write: if isContador();
     }
   }
 }

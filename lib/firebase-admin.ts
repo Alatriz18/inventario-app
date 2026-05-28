@@ -1,19 +1,21 @@
 import * as admin from 'firebase-admin';
 
-if (!admin.apps.length) {
-  try {
-    const serviceAccount = JSON.parse(
-      process.env.FIREBASE_SERVICE_ACCOUNT!
-    );
+function getApp(): admin.app.App {
+  if (admin.apps.length) return admin.app();
 
-    admin.initializeApp({
-      credential: admin.credential.cert(serviceAccount),
-    });
-  } catch (err) {
-    console.error('Error inicializando Firebase Admin:', err);
-  }
+  const raw = process.env.FIREBASE_SERVICE_ACCOUNT;
+  if (!raw) throw new Error('FIREBASE_SERVICE_ACCOUNT no está configurada');
+
+  const serviceAccount = JSON.parse(raw);
+  return admin.initializeApp({ credential: admin.credential.cert(serviceAccount) });
 }
 
-export const adminAuth = admin.auth();
-export const adminDb   = admin.firestore();
-export default admin;
+export function getAdminAuth() {
+  return getApp().auth();
+}
+
+export function getAdminDb() {
+  return getApp().firestore();
+}
+
+export default { getAdminAuth, getAdminDb };

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { adminAuth, adminDb } from '@/lib/firebase-admin';
+import { getAdminAuth, getAdminDb } from '@/lib/firebase-admin';
 
 export async function POST(req: NextRequest) {
   try {
@@ -8,6 +8,9 @@ export async function POST(req: NextRequest) {
     if (!nombre || !email || !password || !rol) {
       return NextResponse.json({ error: 'Faltan campos requeridos' }, { status: 400 });
     }
+
+    const adminAuth = getAdminAuth();
+    const adminDb   = getAdminDb();
 
     // 1. Crear en Firebase Auth
     const userRecord = await adminAuth.createUser({

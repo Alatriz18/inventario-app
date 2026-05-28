@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { adminAuth, adminDb } from '@/lib/firebase-admin';
+import { getAdminAuth, getAdminDb } from '@/lib/firebase-admin';
 
 export async function PUT(
   req: NextRequest,
@@ -8,6 +8,9 @@ export async function PUT(
   try {
     const { uid } = await params;
     const { nombre, rol, activo, password } = await req.json();
+
+    const adminAuth = getAdminAuth();
+    const adminDb   = getAdminDb();
 
     const authUpdate: any = {};
     if (nombre)             authUpdate.displayName = nombre;
@@ -39,8 +42,8 @@ export async function DELETE(
 ) {
   try {
     const { uid } = await params;
-    await adminAuth.updateUser(uid, { disabled: true });
-    await adminDb.collection('users').doc(uid).update({ activo: false });
+    await getAdminAuth().updateUser(uid, { disabled: true });
+    await getAdminDb().collection('users').doc(uid).update({ activo: false });
     return NextResponse.json({ success: true });
   } catch (err: any) {
     return NextResponse.json({ error: err.message ?? 'Error al desactivar' }, { status: 400 });

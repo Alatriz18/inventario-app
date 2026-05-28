@@ -90,11 +90,12 @@ export default function PlanCuentasPage() {
   const onSubmit = async (data: CuentaForm) => {
     setSaving(true);
     try {
+      const payload = { ...data, nivel: data.nivel as 1|2|3|4|5 };
       if (editing) {
-        await updateCuenta(editing.id, data);
+        await updateCuenta(editing.id, payload);
         toast.success('Cuenta actualizada');
       } else {
-        await createCuenta({ ...data, activa: true });
+        await createCuenta({ ...payload, activa: true });
         toast.success('Cuenta creada');
       }
       setDialogOpen(false);

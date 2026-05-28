@@ -1,4 +1,4 @@
-import { TipoCuenta, NaturalezaCuenta } from '@/types';
+import { TipoCuenta, NaturalezaCuenta, ConfigContable } from '@/types';
 
 interface CuentaSeed {
   codigo:            string;

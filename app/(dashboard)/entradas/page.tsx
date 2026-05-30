@@ -12,6 +12,7 @@ import {
 } from 'lucide-react';
 
 import QuickCreateProveedor from '@/components/shared/QuickCreateProveedor';
+import { crearAsientoCompra } from '@/lib/contabilidad/motor-asientos';
 import PageHeader   from '@/components/shared/PageHeader';
 import { Button }   from '@/components/ui/button';
 import { Input }    from '@/components/ui/input';
@@ -36,9 +37,9 @@ import {
 
 import { Entrada, Producto, Proveedor, Bodega } from '@/types';
 import { subscribeToEntradas, createEntrada, anularEntrada } from '@/lib/firebase/entradas';
-import { subscribeToProductos }  from '@/lib/firebase/productos';
+import { subscribeToProductos }   from '@/lib/firebase/productos';
 import { subscribeToProveedores } from '@/lib/firebase/proveedores';
-import { subscribeToBodegas }    from '@/lib/firebase/bodegas';
+import { subscribeToBodegas }     from '@/lib/firebase/bodegas';
 import { useAuth } from '@/context/AuthContext';
 
 const itemSchema = z.object({
@@ -76,7 +77,7 @@ export default function EntradasPage() {
   const [saving,         setSaving]         = useState(false);
   const [search,         setSearch]         = useState('');
   const [busquedaProd,   setBusquedaProd]   = useState('');
-  const [quickProveedor, setQuickProveedor] = useState(false); // ← dentro del componente
+  const [quickProveedor, setQuickProveedor] = useState(false);
 
   const { register, handleSubmit, reset, watch, setValue, control, formState: { errors } } =
     useForm<EntradaForm>({
@@ -134,16 +135,39 @@ export default function EntradasPage() {
       const prov   = proveedores.find((p) => p.id === data.proveedorId);
       const bodega = bodegas.find((b) => b.id === data.bodegaId);
       const items  = data.items.map((i) => ({ ...i, subtotal: i.cantidad * i.precioUnitario }));
-      await createEntrada(
+
+      const entradaId = await createEntrada(
         {
-          fecha: new Date(data.fecha), proveedorId: data.proveedorId,
-          proveedorNombre: prov?.nombre ?? '', bodegaId: data.bodegaId || undefined,
-          bodegaNombre: bodega?.nombre, items, subtotal, iva, total,
-          usuarioId: user.uid, usuarioNombre: user.nombre,
-          notas: data.notas, createdAt: new Date(),
+          fecha:           new Date(data.fecha),
+          proveedorId:     data.proveedorId,
+          proveedorNombre: prov?.nombre ?? '',
+          bodegaId:        data.bodegaId || undefined,
+          bodegaNombre:    bodega?.nombre,
+          items,
+          subtotal,
+          iva,
+          total,
+          usuarioId:       user.uid,
+          usuarioNombre:   user.nombre,
+          notas:           data.notas,
+          createdAt:       new Date(),
         },
-        user.uid, user.nombre
+        user.uid,
+        user.nombre
       );
+
+      // ── Motor contable automático (background) ──
+      crearAsientoCompra({
+        entradaId,
+        fecha:           new Date(data.fecha),
+        proveedorNombre: prov?.nombre ?? '',
+        subtotal,
+        iva,
+        total,
+        usuarioId:       user.uid,
+        usuarioNombre:   user.nombre,
+      }).catch(() => {});
+
       toast.success('Entrada registrada y stock actualizado');
       setDialogOpen(false);
     } catch (err: any) {
@@ -213,7 +237,9 @@ export default function EntradasPage() {
                 </TableCell>
                 <TableCell className="font-medium">{e.proveedorNombre}</TableCell>
                 <TableCell className="text-slate-500 text-sm">{e.bodegaNombre || '—'}</TableCell>
-                <TableCell className="text-center"><Badge variant="outline">{e.items.length} ítem(s)</Badge></TableCell>
+                <TableCell className="text-center">
+                  <Badge variant="outline">{e.items.length} ítem(s)</Badge>
+                </TableCell>
                 <TableCell className="text-right text-sm">{formatCurrency(e.subtotal)}</TableCell>
                 <TableCell className="text-right text-sm">{formatCurrency(e.iva)}</TableCell>
                 <TableCell className="text-right font-semibold">{formatCurrency(e.total)}</TableCell>
@@ -250,8 +276,6 @@ export default function EntradasPage() {
           </DialogHeader>
           <div className="space-y-5 py-2">
             <div className="grid grid-cols-3 gap-3">
-
-              {/* Proveedor con botón inline */}
               <div className="space-y-1.5">
                 <div className="flex items-center justify-between">
                   <Label>Proveedor *</Label>

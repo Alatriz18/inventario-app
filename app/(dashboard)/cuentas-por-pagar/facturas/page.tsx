@@ -30,6 +30,7 @@ import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from '@/components/ui/table';
 
+import { crearAsientoPago } from '@/lib/contabilidad/motor-asientos';
 import { FacturaProveedor, Proveedor, MetodoPago } from '@/types';
 import {
   subscribeToFacturasProveedor,
@@ -40,18 +41,17 @@ import { subscribeToProveedores } from '@/lib/firebase/proveedores';
 import { parsearFacturaXML, extraerIVAdeXML } from '@/lib/sri/xmlParser';
 import { useAuth } from '@/context/AuthContext';
 
-// ─── Esquemas ────────────────────────────────────────────────────────────────
 const facturaSchema = z.object({
-  proveedorId:     z.string().min(1, 'Selecciona un proveedor'),
-  numeroFactura:   z.string().min(1, 'Requerido'),
-  claveAcceso:     z.string().optional(),
-  fechaEmision:    z.string().min(1, 'Requerida'),
-  fechaVencimiento:z.string().optional(),
-  subtotal12:      z.coerce.number().min(0),
-  subtotal0:       z.coerce.number().min(0),
-  iva:             z.coerce.number().min(0),
-  total:           z.coerce.number().min(0.01, 'El total debe ser mayor a 0'),
-  notas:           z.string().optional(),
+  proveedorId:      z.string().min(1, 'Selecciona un proveedor'),
+  numeroFactura:    z.string().min(1, 'Requerido'),
+  claveAcceso:      z.string().optional(),
+  fechaEmision:     z.string().min(1, 'Requerida'),
+  fechaVencimiento: z.string().optional(),
+  subtotal12:       z.coerce.number().min(0),
+  subtotal0:        z.coerce.number().min(0),
+  iva:              z.coerce.number().min(0),
+  total:            z.coerce.number().min(0.01, 'El total debe ser mayor a 0'),
+  notas:            z.string().optional(),
 });
 
 const pagoSchema = z.object({
@@ -63,7 +63,6 @@ const pagoSchema = z.object({
 type FacturaForm = z.infer<typeof facturaSchema>;
 type PagoForm    = z.infer<typeof pagoSchema>;
 
-// ─── Helpers ─────────────────────────────────────────────────────────────────
 const ESTADO_CONFIG = {
   pendiente: { label: 'Pendiente', color: 'bg-amber-50 text-amber-700',  icon: Clock },
   parcial:   { label: 'Parcial',   color: 'bg-blue-50 text-blue-700',    icon: CreditCard },
@@ -72,7 +71,6 @@ const ESTADO_CONFIG = {
 };
 
 function currency(v: number) { return `$${v.toFixed(2)}`; }
-
 function formatFecha(fecha: any) {
   const d = fecha?.toDate?.() ?? new Date(fecha);
   return format(d, 'dd/MM/yyyy', { locale: es });
@@ -81,24 +79,24 @@ function formatFecha(fecha: any) {
 export default function FacturasProveedorPage() {
   const { user } = useAuth();
 
-  const [facturas,    setFacturas]    = useState<FacturaProveedor[]>([]);
-  const [proveedores, setProveedores] = useState<Proveedor[]>([]);
-  const [loading,     setLoading]     = useState(true);
-  const [dialogOpen,  setDialogOpen]  = useState(false);
-  const [pagoDialog,  setPagoDialog]  = useState<FacturaProveedor | null>(null);
-  const [detailDialog,setDetailDialog]= useState<FacturaProveedor | null>(null);
-  const [xmlDialog,   setXmlDialog]   = useState(false);
-  const [xmlPreview,  setXmlPreview]  = useState<any>(null);
-  const [saving,      setSaving]      = useState(false);
-  const [search,      setSearch]      = useState('');
-  const [filtroEstado,setFiltroEstado]= useState('todos');
+  const [facturas,     setFacturas]     = useState<FacturaProveedor[]>([]);
+  const [proveedores,  setProveedores]  = useState<Proveedor[]>([]);
+  const [loading,      setLoading]      = useState(true);
+  const [dialogOpen,   setDialogOpen]   = useState(false);
+  const [pagoDialog,   setPagoDialog]   = useState<FacturaProveedor | null>(null);
+  const [detailDialog, setDetailDialog] = useState<FacturaProveedor | null>(null);
+  const [xmlDialog,    setXmlDialog]    = useState(false);
+  const [xmlPreview,   setXmlPreview]   = useState<any>(null);
+  const [saving,       setSaving]       = useState(false);
+  const [search,       setSearch]       = useState('');
+  const [filtroEstado, setFiltroEstado] = useState('todos');
   const xmlRef = useRef<HTMLInputElement>(null);
 
   const facturaForm = useForm<FacturaForm>({ resolver: zodResolver(facturaSchema) as any });
-const pagoForm    = useForm<PagoForm>({
-  resolver: zodResolver(pagoSchema) as any,
-  defaultValues: { metodoPago: 'transferencia' },
-});
+  const pagoForm    = useForm<PagoForm>({
+    resolver: zodResolver(pagoSchema) as any,
+    defaultValues: { metodoPago: 'transferencia' },
+  });
 
   useEffect(() => {
     const u1 = subscribeToFacturasProveedor((d) => { setFacturas(d); setLoading(false); });
@@ -106,24 +104,20 @@ const pagoForm    = useForm<PagoForm>({
     return () => { u1(); u2(); };
   }, []);
 
-  // ── Stats ──
   const stats = {
-    totalPendiente: facturas.filter(f => f.estado !== 'pagada')
-      .reduce((s, f) => s + f.saldoPendiente, 0),
-    vencidas:  facturas.filter(f => f.estado === 'vencida').length,
-    pendientes:facturas.filter(f => f.estado === 'pendiente' || f.estado === 'parcial').length,
-    pagadas:   facturas.filter(f => f.estado === 'pagada').length,
+    totalPendiente: facturas.filter(f => f.estado !== 'pagada').reduce((s, f) => s + f.saldoPendiente, 0),
+    vencidas:       facturas.filter(f => f.estado === 'vencida').length,
+    pendientes:     facturas.filter(f => f.estado === 'pendiente' || f.estado === 'parcial').length,
+    pagadas:        facturas.filter(f => f.estado === 'pagada').length,
   };
 
-  // ── Filtros ──
   const filtered = facturas.filter(f => {
-    const matchSearch  = !search || f.proveedorNombre.toLowerCase().includes(search.toLowerCase()) ||
+    const matchSearch = !search || f.proveedorNombre.toLowerCase().includes(search.toLowerCase()) ||
       f.numeroFactura.includes(search);
-    const matchEstado  = filtroEstado === 'todos' || f.estado === filtroEstado;
+    const matchEstado = filtroEstado === 'todos' || f.estado === filtroEstado;
     return matchSearch && matchEstado;
   });
 
-  // ── Abrir formulario manual ──
   const openCreate = () => {
     facturaForm.reset({
       proveedorId: '', numeroFactura: '', claveAcceso: '',
@@ -133,7 +127,6 @@ const pagoForm    = useForm<PagoForm>({
     setDialogOpen(true);
   };
 
-  // ── Guardar factura manual ──
   const onSaveFactura = async (data: FacturaForm) => {
     if (!user) return;
     setSaving(true);
@@ -168,7 +161,6 @@ const pagoForm    = useForm<PagoForm>({
     }
   };
 
-  // ── Registrar pago ──
   const onSavePago = async (data: PagoForm) => {
     if (!pagoDialog || !user) return;
     if (data.monto > pagoDialog.saldoPendiente) {
@@ -178,14 +170,26 @@ const pagoForm    = useForm<PagoForm>({
     setSaving(true);
     try {
       await registrarPago(pagoDialog.id, {
-        fecha:        new Date(),
-        monto:        data.monto,
-        metodoPago:   data.metodoPago,
-        referencia:   data.referencia || undefined,
-        usuarioId:    user.uid,
-        usuarioNombre:user.nombre,
+        fecha:         new Date(),
+        monto:         data.monto,
+        metodoPago:    data.metodoPago,
+        referencia:    data.referencia || undefined,
+        usuarioId:     user.uid,
+        usuarioNombre: user.nombre,
       });
+
       toast.success('Pago registrado');
+
+      // ── Motor contable automático (background) ──
+      crearAsientoPago({
+        facturaId:       pagoDialog.id,
+        fecha:           new Date(),
+        proveedorNombre: pagoDialog.proveedorNombre,
+        monto:           data.monto,
+        usuarioId:       user.uid,
+        usuarioNombre:   user.nombre,
+      }).catch(() => {});
+
       setPagoDialog(null);
       pagoForm.reset({ metodoPago: 'transferencia' });
     } catch (err: any) {
@@ -195,13 +199,12 @@ const pagoForm    = useForm<PagoForm>({
     }
   };
 
-  // ── Importar XML ──
   const handleXMLUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
     const reader = new FileReader();
     reader.onload = (ev) => {
-      const xml = ev.target?.result as string;
+      const xml  = ev.target?.result as string;
       const data = parsearFacturaXML(xml);
       const iva  = extraerIVAdeXML(xml);
       if (!data) { toast.error('No se pudo leer el XML del SRI'); return; }
@@ -218,17 +221,12 @@ const pagoForm    = useForm<PagoForm>({
     setSaving(true);
     try {
       const { infoTributaria: it, infoFactura: inf } = data;
-      const numDoc = `${it.estab}-${it.ptoEmi}-${it.secuencial}`;
-
-      // Buscar proveedor por RUC
-      const prov = proveedores.find(p => p.ruc === it.ruc);
-
+      const numDoc   = `${it.estab}-${it.ptoEmi}-${it.secuencial}`;
+      const prov     = proveedores.find(p => p.ruc === it.ruc);
       const subtotal = Number(inf.totalSinImpuestos) ?? 0;
       const total    = Number(inf.importeTotal)      ?? 0;
-
-      // Parsear fecha del XML (formato dd/MM/yyyy)
       const [dd, MM, yyyy] = inf.fechaEmision.split('/');
-      const fechaEmision = new Date(`${yyyy}-${MM}-${dd}`);
+      const fechaEmision   = new Date(`${yyyy}-${MM}-${dd}`);
 
       await createFacturaProveedor({
         proveedorId:    prov?.id    ?? '',
@@ -337,8 +335,8 @@ const pagoForm    = useForm<PagoForm>({
                 </TableCell>
               </TableRow>
             ) : filtered.map(f => {
-              const cfg = ESTADO_CONFIG[f.estado] ?? ESTADO_CONFIG.pendiente;
-              const Icon = cfg.icon;
+              const cfg      = ESTADO_CONFIG[f.estado] ?? ESTADO_CONFIG.pendiente;
+              const Icon     = cfg.icon;
               const esVencida = f.estado === 'vencida';
               return (
                 <TableRow key={f.id} className={f.estado === 'pagada' ? 'opacity-60' : ''}>
@@ -407,32 +405,23 @@ const pagoForm    = useForm<PagoForm>({
                 <p className="text-xs text-red-500">{facturaForm.formState.errors.proveedorId.message}</p>
               )}
             </div>
-
             <div className="space-y-1.5">
               <Label>Número de factura *</Label>
               <Input placeholder="001-001-000000001" {...facturaForm.register('numeroFactura')} />
-              {facturaForm.formState.errors.numeroFactura && (
-                <p className="text-xs text-red-500">{facturaForm.formState.errors.numeroFactura.message}</p>
-              )}
             </div>
-
             <div className="space-y-1.5">
               <Label>Clave de acceso SRI</Label>
               <Input placeholder="49 dígitos (opcional)" {...facturaForm.register('claveAcceso')} />
             </div>
-
             <div className="space-y-1.5">
               <Label>Fecha de emisión *</Label>
               <Input type="date" {...facturaForm.register('fechaEmision')} />
             </div>
-
             <div className="space-y-1.5">
               <Label>Fecha de vencimiento</Label>
               <Input type="date" {...facturaForm.register('fechaVencimiento')} />
             </div>
-
             <Separator className="col-span-2" />
-
             <div className="space-y-1.5">
               <Label>Base imponible 15%</Label>
               <div className="relative">
@@ -450,7 +439,6 @@ const pagoForm    = useForm<PagoForm>({
                 />
               </div>
             </div>
-
             <div className="space-y-1.5">
               <Label>Base imponible 0%</Label>
               <div className="relative">
@@ -467,7 +455,6 @@ const pagoForm    = useForm<PagoForm>({
                 />
               </div>
             </div>
-
             <div className="space-y-1.5">
               <Label>IVA 15%</Label>
               <div className="relative">
@@ -476,7 +463,6 @@ const pagoForm    = useForm<PagoForm>({
                   readOnly {...facturaForm.register('iva')} />
               </div>
             </div>
-
             <div className="space-y-1.5">
               <Label>Total *</Label>
               <div className="relative">
@@ -488,7 +474,6 @@ const pagoForm    = useForm<PagoForm>({
                 <p className="text-xs text-red-500">{facturaForm.formState.errors.total.message}</p>
               )}
             </div>
-
             <div className="space-y-1.5 col-span-2">
               <Label>Notas</Label>
               <Textarea placeholder="Observaciones..." rows={2} {...facturaForm.register('notas')} />
@@ -530,7 +515,6 @@ const pagoForm    = useForm<PagoForm>({
                   <span className="text-red-600">{currency(pagoDialog.saldoPendiente)}</span>
                 </div>
               </div>
-
               <div className="space-y-1.5">
                 <Label>Monto a pagar *</Label>
                 <div className="relative">
@@ -543,7 +527,6 @@ const pagoForm    = useForm<PagoForm>({
                   <p className="text-xs text-red-500">{pagoForm.formState.errors.monto.message}</p>
                 )}
               </div>
-
               <div className="space-y-1.5">
                 <Label>Método de pago *</Label>
                 <Select onValueChange={v => pagoForm.setValue('metodoPago', v as MetodoPago)}
@@ -556,7 +539,6 @@ const pagoForm    = useForm<PagoForm>({
                   </SelectContent>
                 </Select>
               </div>
-
               <div className="space-y-1.5">
                 <Label>Referencia / Número de transacción</Label>
                 <Input placeholder="Número de transferencia, cheque, etc."
@@ -594,9 +576,7 @@ const pagoForm    = useForm<PagoForm>({
                   </div>
                 )}
               </div>
-
               <Separator />
-
               <div className="space-y-1.5 text-sm">
                 <div className="flex justify-between text-slate-500">
                   <span>Base 15%</span><span>{currency(detailDialog.subtotal12)}</span>
@@ -615,8 +595,6 @@ const pagoForm    = useForm<PagoForm>({
                   <span>Saldo pendiente</span><span>{currency(detailDialog.saldoPendiente)}</span>
                 </div>
               </div>
-
-              {/* Historial de pagos */}
               {detailDialog.pagos?.length > 0 && (
                 <>
                   <Separator />
@@ -631,9 +609,7 @@ const pagoForm    = useForm<PagoForm>({
                               {p.metodoPago} {p.referencia ? `— ${p.referencia}` : ''}
                             </p>
                           </div>
-                          <p className="text-xs text-slate-400">
-                            {formatFecha(p.fecha)}
-                          </p>
+                          <p className="text-xs text-slate-400">{formatFecha(p.fecha)}</p>
                         </div>
                       ))}
                     </div>
@@ -688,15 +664,12 @@ const pagoForm    = useForm<PagoForm>({
                   <span>{currency(Number(xmlPreview.data.infoFactura.importeTotal))}</span>
                 </div>
               </div>
-
               {!proveedores.find(p => p.ruc === xmlPreview.data.infoTributaria.ruc) && (
                 <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 text-xs text-amber-700">
                   ⚠️ El proveedor con RUC <strong>{xmlPreview.data.infoTributaria.ruc}</strong> no está
                   registrado. La factura se importará igualmente pero sin asociar al proveedor.
-                  Puedes crearlo después en el módulo de Proveedores.
                 </div>
               )}
-
               <p className="text-xs text-slate-400">
                 Se importarán {xmlPreview.data.detalles?.length ?? 0} línea(s) de detalle.
               </p>

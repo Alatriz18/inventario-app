@@ -28,7 +28,7 @@ import {
 } from '@/components/ui/table';
 
 import { AsientoContable, CuentaContable, TipoAsiento } from '@/types';
-import { subscribeToAsientos, createAsiento, confirmarAsiento } from '@/lib/firebase/asientos';
+import { subscribeToAsientos, createAsiento, confirmarAsiento, editarAsiento } from '@/lib/firebase/asientos';
 import { subscribeToCuentas } from '@/lib/firebase/plan-cuentas';
 import { useAuth } from '@/context/AuthContext';
 
@@ -73,6 +73,7 @@ export default function AsientosPage() {
   const [cuentas,    setCuentas]    = useState<CuentaContable[]>([]);
   const [loading,    setLoading]    = useState(true);
   const [dialogOpen, setDialogOpen] = useState(false);
+  const [editId,     setEditId]     = useState<string | null>(null); // null = crear, string = editar
   const [detailId,   setDetailId]   = useState<string | null>(null);
   const [saving,     setSaving]     = useState(false);
   const [search,     setSearch]     = useState('');
@@ -97,6 +98,7 @@ export default function AsientosPage() {
   }, []);
 
   const openCreate = () => {
+    setEditId(null);
     reset({
       fecha: new Date().toISOString().split('T')[0],
       concepto: '', tipo: 'manual',
@@ -104,6 +106,28 @@ export default function AsientosPage() {
         { cuentaCodigo: '', descripcion: '', debe: 0, haber: 0 },
         { cuentaCodigo: '', descripcion: '', debe: 0, haber: 0 },
       ],
+    });
+    setDialogOpen(true);
+  };
+
+  const openEdit = (asiento: AsientoContable) => {
+    if (asiento.bloqueado) {
+      toast.error('Asiento bloqueado — el período contable está cerrado');
+      return;
+    }
+    setEditId(asiento.id);
+    const fechaDate = (asiento.fecha as any)?.toDate?.() ?? new Date(asiento.fecha as any);
+    reset({
+      fecha:    fechaDate.toISOString().split('T')[0],
+      concepto: asiento.concepto,
+      tipo:     (['manual','apertura','ajuste_inventario','cierre'].includes(asiento.tipo)
+                  ? asiento.tipo : 'manual') as any,
+      lineas: asiento.lineas.map(l => ({
+        cuentaCodigo: l.cuentaCodigo,
+        descripcion:  l.descripcion ?? '',
+        debe:         l.debe,
+        haber:        l.haber,
+      })),
     });
     setDialogOpen(true);
   };
@@ -116,7 +140,7 @@ export default function AsientosPage() {
       const lineas = data.lineas.map((l, i) => {
         const cuenta = cuentas.find(c => c.codigo === l.cuentaCodigo);
         return {
-          id:           `${i}`,
+          id:           `${i}-${Date.now()}`,
           cuentaId:     cuenta?.id    ?? l.cuentaCodigo,
           cuentaCodigo: l.cuentaCodigo,
           cuentaNombre: cuenta?.nombre ?? l.cuentaCodigo,
@@ -125,23 +149,40 @@ export default function AsientosPage() {
           descripcion:  l.descripcion  || '',
         };
       });
-      await createAsiento({
-        fecha:        new Date(data.fecha),
-        concepto:     data.concepto,
-        tipo:         data.tipo as TipoAsiento,
-        lineas,
-        totalDebe,
-        totalHaber,
-        estado:       'confirmado',
-        usuarioId:    user.uid,
-        usuarioNombre:user.nombre,
-        createdAt:    new Date(),
-      });
-      toast.success('Asiento registrado');
+
+      if (editId) {
+        // EDITAR asiento existente
+        await editarAsiento(
+          editId,
+          { concepto: data.concepto, fecha: new Date(data.fecha), lineas },
+          user.uid, user.nombre
+        );
+        toast.success('Asiento actualizado');
+      } else {
+        // CREAR nuevo asiento manual
+        await createAsiento({
+          fecha:              new Date(data.fecha),
+          concepto:           data.concepto,
+          tipo:               data.tipo as TipoAsiento,
+          lineas,
+          totalDebe,
+          totalHaber,
+          estado:             'confirmado',
+          bloqueado:          false,
+          editadoManualmente: false,
+          usuarioId:          user.uid,
+          usuarioNombre:      user.nombre,
+          createdAt:          new Date(),
+        });
+        toast.success('Asiento registrado');
+      }
       setDialogOpen(false);
-    } catch { toast.error('Error al guardar el asiento'); }
+    } catch (e: any) {
+      toast.error(e.message ?? 'Error al guardar el asiento');
+    }
     finally { setSaving(false); }
   };
+
 
   const filtered = asientos.filter(a =>
     a.concepto.toLowerCase().includes(search.toLowerCase()) ||
@@ -222,12 +263,33 @@ export default function AsientosPage() {
             ) : filtered.map(a => {
               const fecha = (a.fecha as any)?.toDate?.() ?? new Date(a.fecha);
               return (
-                <TableRow key={a.id}>
+                <TableRow key={a.id} className={a.bloqueado ? 'opacity-60' : ''}>
                   <TableCell className="font-mono text-xs font-semibold">{a.numero}</TableCell>
                   <TableCell className="text-sm text-slate-500">
                     {format(fecha, 'dd/MM/yyyy', { locale: es })}
                   </TableCell>
-                  <TableCell className="font-medium text-sm">{a.concepto}</TableCell>
+                  <TableCell className="font-medium text-sm">
+                    <div className="flex flex-col gap-0.5">
+                      <span>{a.concepto}</span>
+                      <div className="flex gap-1">
+                        {a.editadoManualmente && (
+                          <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-100 text-amber-700 font-medium">
+                            editado manualmente
+                          </span>
+                        )}
+                        {a.referenciaId && (
+                          <span className="text-[10px] px-1.5 py-0.5 rounded bg-slate-100 text-slate-500">
+                            {a.referenciaTipo}
+                          </span>
+                        )}
+                        {a.bloqueado && (
+                          <span className="text-[10px] px-1.5 py-0.5 rounded bg-red-100 text-red-600 font-medium">
+                            período cerrado
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  </TableCell>
                   <TableCell className="text-center">
                     <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${TIPO_COLORS[a.tipo] ?? 'bg-slate-100 text-slate-600'}`}>
                       {TIPO_LABELS[a.tipo] ?? a.tipo}
@@ -241,10 +303,18 @@ export default function AsientosPage() {
                     </Badge>
                   </TableCell>
                   <TableCell className="text-center">
-                    <Button variant="ghost" size="icon" onClick={() => setDetailId(a.id)}
-                      className="h-7 w-7 text-slate-400 hover:text-blue-600">
-                      <ChevronDown className="h-3.5 w-3.5" />
-                    </Button>
+                    <div className="flex gap-1 justify-center">
+                      <Button variant="ghost" size="icon" onClick={() => openEdit(a)}
+                        className="h-7 w-7 text-slate-400 hover:text-amber-600"
+                        title="Editar asiento">
+                        <svg xmlns="http://www.w3.org/2000/svg" className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+                      </Button>
+                      <Button variant="ghost" size="icon" onClick={() => setDetailId(a.id)}
+                        className="h-7 w-7 text-slate-400 hover:text-blue-600"
+                        title="Ver detalle">
+                        <ChevronDown className="h-3.5 w-3.5" />
+                      </Button>
+                    </div>
                   </TableCell>
                 </TableRow>
               );
@@ -253,10 +323,20 @@ export default function AsientosPage() {
         </Table>
       </div>
 
-      {/* ─── DIALOG NUEVO ASIENTO ─── */}
+      {/* ─── DIALOG CREAR / EDITAR ASIENTO ─── */}
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
         <DialogContent className="sm:max-w-2xl max-h-[90vh] overflow-y-auto">
-          <DialogHeader><DialogTitle>Nuevo Asiento Contable</DialogTitle></DialogHeader>
+          <DialogHeader>
+            <DialogTitle>
+              {editId ? 'Editar Asiento Contable' : 'Nuevo Asiento Contable'}
+            </DialogTitle>
+            {editId && (
+              <p className="text-xs text-amber-600 bg-amber-50 border border-amber-200 rounded px-3 py-2 mt-1">
+                Este asiento fue generado automáticamente por el sistema. Al editarlo se marcará como "editado manualmente"
+                y no se sobreescribirá si el documento origen cambia (salvo que uses "Recalcular desde origen").
+              </p>
+            )}
+          </DialogHeader>
           <div className="space-y-4 py-2">
             <div className="grid grid-cols-3 gap-3">
               <div className="space-y-1.5">
@@ -344,7 +424,7 @@ export default function AsientosPage() {
           <DialogFooter>
             <Button variant="outline" onClick={() => setDialogOpen(false)}>Cancelar</Button>
             <Button onClick={() => handleSubmit(onSubmit)()} disabled={saving || !cuadra}>
-              {saving ? 'Guardando...' : 'Registrar Asiento'}
+              {saving ? 'Guardando...' : editId ? 'Guardar cambios' : 'Registrar Asiento'}
             </Button>
           </DialogFooter>
         </DialogContent>

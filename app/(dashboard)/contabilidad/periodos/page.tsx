@@ -53,11 +53,11 @@ export default function PeriodosPage() {
   const handleToggle = async (p: PeriodoContable) => {
     try {
       if (p.estado === 'abierto') {
-        await cerrarPeriodo(p.id);
-        toast.success(`Período ${p.nombre} cerrado`);
+        await cerrarPeriodo(p.id, p.anio, p.mes);
+        toast.success(`Período ${p.nombre} cerrado — asientos bloqueados`);
       } else {
-        await abrirPeriodo(p.id);
-        toast.success(`Período ${p.nombre} reabierto`);
+        await abrirPeriodo(p.id, p.anio, p.mes);
+        toast.success(`Período ${p.nombre} reabierto — asientos desbloqueados`);
       }
     } catch { toast.error('Error al cambiar estado'); }
   };

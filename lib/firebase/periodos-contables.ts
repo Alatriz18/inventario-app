@@ -4,6 +4,7 @@ import {
 } from 'firebase/firestore';
 import { db } from '@/lib/firebase/config';
 import { PeriodoContable } from '@/types';
+import { bloquearAsientosDePeriodo } from '@/lib/firebase/asientos';
 
 const COL = 'periodos_contables';
 
@@ -27,12 +28,22 @@ export async function createPeriodo(anio: number, mes: number): Promise<void> {
   });
 }
 
-export async function cerrarPeriodo(id: string): Promise<void> {
+/**
+ * Cierra el período y bloquea todos sus asientos contables.
+ * Los asientos bloqueados no se pueden editar ni eliminar.
+ */
+export async function cerrarPeriodo(id: string, anio: number, mes: number): Promise<void> {
   await updateDoc(doc(db, COL, id), { estado: 'cerrado' });
+  // Bloquear todos los asientos del mes para evitar modificaciones
+  await bloquearAsientosDePeriodo(anio, mes, true);
 }
 
-export async function abrirPeriodo(id: string): Promise<void> {
+/**
+ * Reabre el período y desbloquea sus asientos (solo admin).
+ */
+export async function abrirPeriodo(id: string, anio: number, mes: number): Promise<void> {
   await updateDoc(doc(db, COL, id), { estado: 'abierto' });
+  await bloquearAsientosDePeriodo(anio, mes, false);
 }
 
 export async function getPeriodoActual(): Promise<PeriodoContable | null> {

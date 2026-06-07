@@ -364,15 +364,20 @@ export interface AsientoContable {
   fecha:          Date;
   concepto:       string;
   tipo:           TipoAsiento;
-  referenciaId?:  string;
-  referenciaTipo?:string;
+  referenciaId?:  string;   // ID del documento origen (venta, entrada, pago, etc.)
+  referenciaTipo?:string;   // 'venta' | 'entrada' | 'factura_proveedor' | etc.
   lineas:         AsientoLinea[];
   totalDebe:      number;
   totalHaber:     number;
   estado:         'borrador' | 'confirmado';
+  bloqueado:      boolean;  // true si el período contable está cerrado
+  editadoManualmente: boolean; // true si fue modificado después de crearse automáticamente
   usuarioId:      string;
   usuarioNombre:  string;
   createdAt:      Date;
+  updatedAt?:     Date;     // fecha de última edición
+  usuarioEdicionId?:     string;
+  usuarioEdicionNombre?: string;
 }
 
 export interface ConfigContable {
@@ -397,6 +402,73 @@ export interface PeriodoContable {
   nombre:   string;
   estado:   'abierto' | 'cerrado';
   creadoAt: Date;
+}
+
+// ─── RÉGIMEN Y CONFIGURACIÓN DE EMPRESA ────────────────────────────────────
+
+/**
+ * Régimen tributario que define:
+ *  - Qué comprobantes puede emitir
+ *  - Si cobra IVA o no
+ *  - Si es agente de retención
+ *  - Qué formularios SRI debe declarar
+ */
+export type RegimenEmpresa =
+  | 'general'              // RUC, obligado o no a contabilidad, IVA 15%, facturas
+  | 'rimpe_emprendedor'    // RUC, hasta $300k ventas, IVA 15%, facturas + notas venta
+  | 'rimpe_negocio_popular'// Antes "RISE": notas de venta, sin IVA, tarifa fija mensual
+  | 'rimpe_artesano'       // Artesano calificado JNDA: factura con IVA 0%
+  | 'exportador_habitual'  // IVA 0% en exportaciones, devol. IVA, facturas exportación
+  | 'contribuyente_especial'; // Grandes empresas, retención del 100% IVA
+
+export interface ComprobantesHabilitados {
+  factura:           boolean;
+  notaVenta:         boolean;  // Solo RIMPE negocio popular
+  notaCredito:       boolean;
+  notaDebito:        boolean;
+  comprobanteRetencion: boolean; // Solo si es agente de retención
+  liquidacionCompras:boolean;
+  guiaRemision:      boolean;
+  reciboInterno:     boolean;  // Sin validez tributaria, solo control interno
+}
+
+export interface ReglasTributarias {
+  cobrarIVA:              boolean;   // false para negocio popular y artesanos
+  tasaIVA:                number;    // 15 general, 0 exportador/artesano
+  esAgenteRetencion:      boolean;   // Puede emitir comp. retención
+  obligadoContabilidad:   boolean;
+  contribuyenteEspecial:  boolean;
+  aplicaICE:              boolean;   // Tabacos, licores, etc.
+  // Declaraciones requeridas
+  declaraFormulario104:   boolean;
+  declaraFormulario103:   boolean;
+  declaraFormulario105:   boolean;
+  declaraATS:             boolean;
+  declaraFormulario101:   boolean;  // IR anual
+  declaraRIMPE:           boolean;  // Formulario RIMPE semestral
+}
+
+export interface ConfigEmpresa {
+  // Identificación
+  nombreEmpresa:     string;
+  nombreComercial?:  string;
+  ruc:               string;
+  direccion:         string;
+  telefono?:         string;
+  email?:            string;
+  ciudad?:           string;
+  provincia?:        string;
+  logo?:             string;  // base64 o URL
+  // Régimen tributario — el campo más importante
+  regimen:           RegimenEmpresa;
+  // Derivados del régimen (calculados automáticamente, sobreescribibles)
+  comprobantesHabilitados: ComprobantesHabilitados;
+  reglasTributarias:       ReglasTributarias;
+  // Facturación
+  moneda:            string;  // USD
+  // Pie de RIDE / recibos
+  mensajeAdicional?: string;
+  updatedAt?:        Date;
 }
 
 // ─── TRIBUTARIO ────────────────────────────────────────────────────────────

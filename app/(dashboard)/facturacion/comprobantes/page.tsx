@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react';
 import { format } from 'date-fns';
 import { es } from 'date-fns/locale';
-import { ClipboardList, RefreshCw } from 'lucide-react';
+import { ClipboardList, RefreshCw, Download, Eye, FileText } from 'lucide-react';
 
 import PageHeader  from '@/components/shared/PageHeader';
 import { Input }   from '@/components/ui/input';
@@ -21,6 +21,7 @@ import { subscribeToComprobantes, Comprobante, updateComprobante } from '@/lib/f
 import { autorizarComprobante } from '@/lib/sri/webservice';
 import { getConfigSRI } from '@/lib/firebase/config-sri';
 import { toast } from 'sonner';
+import { useRIDE } from '@/hooks/useRIDE';
 
 const TIPO_LABELS: Record<string, string> = {
   factura:    'Factura', nota_venta: 'Nota de Venta',
@@ -43,6 +44,7 @@ export default function ComprobantesPage() {
   const [search,       setSearch]       = useState('');
   const [filtroEstado, setFiltroEstado] = useState('todos');
   const [consultando,  setConsultando]  = useState<string | null>(null);
+  const { descargar: descargarRIDE, abrir: abrirRIDE, generando } = useRIDE();
 
   useEffect(() => {
     return subscribeToComprobantes((data) => { setComprobantes(data); setLoading(false); });
@@ -194,6 +196,20 @@ export default function ComprobantesPage() {
                           <RefreshCw className={`h-4 w-4 ${consultando === c.id ? 'animate-spin' : ''}`} />
                         </Button>
                       )}
+                      <Button variant="ghost" size="icon"
+                        onClick={() => abrirRIDE(c)}
+                        disabled={generando}
+                        className="h-8 w-8 text-slate-500 hover:text-emerald-600"
+                        title="Ver RIDE en nueva pestaña">
+                        <Eye className="h-4 w-4" />
+                      </Button>
+                      <Button variant="ghost" size="icon"
+                        onClick={() => descargarRIDE(c)}
+                        disabled={generando}
+                        className="h-8 w-8 text-slate-500 hover:text-blue-600"
+                        title="Descargar RIDE PDF">
+                        <Download className="h-4 w-4" />
+                      </Button>
                     </div>
                   </TableCell>
                 </TableRow>

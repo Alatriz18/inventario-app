@@ -41,6 +41,7 @@ const NAV: NavItem[] = [
     children: [
       { label: 'Punto de Venta', href: '/ventas/pos',       icon: ShoppingCart },
       { label: 'Historial',      href: '/ventas/historial', icon: Receipt },
+      { label: 'Recibos Internos', href: '/ventas/recibo',  icon: FileText },
       { label: 'Clientes',       href: '/clientes',         icon: Users },
     ],
   },

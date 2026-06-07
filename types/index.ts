@@ -471,6 +471,236 @@ export interface ConfigEmpresa {
   updatedAt?:        Date;
 }
 
+// ─── CUENTAS POR COBRAR (CxC) ──────────────────────────────────────────────
+
+export type EstadoCxC = 'pendiente' | 'parcial' | 'pagada' | 'vencida';
+
+export interface CobroCxC {
+  id:           string;
+  fecha:        Date;
+  monto:        number;
+  metodoPago:   MetodoPago;
+  referencia?:  string;
+  notas?:       string;
+  usuarioId:    string;
+  usuarioNombre:string;
+}
+
+export interface CuentaCobrar {
+  id:                  string;
+  ventaId:             string;
+  comprobanteId?:      string;
+  clienteId:           string;
+  clienteNombre:       string;
+  clienteIdentificacion:string;
+  fechaEmision:        Date;
+  fechaVencimiento:    Date;
+  diasCredito:         number;
+  total:               number;
+  saldoPendiente:      number;
+  estado:              EstadoCxC;
+  cobros:              CobroCxC[];
+  retencionesFuenteRecibidas?: number;
+  retencionesIVARecibidas?:    number;
+  usuarioId:           string;
+  usuarioNombre:       string;
+  createdAt:           Date;
+  notas?:              string;
+}
+
+// ─── NOTAS DE CRÉDITO SRI ──────────────────────────────────────────────────
+
+export type EstadoNotaCredito = 'pendiente' | 'autorizada' | 'rechazada';
+export type MotivoNotaCredito = 'devolucion' | 'descuento' | 'error' | 'anulacion';
+
+export interface ItemNotaCredito {
+  codigoPrincipal:       string;
+  descripcion:           string;
+  cantidad:              number;
+  precioUnitario:        number;
+  descuento:             number;
+  precioTotalSinImpuesto:number;
+  tieneIVA:              boolean;
+}
+
+export interface NotaCredito {
+  id:                   string;
+  comprobanteOrigenId:  string;
+  numeroComprobanteOrigen: string;
+  fechaEmisionOrigen:   Date;
+  clienteId:            string;
+  clienteNombre:        string;
+  clienteIdentificacion:string;
+  tipo:                 'nota_credito';
+  secuencial:           string;
+  claveAcceso:          string;
+  numeroAutorizacion?:  string;
+  fechaAutorizacion?:   Date;
+  estado:               EstadoNotaCredito;
+  motivo:               MotivoNotaCredito;
+  descripcionMotivo:    string;
+  fechaEmision:         Date;
+  items:                ItemNotaCredito[];
+  subtotal:             number;
+  iva:                  number;
+  total:                number;
+  xmlUrl?:              string;
+  rideUrl?:             string;
+  usuarioId:            string;
+  usuarioNombre:        string;
+  createdAt:            Date;
+}
+
+// ─── NOTAS DE DÉBITO SRI ───────────────────────────────────────────────────
+
+export type EstadoNotaDebito = 'pendiente' | 'autorizada' | 'rechazada';
+
+export interface RazonNotaDebito {
+  descripcion: string;
+  valor:       number;
+}
+
+export interface NotaDebito {
+  id:                   string;
+  comprobanteOrigenId:  string;
+  numeroComprobanteOrigen: string;
+  fechaEmisionOrigen:   Date;
+  clienteId:            string;
+  clienteNombre:        string;
+  clienteIdentificacion:string;
+  tipo:                 'nota_debito';
+  secuencial:           string;
+  claveAcceso:          string;
+  numeroAutorizacion?:  string;
+  fechaAutorizacion?:   Date;
+  estado:               EstadoNotaDebito;
+  fechaEmision:         Date;
+  razones:              RazonNotaDebito[];
+  subtotal:             number;
+  iva:                  number;
+  total:                number;
+  xmlUrl?:              string;
+  usuarioId:            string;
+  usuarioNombre:        string;
+  createdAt:            Date;
+}
+
+// ─── COMPROBANTES DE RETENCIÓN EMITIDOS (a proveedores) ───────────────────
+
+export type EstadoRetencion = 'pendiente' | 'autorizado' | 'rechazado';
+
+export interface LineaRetencion {
+  id:           string;
+  tipo:         'fuente_ir' | 'iva';
+  codigo:       string;
+  descripcion:  string;
+  porcentaje:   number;
+  baseImponible:number;
+  valorRetenido:number;
+}
+
+export interface RetencionEmitida {
+  id:                   string;
+  facturaProveedorId:   string;
+  numeroFacturaProveedor:string;
+  proveedorId:          string;
+  proveedorNombre:      string;
+  proveedorRuc:         string;
+  fechaFactura:         Date;
+  secuencial:           string;
+  claveAcceso:          string;
+  numeroAutorizacion?:  string;
+  fechaAutorizacion?:   Date;
+  estado:               EstadoRetencion;
+  fechaEmision:         Date;
+  ejercicioFiscal:      string;
+  lineas:               LineaRetencion[];
+  totalRetenido:        number;
+  xmlUrl?:              string;
+  usuarioId:            string;
+  usuarioNombre:        string;
+  createdAt:            Date;
+}
+
+// ─── CONCILIACIÓN BANCARIA ─────────────────────────────────────────────────
+
+export interface CuentaBancaria {
+  id:           string;
+  banco:        string;
+  tipoCuenta:   'corriente' | 'ahorros';
+  numeroCuenta: string;
+  titular:      string;
+  moneda:       string;
+  saldoInicial: number;
+  cuentaContableId?: string;
+  cuentaContableCodigo?: string;
+  cuentaContableNombre?: string;
+  activa:       boolean;
+  createdAt:    Date;
+}
+
+export type TipoMovBanco = 'credito' | 'debito';
+export type EstadoConciliacion = 'no_conciliado' | 'conciliado' | 'ignorado';
+
+export interface MovimientoBancario {
+  id:             string;
+  cuentaBancariaId:string;
+  fecha:          Date;
+  descripcion:    string;
+  tipo:           TipoMovBanco;
+  monto:          number;
+  saldo?:         number;
+  referencia?:    string;
+  estado:         EstadoConciliacion;
+  asientoId?:     string;
+  createdAt:      Date;
+}
+
+// ─── ACTIVOS FIJOS ─────────────────────────────────────────────────────────
+
+export type MetodoDepreciacion = 'linea_recta' | 'saldo_decreciente' | 'unidades_produccion';
+export type EstadoActivo = 'activo' | 'depreciado' | 'dado_de_baja' | 'vendido';
+
+export interface CuotaDepreciacion {
+  id:             string;
+  anio:           number;
+  mes:            number;
+  cuota:          number;
+  depAcumulada:   number;
+  valorLibros:    number;
+  asientoId?:     string;
+  registrado:     boolean;
+}
+
+export interface ActivoFijo {
+  id:                    string;
+  codigo:                string;
+  descripcion:           string;
+  categoria:             string;
+  proveedor?:            string;
+  fechaAdquisicion:      Date;
+  valorAdquisicion:      number;
+  valorResidual:         number;
+  vidaUtilAnios:         number;
+  metodoDepreciacion:    MetodoDepreciacion;
+  tasaDepreciacion:      number;
+  depreciacionAcumulada: number;
+  valorLibros:           number;
+  estado:                EstadoActivo;
+  ubicacion?:            string;
+  // Cuentas contables
+  cuentaActivoId?:       string;
+  cuentaActivoCodigo?:   string;
+  cuentaDepAcumId?:      string;
+  cuentaDepAcumCodigo?:  string;
+  cuentaGastoDepId?:     string;
+  cuentaGastoDepCodigo?: string;
+  cuotas:                CuotaDepreciacion[];
+  createdAt:             Date;
+  updatedAt:             Date;
+  notas?:                string;
+}
+
 // ─── TRIBUTARIO ────────────────────────────────────────────────────────────
 
 export interface ConfigRetencion {

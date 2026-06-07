@@ -11,7 +11,8 @@ import {
   FileCheck, CreditCard, BarChart3, Settings, UserCog, ChevronDown,
   ChevronRight, PackageCheck, Warehouse, BookOpen, Scale, FileSpreadsheet,
   Calculator, TrendingUp, BookMarked, Landmark, FileMinus, FilePlus,
-  FileSearch, Coins, ReceiptText, X,
+  FileSearch, Coins, ReceiptText, X, Building2, Layers, ClipboardCheck,
+  DollarSign, ListChecks,
 } from 'lucide-react';
 
 interface NavItem {
@@ -27,13 +28,14 @@ const NAV: NavItem[] = [
   {
     label: 'Inventario', icon: Package,
     children: [
-      { label: 'Productos',   href: '/productos',   icon: Package },
-      { label: 'Categorías',  href: '/categorias',  icon: Tags },
-      { label: 'Bodegas',     href: '/bodegas',     icon: Warehouse },
-      { label: 'Proveedores', href: '/proveedores', icon: Truck },
-      { label: 'Entradas',    href: '/entradas',    icon: PackagePlus },
-      { label: 'Despachos',   href: '/despachos',   icon: PackageMinus },
-      { label: 'Movimientos', href: '/movimientos', icon: ArrowLeftRight },
+      { label: 'Productos',   href: '/productos',           icon: Package },
+      { label: 'Categorías',  href: '/categorias',          icon: Tags },
+      { label: 'Bodegas',     href: '/bodegas',             icon: Warehouse },
+      { label: 'Proveedores', href: '/proveedores',         icon: Truck },
+      { label: 'Entradas',    href: '/entradas',            icon: PackagePlus },
+      { label: 'Despachos',   href: '/despachos',           icon: PackageMinus },
+      { label: 'Movimientos', href: '/movimientos',         icon: ArrowLeftRight },
+      { label: 'Kardex',      href: '/inventario/kardex',  icon: ListChecks },
     ],
   },
   {
@@ -48,9 +50,17 @@ const NAV: NavItem[] = [
   {
     label: 'Facturación SRI', icon: FileText,
     children: [
-      { label: 'Emitir Comprobante', href: '/facturacion/emitir',        icon: FileText },
-      { label: 'Comprobantes',       href: '/facturacion/comprobantes',  icon: ClipboardList },
-      { label: 'Configuración SRI',  href: '/facturacion/configuracion', icon: Settings, roles: ['admin'] },
+      { label: 'Emitir Comprobante', href: '/facturacion/emitir',         icon: FileText },
+      { label: 'Comprobantes',       href: '/facturacion/comprobantes',   icon: ClipboardList },
+      { label: 'Notas de Crédito',   href: '/facturacion/notas-credito',  icon: FileMinus },
+      { label: 'Notas de Débito',    href: '/facturacion/notas-debito',   icon: FilePlus },
+      { label: 'Configuración SRI',  href: '/facturacion/configuracion',  icon: Settings, roles: ['admin'] },
+    ],
+  },
+  {
+    label: 'Cuentas por Cobrar', icon: DollarSign,
+    children: [
+      { label: 'Saldos y Cobros', href: '/cuentas-por-cobrar', icon: DollarSign },
     ],
   },
   {
@@ -78,15 +88,19 @@ const NAV: NavItem[] = [
   {
     label: 'Tributario', icon: ReceiptText,
     children: [
-      { label: 'Retenciones',      href: '/tributario/retenciones', icon: FileMinus },
-      { label: 'ICE',              href: '/tributario/ice',         icon: Coins },
-      { label: 'ATS (DIMM)',       href: '/tributario/ats',         icon: FileSearch },
-      { label: 'Form. 104 – IVA', href: '/tributario/form-104',    icon: FileSpreadsheet },
-      { label: 'Form. 103 – Ret.',href: '/tributario/form-103',    icon: FileSpreadsheet },
-      { label: 'Form. 105 – ICE', href: '/tributario/form-105',    icon: FileSpreadsheet },
+      { label: 'Retenciones (config)', href: '/tributario/retenciones',         icon: FileMinus },
+      { label: 'Ret. Emitidas',        href: '/tributario/retenciones-emitidas',icon: ClipboardCheck },
+      { label: 'ICE',                  href: '/tributario/ice',                 icon: Coins },
+      { label: 'ATS (DIMM)',           href: '/tributario/ats',                 icon: FileSearch },
+      { label: 'Form. 104 – IVA',      href: '/tributario/form-104',            icon: FileSpreadsheet },
+      { label: 'Form. 103 – Ret.',     href: '/tributario/form-103',            icon: FileSpreadsheet },
+      { label: 'Form. 105 – ICE',      href: '/tributario/form-105',            icon: FileSpreadsheet },
+      { label: 'Form. 101 – IR Anual', href: '/tributario/form-101',            icon: FileSpreadsheet, roles: ['admin','contador'] },
     ],
   },
-  { label: 'Reportes',     href: '/reportes',     icon: BarChart3 },
+  { label: 'Activos Fijos',         href: '/activos-fijos',          icon: Layers },
+  { label: 'Conciliación Bancaria', href: '/conciliacion-bancaria',  icon: Building2 },
+  { label: 'Reportes',              href: '/reportes',               icon: BarChart3 },
   { label: 'Usuarios',     href: '/usuarios',     icon: UserCog,  roles: ['admin'] },
   { label: 'Configuración',href: '/configuracion',icon: Settings, roles: ['admin'] },
 ];
@@ -196,7 +210,7 @@ export default function Sidebar({ onClose }: SidebarProps) {
 
       {/* Version */}
       <div className="px-4 py-3 border-t border-slate-700/60 shrink-0">
-        <p className="text-slate-500 text-[10px]">v1.0.0 — Sprint 4</p>
+        <p className="text-slate-500 text-[10px]">v2.0.0 — Sistema Completo</p>
       </div>
     </aside>
   );

@@ -315,6 +315,230 @@ export async function recalcularAsientoPago(
 }
 
 // ─────────────────────────────────────────────────────────────────────────
+// COBRO A CLIENTE (CxC)
+// ─────────────────────────────────────────────────────────────────────────
+
+interface ParamsCobro extends ParamsBase {
+  cxcId:        string;
+  fecha:        Date;
+  clienteNombre:string;
+  monto:        number;
+  usaBanco?:    boolean;
+  retFuente?:   number;
+  retIVA?:      number;
+}
+
+export async function crearAsientoCobro(p: ParamsCobro): Promise<string | null> {
+  try {
+    const config  = await getConfigSegura();
+    if (!config) return null;
+    const cuentas = await getCuentasCached();
+
+    const cuentaEntrada = p.usaBanco ? config.cuentaBancos : config.cuentaCaja;
+    const lineas: AsientoLinea[] = [];
+
+    // DB: Caja o Banco (neto cobrado)
+    const netoCobrado = p.monto - (p.retFuente ?? 0) - (p.retIVA ?? 0);
+    lineas.push(buildLinea(cuentas, cuentaEntrada, netoCobrado, 0, `Cobro cliente ${p.clienteNombre}`));
+
+    // DB: Retención fuente recibida
+    if ((p.retFuente ?? 0) > 0) {
+      lineas.push(buildLinea(cuentas, config.cuentaRetFuenteClientes,
+        p.retFuente!, 0, `Ret. fuente recibida de ${p.clienteNombre}`));
+    }
+
+    // DB: Retención IVA recibida
+    if ((p.retIVA ?? 0) > 0) {
+      lineas.push(buildLinea(cuentas, config.cuentaRetIVAClientes,
+        p.retIVA!, 0, `Ret. IVA recibida de ${p.clienteNombre}`));
+    }
+
+    // CR: CxC Clientes
+    lineas.push(buildLinea(cuentas, config.cuentaCxCClientes, 0, p.monto,
+      `Cancelación CxC ${p.clienteNombre}`));
+
+    return await createAsiento({
+      fecha:          p.fecha,
+      concepto:       `Cobro a cliente ${p.clienteNombre}`,
+      tipo:           'cobro_cliente',
+      referenciaId:   p.cxcId,
+      referenciaTipo: 'cxc',
+      lineas,
+      totalDebe:      lineas.reduce((s, l) => s + l.debe,  0),
+      totalHaber:     lineas.reduce((s, l) => s + l.haber, 0),
+      estado:         'confirmado',
+      bloqueado:      false,
+      editadoManualmente: false,
+      usuarioId:      p.usuarioId,
+      usuarioNombre:  p.usuarioNombre,
+      createdAt:      new Date(),
+    });
+  } catch { return null; }
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// NOTA DE CRÉDITO
+// ─────────────────────────────────────────────────────────────────────────
+
+interface ParamsNotaCredito extends ParamsBase {
+  notaCreditoId: string;
+  fecha:         Date;
+  clienteNombre: string;
+  tieneIVA:      boolean;
+  subtotal:      number;
+  iva:           number;
+  total:         number;
+  costoDevolucion?: number;
+}
+
+export async function crearAsientoNotaCredito(p: ParamsNotaCredito): Promise<string | null> {
+  try {
+    const config  = await getConfigSegura();
+    if (!config) return null;
+    const cuentas = await getCuentasCached();
+
+    const lineas: AsientoLinea[] = [];
+
+    // DB: Devolución ventas (reverso de la venta)
+    const cuentaVentas = p.tieneIVA ? config.cuentaVentas12 : config.cuentaVentas0;
+    lineas.push(buildLinea(cuentas, cuentaVentas, p.subtotal, 0, 'Devolución en ventas'));
+
+    if (p.tieneIVA && p.iva > 0) {
+      lineas.push(buildLinea(cuentas, config.cuentaIVAVentas, p.iva, 0, 'IVA devolución'));
+    }
+
+    // CR: CxC o Caja (se devuelve al cliente)
+    lineas.push(buildLinea(cuentas, config.cuentaCxCClientes, 0, p.total,
+      `NC emitida a ${p.clienteNombre}`));
+
+    // Reverso costo (si aplica)
+    if ((p.costoDevolucion ?? 0) > 0) {
+      lineas.push(buildLinea(cuentas, config.cuentaInventario,
+        p.costoDevolucion!, 0, 'Retorno mercadería'));
+      lineas.push(buildLinea(cuentas, config.cuentaCostoVentas,
+        0, p.costoDevolucion!, 'Reverso costo de ventas'));
+    }
+
+    return await createAsiento({
+      fecha:          p.fecha,
+      concepto:       `Nota de crédito a ${p.clienteNombre}`,
+      tipo:           'manual',
+      referenciaId:   p.notaCreditoId,
+      referenciaTipo: 'nota_credito',
+      lineas,
+      totalDebe:      lineas.reduce((s, l) => s + l.debe,  0),
+      totalHaber:     lineas.reduce((s, l) => s + l.haber, 0),
+      estado:         'confirmado',
+      bloqueado:      false,
+      editadoManualmente: false,
+      usuarioId:      p.usuarioId,
+      usuarioNombre:  p.usuarioNombre,
+      createdAt:      new Date(),
+    });
+  } catch { return null; }
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// RETENCIÓN EMITIDA (a proveedor)
+// ─────────────────────────────────────────────────────────────────────────
+
+interface ParamsRetencionEmitida extends ParamsBase {
+  retencionId:     string;
+  fecha:           Date;
+  proveedorNombre: string;
+  totalRetenido:   number;
+  retFuente:       number;
+  retIVA:          number;
+}
+
+export async function crearAsientoRetencionEmitida(p: ParamsRetencionEmitida): Promise<string | null> {
+  try {
+    const config  = await getConfigSegura();
+    if (!config) return null;
+    const cuentas = await getCuentasCached();
+
+    const CUENTA_RET_FUENTE = '2.1.07.01';
+    const CUENTA_RET_IVA    = '2.1.07.02';
+
+    const lineas: AsientoLinea[] = [];
+
+    // DB: CxP Proveedores (reduce la deuda en el monto retenido)
+    lineas.push(buildLinea(cuentas, config.cuentaCxPProveedores,
+      p.totalRetenido, 0, `Retención emitida a ${p.proveedorNombre}`));
+
+    if (p.retFuente > 0) {
+      lineas.push(buildLinea(cuentas, CUENTA_RET_FUENTE,
+        0, p.retFuente, 'Retención en la fuente por pagar'));
+    }
+    if (p.retIVA > 0) {
+      lineas.push(buildLinea(cuentas, CUENTA_RET_IVA,
+        0, p.retIVA, 'Retención de IVA por pagar'));
+    }
+
+    return await createAsiento({
+      fecha:          p.fecha,
+      concepto:       `Retención emitida a ${p.proveedorNombre}`,
+      tipo:           'manual',
+      referenciaId:   p.retencionId,
+      referenciaTipo: 'retencion_emitida',
+      lineas,
+      totalDebe:      lineas.reduce((s, l) => s + l.debe,  0),
+      totalHaber:     lineas.reduce((s, l) => s + l.haber, 0),
+      estado:         'confirmado',
+      bloqueado:      false,
+      editadoManualmente: false,
+      usuarioId:      p.usuarioId,
+      usuarioNombre:  p.usuarioNombre,
+      createdAt:      new Date(),
+    });
+  } catch { return null; }
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// DEPRECIACIÓN ACTIVO FIJO
+// ─────────────────────────────────────────────────────────────────────────
+
+interface ParamsDepreciacion extends ParamsBase {
+  activoId:            string;
+  activoDescripcion:   string;
+  fecha:               Date;
+  cuota:               number;
+  cuentaActivoCodigo:  string;
+  cuentaDepAcumCodigo: string;
+  cuentaGastoDepCodigo:string;
+}
+
+export async function crearAsientoDepreciacion(p: ParamsDepreciacion): Promise<string | null> {
+  try {
+    const cuentas = await getCuentasCached();
+
+    const lineas: AsientoLinea[] = [
+      buildLinea(cuentas, p.cuentaGastoDepCodigo, p.cuota, 0,
+        `Gasto depreciación ${p.activoDescripcion}`),
+      buildLinea(cuentas, p.cuentaDepAcumCodigo, 0, p.cuota,
+        `Dep. acumulada ${p.activoDescripcion}`),
+    ];
+
+    return await createAsiento({
+      fecha:          p.fecha,
+      concepto:       `Depreciación ${p.activoDescripcion}`,
+      tipo:           'manual',
+      referenciaId:   p.activoId,
+      referenciaTipo: 'activo_fijo',
+      lineas,
+      totalDebe:      p.cuota,
+      totalHaber:     p.cuota,
+      estado:         'confirmado',
+      bloqueado:      false,
+      editadoManualmente: false,
+      usuarioId:      p.usuarioId,
+      usuarioNombre:  p.usuarioNombre,
+      createdAt:      new Date(),
+    });
+  } catch { return null; }
+}
+
+// ─────────────────────────────────────────────────────────────────────────
 // AJUSTE DE INVENTARIO
 // ─────────────────────────────────────────────────────────────────────────
 

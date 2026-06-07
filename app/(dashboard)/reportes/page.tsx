@@ -20,9 +20,11 @@ import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from '@/components/ui/table';
 
-import { Venta, Producto } from '@/types';
-import { subscribeToVentas }   from '@/lib/firebase/ventas';
-import { subscribeToProductos } from '@/lib/firebase/productos';
+import { Venta, Producto, Entrada, FacturaProveedor } from '@/types';
+import { subscribeToVentas }           from '@/lib/firebase/ventas';
+import { subscribeToProductos }        from '@/lib/firebase/productos';
+import { subscribeToEntradas }         from '@/lib/firebase/entradas';
+import { subscribeToFacturasProveedor }from '@/lib/firebase/facturas-proveedor';
 
 // ─── Colores ────────────────────────────────────────────────────────────────
 const COLORS = ['#1A3C5E', '#2E75B6', '#00A896', '#F59E0B', '#EF4444', '#8B5CF6'];
@@ -41,6 +43,8 @@ const PRESETS = [
 export default function ReportesPage() {
   const [ventas,    setVentas]    = useState<Venta[]>([]);
   const [productos, setProductos] = useState<Producto[]>([]);
+  const [entradas,  setEntradas]  = useState<Entrada[]>([]);
+  const [facturasP, setFacturasP] = useState<FacturaProveedor[]>([]);
   const [loading,   setLoading]   = useState(true);
   const [dateFrom,  setDateFrom]  = useState(format(startOfMonth(new Date()), 'yyyy-MM-dd'));
   const [dateTo,    setDateTo]    = useState(format(new Date(), 'yyyy-MM-dd'));
@@ -49,7 +53,9 @@ export default function ReportesPage() {
   useEffect(() => {
     const u1 = subscribeToVentas((d) => { setVentas(d); setLoading(false); });
     const u2 = subscribeToProductos(setProductos);
-    return () => { u1(); u2(); };
+    const u3 = subscribeToEntradas(setEntradas);
+    const u4 = subscribeToFacturasProveedor(setFacturasP);
+    return () => { u1(); u2(); u3(); u4(); };
   }, []);
 
   const applyPreset = (p: typeof PRESETS[0]) => {
@@ -190,6 +196,68 @@ export default function ReportesPage() {
     XLSX.writeFile(wb, `reporte_ganancias_${dateFrom}_${dateTo}.xlsx`);
   };
 
+  // ── Compras por proveedor ──
+  const comprasPorProveedor = useMemo(() => {
+    const from = new Date(dateFrom + 'T00:00:00');
+    const to   = new Date(dateTo   + 'T23:59:59');
+    const map  = new Map<string, { nombre: string; total: number; facturas: number }>();
+    facturasP.forEach(f => {
+      const fecha = (f.createdAt as any)?.toDate?.() ?? new Date(f.createdAt);
+      if (fecha < from || fecha > to) return;
+      const prev = map.get(f.proveedorId) ?? { nombre: f.proveedorNombre, total: 0, facturas: 0 };
+      map.set(f.proveedorId, { nombre: f.proveedorNombre, total: prev.total + f.total, facturas: prev.facturas + 1 });
+    });
+    return Array.from(map.values()).sort((a, b) => b.total - a.total);
+  }, [facturasP, dateFrom, dateTo]);
+
+  // ── Ventas por cliente ──
+  const ventasPorCliente = useMemo(() => {
+    const map = new Map<string, { nombre: string; identificacion: string; total: number; ganancia: number; compras: number }>();
+    ventasFiltradas.forEach(v => {
+      const prev = map.get(v.clienteId) ?? { nombre: v.clienteNombre, identificacion: v.clienteIdentificacion, total: 0, ganancia: 0, compras: 0 };
+      map.set(v.clienteId, { ...prev, total: prev.total + v.total, ganancia: prev.ganancia + v.gananciaTotal, compras: prev.compras + 1 });
+    });
+    return Array.from(map.values()).sort((a, b) => b.total - a.total);
+  }, [ventasFiltradas]);
+
+  // ── Ventas por vendedor ──
+  const ventasPorVendedor = useMemo(() => {
+    const map = new Map<string, { nombre: string; total: number; ganancia: number; compras: number }>();
+    ventasFiltradas.forEach(v => {
+      const prev = map.get(v.usuarioId) ?? { nombre: v.usuarioNombre, total: 0, ganancia: 0, compras: 0 };
+      map.set(v.usuarioId, { ...prev, total: prev.total + v.total, ganancia: prev.ganancia + v.gananciaTotal, compras: prev.compras + 1 });
+    });
+    return Array.from(map.values()).sort((a, b) => b.total - a.total);
+  }, [ventasFiltradas]);
+
+  const exportCompras = () => {
+    const rows = comprasPorProveedor.map(p => ({
+      Proveedor: p.nombre, Facturas: p.facturas, TotalCompras: p.total,
+    }));
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(rows), 'Compras');
+    XLSX.writeFile(wb, `reporte_compras_${dateFrom}_${dateTo}.xlsx`);
+  };
+
+  const exportClientes = () => {
+    const rows = ventasPorCliente.map(c => ({
+      Cliente: c.nombre, Identificacion: c.identificacion,
+      NumVentas: c.compras, TotalVentas: c.total, Ganancia: c.ganancia,
+    }));
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(rows), 'Clientes');
+    XLSX.writeFile(wb, `reporte_clientes_${dateFrom}_${dateTo}.xlsx`);
+  };
+
+  const exportVendedores = () => {
+    const rows = ventasPorVendedor.map(v => ({
+      Vendedor: v.nombre, NumVentas: v.compras, TotalVentas: v.total, Ganancia: v.ganancia,
+    }));
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(rows), 'Vendedores');
+    XLSX.writeFile(wb, `reporte_vendedores_${dateFrom}_${dateTo}.xlsx`);
+  };
+
   return (
     <div className="space-y-5">
       <PageHeader title="Reportes" description="Análisis de ventas, inventario y rentabilidad" />
@@ -229,11 +297,14 @@ export default function ReportesPage() {
       </div>
 
       <Tabs defaultValue="resumen">
-        <TabsList className="grid grid-cols-4 w-full max-w-lg">
+        <TabsList className="flex flex-wrap gap-1 h-auto w-full max-w-3xl">
           <TabsTrigger value="resumen">📊 Resumen</TabsTrigger>
           <TabsTrigger value="ventas">💰 Ventas</TabsTrigger>
           <TabsTrigger value="inventario">📦 Inventario</TabsTrigger>
           <TabsTrigger value="ganancias">📈 Ganancias</TabsTrigger>
+          <TabsTrigger value="compras">🛒 Compras</TabsTrigger>
+          <TabsTrigger value="clientes">👥 Clientes</TabsTrigger>
+          <TabsTrigger value="vendedores">👤 Vendedores</TabsTrigger>
         </TabsList>
 
         {/* ══ TAB RESUMEN ══════════════════════════════════════════════════ */}
@@ -610,6 +681,172 @@ export default function ReportesPage() {
             </Table>
           </div>
         </TabsContent>
+
+        {/* ══ TAB COMPRAS ══════════════════════════════════════════════════ */}
+        <TabsContent value="compras" className="mt-4 space-y-4">
+          <div className="flex justify-between items-center">
+            <p className="text-sm text-slate-500">
+              {comprasPorProveedor.length} proveedores —
+              Total: <span className="font-bold text-slate-800">
+                {currency(comprasPorProveedor.reduce((s, p) => s + p.total, 0))}
+              </span>
+            </p>
+            <Button variant="outline" size="sm" onClick={exportCompras} disabled={comprasPorProveedor.length === 0}>
+              <Download className="mr-2 h-4 w-4" /> Exportar Excel
+            </Button>
+          </div>
+          <div className="bg-white rounded-xl border overflow-hidden">
+            <Table>
+              <TableHeader>
+                <TableRow className="bg-slate-50">
+                  <TableHead>#</TableHead>
+                  <TableHead>Proveedor</TableHead>
+                  <TableHead className="text-center">N° Facturas</TableHead>
+                  <TableHead className="text-right">Total compras</TableHead>
+                  <TableHead className="text-right">Participación</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {comprasPorProveedor.length === 0 ? (
+                  <TableRow>
+                    <TableCell colSpan={5} className="text-center py-10 text-slate-400">
+                      No hay compras en el período.
+                    </TableCell>
+                  </TableRow>
+                ) : (() => {
+                  const totalCompras = comprasPorProveedor.reduce((s, p) => s + p.total, 0);
+                  return comprasPorProveedor.map((p, i) => (
+                    <TableRow key={i}>
+                      <TableCell className="text-sm text-slate-400">{i + 1}</TableCell>
+                      <TableCell className="font-medium">{p.nombre}</TableCell>
+                      <TableCell className="text-center">
+                        <Badge variant="outline">{p.facturas}</Badge>
+                      </TableCell>
+                      <TableCell className="text-right font-semibold">{currency(p.total)}</TableCell>
+                      <TableCell className="text-right">
+                        <span className="text-xs text-slate-500">
+                          {totalCompras > 0 ? ((p.total / totalCompras) * 100).toFixed(1) : 0}%
+                        </span>
+                      </TableCell>
+                    </TableRow>
+                  ));
+                })()}
+              </TableBody>
+            </Table>
+          </div>
+        </TabsContent>
+
+        {/* ══ TAB CLIENTES ═════════════════════════════════════════════════ */}
+        <TabsContent value="clientes" className="mt-4 space-y-4">
+          <div className="flex justify-between items-center">
+            <p className="text-sm text-slate-500">
+              {ventasPorCliente.length} clientes en el período
+            </p>
+            <Button variant="outline" size="sm" onClick={exportClientes} disabled={ventasPorCliente.length === 0}>
+              <Download className="mr-2 h-4 w-4" /> Exportar Excel
+            </Button>
+          </div>
+          <div className="bg-white rounded-xl border overflow-hidden">
+            <Table>
+              <TableHeader>
+                <TableRow className="bg-slate-50">
+                  <TableHead>#</TableHead>
+                  <TableHead>Cliente</TableHead>
+                  <TableHead className="text-center">N° Compras</TableHead>
+                  <TableHead className="text-right">Total ventas</TableHead>
+                  <TableHead className="text-right">Ganancia</TableHead>
+                  <TableHead className="text-center">Margen</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {ventasPorCliente.length === 0 ? (
+                  <TableRow>
+                    <TableCell colSpan={6} className="text-center py-10 text-slate-400">
+                      No hay ventas en el período.
+                    </TableCell>
+                  </TableRow>
+                ) : ventasPorCliente.map((c, i) => {
+                  const margen = c.total > 0 ? (c.ganancia / c.total) * 100 : 0;
+                  return (
+                    <TableRow key={i}>
+                      <TableCell className="text-sm text-slate-400">{i + 1}</TableCell>
+                      <TableCell>
+                        <p className="font-medium text-sm">{c.nombre}</p>
+                        <p className="text-xs text-slate-400">{c.identificacion}</p>
+                      </TableCell>
+                      <TableCell className="text-center">
+                        <Badge variant="outline">{c.compras}</Badge>
+                      </TableCell>
+                      <TableCell className="text-right font-semibold">{currency(c.total)}</TableCell>
+                      <TableCell className="text-right">
+                        <span className="text-green-600 font-semibold text-sm">{currency(c.ganancia)}</span>
+                      </TableCell>
+                      <TableCell className="text-center">
+                        <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${
+                          margen >= 30 ? 'bg-green-100 text-green-700' :
+                          margen >= 10 ? 'bg-yellow-100 text-yellow-700' :
+                          'bg-red-100 text-red-700'}`}>
+                          {margen.toFixed(1)}%
+                        </span>
+                      </TableCell>
+                    </TableRow>
+                  );
+                })}
+              </TableBody>
+            </Table>
+          </div>
+        </TabsContent>
+
+        {/* ══ TAB VENDEDORES ═══════════════════════════════════════════════ */}
+        <TabsContent value="vendedores" className="mt-4 space-y-4">
+          <div className="flex justify-between items-center">
+            <p className="text-sm text-slate-500">
+              {ventasPorVendedor.length} vendedores en el período
+            </p>
+            <Button variant="outline" size="sm" onClick={exportVendedores} disabled={ventasPorVendedor.length === 0}>
+              <Download className="mr-2 h-4 w-4" /> Exportar Excel
+            </Button>
+          </div>
+          <div className="bg-white rounded-xl border overflow-hidden">
+            <Table>
+              <TableHeader>
+                <TableRow className="bg-slate-50">
+                  <TableHead>#</TableHead>
+                  <TableHead>Vendedor</TableHead>
+                  <TableHead className="text-center">N° Ventas</TableHead>
+                  <TableHead className="text-right">Total ventas</TableHead>
+                  <TableHead className="text-right">Ganancia generada</TableHead>
+                  <TableHead className="text-right">Ticket promedio</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {ventasPorVendedor.length === 0 ? (
+                  <TableRow>
+                    <TableCell colSpan={6} className="text-center py-10 text-slate-400">
+                      No hay ventas en el período.
+                    </TableCell>
+                  </TableRow>
+                ) : ventasPorVendedor.map((v, i) => (
+                  <TableRow key={i}>
+                    <TableCell className="text-sm text-slate-400">{i + 1}</TableCell>
+                    <TableCell className="font-medium">{v.nombre}</TableCell>
+                    <TableCell className="text-center">
+                      <Badge variant="outline">{v.compras}</Badge>
+                    </TableCell>
+                    <TableCell className="text-right font-semibold">{currency(v.total)}</TableCell>
+                    <TableCell className="text-right text-green-600 font-semibold">
+                      {currency(v.ganancia)}
+                    </TableCell>
+                    <TableCell className="text-right text-slate-500">
+                      {v.compras > 0 ? currency(v.total / v.compras) : '—'}
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </div>
+        </TabsContent>
+
       </Tabs>
     </div>
   );

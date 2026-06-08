@@ -18,9 +18,9 @@ function c14n(xml: string): string {
 }
 
 function sha1b64(input: string): string {
-  return forge.util.encode64(
-    forge.md.sha1.create().update(input).digest().getBytes()
-  );
+  const md = forge.md.sha1.create();
+  md.update(input, 'utf8');
+  return forge.util.encode64(md.digest().getBytes());
 }
 
 /**
@@ -84,16 +84,18 @@ export function firmarXML(
     const signingTime = new Date().toISOString().replace(/\.\d{3}Z$/, '+00:00');
 
     // ── SignedProperties ──────────────────────────────────────────────────
+    // IMPORTANT: namespace order must be alphabetical by prefix (ds < xades) per C14N spec.
+    // Self-closing tags must be expanded (<elem/> → <elem></elem>) per C14N spec.
     const signedPropsXML = [
-      `<xades:SignedProperties xmlns:xades="http://uri.etsi.org/01903/v1.3.2#"`,
-        ` xmlns:ds="http://www.w3.org/2000/09/xmldsig#"`,
+      `<xades:SignedProperties xmlns:ds="http://www.w3.org/2000/09/xmldsig#"`,
+        ` xmlns:xades="http://uri.etsi.org/01903/v1.3.2#"`,
         ` Id="${spId}">`,
         `<xades:SignedSignatureProperties>`,
           `<xades:SigningTime>${signingTime}</xades:SigningTime>`,
           `<xades:SigningCertificate>`,
             `<xades:Cert>`,
               `<xades:CertDigest>`,
-                `<ds:DigestMethod Algorithm="http://www.w3.org/2000/09/xmldsig#sha1"/>`,
+                `<ds:DigestMethod Algorithm="http://www.w3.org/2000/09/xmldsig#sha1"></ds:DigestMethod>`,
                 `<ds:DigestValue>${certDigest}</ds:DigestValue>`,
               `</xades:CertDigest>`,
               `<xades:IssuerSerial>`,
@@ -116,25 +118,24 @@ export function firmarXML(
     const spDigest  = sha1b64(c14n(signedPropsXML));
 
     // ── SignedInfo ────────────────────────────────────────────────────────
+    // All self-closing tags expanded per C14N spec (empty elements become open+close pairs).
     const signedInfoXML = [
       `<ds:SignedInfo xmlns:ds="http://www.w3.org/2000/09/xmldsig#">`,
-        `<ds:CanonicalizationMethod Algorithm="http://www.w3.org/TR/2001/REC-xml-c14n-20010315"/>`,
-        `<ds:SignatureMethod Algorithm="http://www.w3.org/2000/09/xmldsig#rsa-sha1"/>`,
-        // Reference 1: al documento (enveloped-signature + exc-c14n)
+        `<ds:CanonicalizationMethod Algorithm="http://www.w3.org/TR/2001/REC-xml-c14n-20010315"></ds:CanonicalizationMethod>`,
+        `<ds:SignatureMethod Algorithm="http://www.w3.org/2000/09/xmldsig#rsa-sha1"></ds:SignatureMethod>`,
         `<ds:Reference Id="${refDocId}" URI="#comprobante">`,
           `<ds:Transforms>`,
-            `<ds:Transform Algorithm="http://www.w3.org/2000/09/xmldsig#enveloped-signature"/>`,
-            `<ds:Transform Algorithm="http://www.w3.org/2001/10/xml-exc-c14n#"/>`,
+            `<ds:Transform Algorithm="http://www.w3.org/2000/09/xmldsig#enveloped-signature"></ds:Transform>`,
+            `<ds:Transform Algorithm="http://www.w3.org/2001/10/xml-exc-c14n#"></ds:Transform>`,
           `</ds:Transforms>`,
-          `<ds:DigestMethod Algorithm="http://www.w3.org/2000/09/xmldsig#sha1"/>`,
+          `<ds:DigestMethod Algorithm="http://www.w3.org/2000/09/xmldsig#sha1"></ds:DigestMethod>`,
           `<ds:DigestValue>${xmlDigest}</ds:DigestValue>`,
         `</ds:Reference>`,
-        // Reference 2: a las SignedProperties (c14n)
         `<ds:Reference Id="${refSpId}" Type="http://uri.etsi.org/01903#SignedProperties" URI="#${spId}">`,
           `<ds:Transforms>`,
-            `<ds:Transform Algorithm="http://www.w3.org/TR/2001/REC-xml-c14n-20010315"/>`,
+            `<ds:Transform Algorithm="http://www.w3.org/TR/2001/REC-xml-c14n-20010315"></ds:Transform>`,
           `</ds:Transforms>`,
-          `<ds:DigestMethod Algorithm="http://www.w3.org/2000/09/xmldsig#sha1"/>`,
+          `<ds:DigestMethod Algorithm="http://www.w3.org/2000/09/xmldsig#sha1"></ds:DigestMethod>`,
           `<ds:DigestValue>${spDigest}</ds:DigestValue>`,
         `</ds:Reference>`,
       `</ds:SignedInfo>`,
@@ -143,7 +144,7 @@ export function firmarXML(
     // ── Firmar SignedInfo canonicalizado ──────────────────────────────────
     const signedInfoC14N = c14n(signedInfoXML);
     const md = forge.md.sha1.create();
-    md.update(signedInfoC14N);
+    md.update(signedInfoC14N, 'utf8');
     const sigValue = forge.util.encode64((privateKey as any).sign(md));
 
     // ── Bloque Signature completo ─────────────────────────────────────────
@@ -168,7 +169,7 @@ export function firmarXML(
                 `<xades:SigningCertificate>`,
                   `<xades:Cert>`,
                     `<xades:CertDigest>`,
-                      `<ds:DigestMethod Algorithm="http://www.w3.org/2000/09/xmldsig#sha1"/>`,
+                      `<ds:DigestMethod Algorithm="http://www.w3.org/2000/09/xmldsig#sha1"></ds:DigestMethod>`,
                       `<ds:DigestValue>${certDigest}</ds:DigestValue>`,
                     `</xades:CertDigest>`,
                     `<xades:IssuerSerial>`,

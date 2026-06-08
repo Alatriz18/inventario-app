@@ -2,7 +2,7 @@
 
 import { useEffect, useState, Suspense } from 'react';
 import { toast } from 'sonner';
-import { FileText, Loader2, CheckCircle, XCircle } from 'lucide-react';
+import { FileText, Loader2, CheckCircle, XCircle, Bug } from 'lucide-react';
 import { format } from 'date-fns';
 import { useSearchParams } from 'next/navigation';
 import PageHeader  from '@/components/shared/PageHeader';
@@ -42,8 +42,10 @@ function EmitirComprobanteInner() {
   const [ventaId,  setVentaId]  = useState('');
   const [tipo,     setTipo]     = useState<'factura' | 'nota_venta'>('factura');
   const [loading,  setLoading]  = useState(true);
-  const [procesando, setProcesando] = useState(false);
-  const [resultado,  setResultado]  = useState<any>(null);
+  const [procesando,   setProcesando]   = useState(false);
+  const [resultado,    setResultado]    = useState<any>(null);
+  const [diagnostico,  setDiagnostico]  = useState<any>(null);
+  const [diagLoading,  setDiagLoading]  = useState(false);
 
   // Solo ventas completadas sin comprobante
   const ventasSinComp = ventas.filter(
@@ -239,6 +241,58 @@ function EmitirComprobanteInner() {
     }
   };
 
+  const diagnosticarFirma = async () => {
+    if (!ventaSeleccionada || !user) return;
+    setDiagLoading(true);
+    setDiagnostico(null);
+    try {
+      const config = await getConfigSRI();
+      if (!config?.certificadoP12) { toast.error('No hay certificado configurado'); return; }
+
+      const secuencial = tipo === 'factura'
+        ? (config.secuencialFactura ?? 1)
+        : (config.secuencialNotaVenta ?? 1);
+
+      const { generarClaveAcceso } = await import('@/lib/sri/clave-acceso');
+      const { generarXMLFactura }  = await import('@/lib/sri/generador-factura');
+      const claveAcceso = generarClaveAcceso({
+        fecha: new Date(), tipoComprobante: tipo === 'factura' ? '01' : '18',
+        ruc: config.ruc, ambiente: config.ambiente,
+        establecimiento: config.establecimiento, puntoEmision: config.puntoEmision, secuencial,
+      });
+      const tipoId = ventaSeleccionada.clienteIdentificacion === '9999999999999' ? '07'
+        : ventaSeleccionada.clienteIdentificacion.length === 13 ? '04' : '05';
+      const items = ventaSeleccionada.items.map(i => ({
+        codigoPrincipal: i.sku, descripcion: i.nombre, cantidad: i.cantidad,
+        precioUnitario: i.precioUnitario, descuento: 0,
+        precioTotalSinImpuesto: i.subtotal, tieneIVA: true, precioTotal: i.subtotal,
+      }));
+      const base = ventaSeleccionada.subtotal;
+      const iva  = base * 0.15;
+      const xml  = generarXMLFactura({
+        claveAcceso, secuencial, fechaEmision: new Date(), ambiente: config.ambiente,
+        ruc: config.ruc, razonSocial: config.razonSocial, nombreComercial: config.nombreComercial,
+        establecimiento: config.establecimiento, puntoEmision: config.puntoEmision,
+        direccionMatriz: config.direccionMatriz, contribuyenteEspecial: config.contribuyenteEspecial,
+        obligadoContabilidad: config.obligadoContabilidad,
+        tipoIdComprador: tipoId, identificacion: ventaSeleccionada.clienteIdentificacion,
+        razonSocialComprador: ventaSeleccionada.clienteNombre,
+        items, subtotal15: base, subtotal0: 0, totalDescuento: 0,
+        iva, total: ventaSeleccionada.total, formaPago: '01',
+      });
+
+      const res  = await fetch('/api/sri/debug-xml', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ xml, p12Base64: config.certificadoP12, password: config.certificadoPassword }),
+      });
+      setDiagnostico(await res.json());
+    } catch (e: any) {
+      toast.error('Error diagnóstico: ' + e.message);
+    } finally {
+      setDiagLoading(false);
+    }
+  };
+
   return (
     <div>
       <PageHeader
@@ -339,6 +393,38 @@ function EmitirComprobanteInner() {
                 ))}
               </div>
             )}
+          </div>
+        )}
+
+        {/* Botón diagnóstico */}
+        {ventaId && (
+          <Button variant="outline" className="w-full" onClick={diagnosticarFirma} disabled={diagLoading}>
+            {diagLoading
+              ? <><Loader2 className="mr-2 h-4 w-4 animate-spin" />Analizando...</>
+              : <><Bug className="mr-2 h-4 w-4" />Diagnosticar Firma (sin enviar al SRI)</>}
+          </Button>
+        )}
+
+        {/* Panel de diagnóstico */}
+        {diagnostico && (
+          <div className="rounded-xl border p-4 space-y-3 bg-slate-50 text-xs font-mono">
+            <p className="font-bold text-sm font-sans">
+              {diagnostico.problemas?.length === 0 ? '✅ Sin problemas detectados' : `❌ ${diagnostico.problemas?.length} problema(s)`}
+            </p>
+            {diagnostico.problemas?.map((p: string, i: number) => (
+              <p key={i} className="text-red-600">• {p}</p>
+            ))}
+            <div className="border-t pt-2 space-y-1 text-slate-600">
+              <p><strong>Cert CN:</strong> {diagnostico.certificado?.cn}</p>
+              <p><strong>RUC en cert:</strong> {diagnostico.certificado?.rucEnCert}</p>
+              <p><strong>RUC en XML:</strong> {diagnostico.xml?.rucEnXML}</p>
+              <p><strong>Razón social:</strong> {diagnostico.xml?.razonSocialEnXML}</p>
+              <p><strong>Cert vence:</strong> {diagnostico.certificado?.vence?.slice(0,10)}</p>
+              <p><strong>id="comprobante":</strong> {diagnostico.xml?.tieneIdComprobante ? '✅ Sí' : '❌ No'}</p>
+              <p><strong>Firma generada:</strong> {diagnostico.firma?.exito ? '✅ Sí' : `❌ ${diagnostico.firma?.error}`}</p>
+              <p><strong>ds:Signature presente:</strong> {diagnostico.firma?.tieneDsSignature ? '✅' : '❌'}</p>
+            </div>
+            <p className="text-slate-500 italic font-sans">{diagnostico.diagnostico}</p>
           </div>
         )}
 

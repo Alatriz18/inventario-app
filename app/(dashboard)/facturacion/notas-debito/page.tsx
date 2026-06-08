@@ -8,7 +8,6 @@ import { toast } from 'sonner';
 import PageHeader  from '@/components/shared/PageHeader';
 import { Button }  from '@/components/ui/button';
 import { Input }   from '@/components/ui/input';
-import { Badge }   from '@/components/ui/badge';
 import { Skeleton }from '@/components/ui/skeleton';
 import { Label }   from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -20,10 +19,9 @@ import {
 } from '@/components/ui/table';
 
 import { NotaDebito, RazonNotaDebito } from '@/types';
-import { subscribeToNotasDebito, createNotaDebito }from '@/lib/firebase/notas-debito';
-import { subscribeToComprobantes, Comprobante } from '@/lib/firebase/comprobantes';
+import { subscribeToNotasDebito, createNotaDebito } from '@/lib/firebase/notas-debito';
+import { subscribeToComprobantes, Comprobante }     from '@/lib/firebase/comprobantes';
 import { getConfigSRI, incrementarSecuencial }      from '@/lib/firebase/config-sri';
-import { getConfigEmpresa }                         from '@/lib/firebase/config-empresa';
 import { generarClaveAcceso }                       from '@/lib/sri/clave-acceso';
 import { generarXMLNotaDebito }                     from '@/lib/sri/generador-nota-debito';
 import { useAuth }                                  from '@/context/AuthContext';
@@ -79,7 +77,6 @@ export default function NotasDebitoPage() {
     setSaving(true);
     try {
       const configSRI = await getConfigSRI();
-      const configEmp = await getConfigEmpresa();
       if (!configSRI) throw new Error('Configure primero los datos SRI');
 
       const comp = comprobantes.find(c => c.id === compSel);
@@ -97,7 +94,10 @@ export default function NotasDebitoPage() {
         secuencial,
       });
 
-      const numeroND = `${configSRI.establecimiento.padStart(3,'0')}-${configSRI.puntoEmision.padStart(3,'0')}-${String(secuencial).padStart(9,'0')}`;
+      const secStr   = String(secuencial).padStart(9, '0');
+      const serie    = `${configSRI.establecimiento.padStart(3,'0')}-${configSRI.puntoEmision.padStart(3,'0')}`;
+      const numeroND = `${serie}-${secStr}`;
+      const numDocOrigen = `${comp.serie}-${comp.secuencial}`;
       const razonesNum: RazonNotaDebito[] = razones.map(r => ({
         descripcion: r.descripcion,
         valor:       parseFloat(r.valor) || 0,
@@ -106,6 +106,9 @@ export default function NotasDebitoPage() {
       const fechaOrigen = (comp.fechaEmision as any)?.toDate?.() ?? new Date(comp.fechaEmision);
       const iva = totalND * 0.15;
 
+      const tipoIdComp = comp.clienteIdentificacion === '9999999999999' ? '07'
+        : comp.clienteIdentificacion.length === 13 ? '04' : '05';
+
       const xml = generarXMLNotaDebito({
         claveAcceso,
         secuencial,
@@ -113,18 +116,17 @@ export default function NotasDebitoPage() {
         ambiente:    configSRI.ambiente,
         ruc:         configSRI.ruc,
         razonSocial: configSRI.razonSocial,
-        nombreComercial: configEmp?.nombreComercial,
         establecimiento: configSRI.establecimiento,
         puntoEmision:    configSRI.puntoEmision,
         direccionMatriz: configSRI.direccionMatriz,
         obligadoContabilidad: configSRI.obligadoContabilidad,
         contribuyenteEspecial: configSRI.contribuyenteEspecial,
         codDocModificado:    '01',
-        numDocModificado:    comp.secuencial,
+        numDocModificado:    numDocOrigen,
         fechaEmisionDocSustento: fechaOrigen,
-        tipoIdComprador:     '07',
-        identificacion:      '9999999999999',
-        razonSocialComprador:'Consumidor Final',
+        tipoIdComprador:     tipoIdComp,
+        identificacion:      comp.clienteIdentificacion,
+        razonSocialComprador:comp.clienteNombre,
         razones:             razonesNum,
         subtotal15:  totalND,
         subtotal0:   0,
@@ -146,16 +148,16 @@ export default function NotasDebitoPage() {
       const result = await resp.json();
 
       const estado: NotaDebito['estado'] =
-        result.autorizado ? 'autorizada' :
-        result.rechazado  ? 'rechazada'  : 'pendiente';
+        result.estado === 'AUTORIZADO' ? 'autorizada' :
+        result.estado === 'DEVUELTA'   ? 'rechazada'  : 'pendiente';
 
       await createNotaDebito({
         comprobanteOrigenId:     compSel,
-        numeroComprobanteOrigen: comp.secuencial,
+        numeroComprobanteOrigen: numDocOrigen,
         fechaEmisionOrigen:      fechaOrigen,
         clienteId:               '',
-        clienteNombre:           'Consumidor Final',
-        clienteIdentificacion:   '9999999999999',
+        clienteNombre:           comp.clienteNombre,
+        clienteIdentificacion:   comp.clienteIdentificacion,
         tipo:                    'nota_debito',
         secuencial:              numeroND,
         claveAcceso,
@@ -171,10 +173,12 @@ export default function NotasDebitoPage() {
         usuarioNombre:      user.nombre ?? user.email ?? 'Usuario',
       });
 
-      if (result.autorizado) {
-        toast.success(`Nota de débito ${numeroND} autorizada`);
+      if (estado === 'autorizada') {
+        toast.success(`Nota de Débito ${numeroND} autorizada por el SRI`);
+      } else if (estado === 'rechazada') {
+        toast.warning(`SRI rechazó la ND: ${result.mensajes?.join(', ') ?? ''}`);
       } else {
-        toast.info('Nota de débito guardada — ' + (result.mensajes?.join(', ') ?? ''));
+        toast.info(`ND guardada como pendiente — ${result.mensajes?.join(', ') ?? ''}`);
       }
 
       setDialogOpen(false);
@@ -204,11 +208,11 @@ export default function NotasDebitoPage() {
           <TableHeader>
             <TableRow className="bg-slate-50">
               <TableHead>N° Nota Débito</TableHead>
-              <TableHead>Comprobante origen</TableHead>
-              <TableHead>Fecha emisión</TableHead>
+              <TableHead>Factura origen</TableHead>
+              <TableHead>Cliente</TableHead>
+              <TableHead>Fecha</TableHead>
               <TableHead className="text-right">Total</TableHead>
               <TableHead className="text-center">Estado</TableHead>
-              <TableHead>N° Autorización</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -229,17 +233,15 @@ export default function NotasDebitoPage() {
               <TableRow key={n.id}>
                 <TableCell className="font-mono text-sm">{n.secuencial}</TableCell>
                 <TableCell className="text-sm text-slate-500">{n.numeroComprobanteOrigen}</TableCell>
+                <TableCell className="text-sm">{n.clienteNombre}</TableCell>
                 <TableCell className="text-sm text-slate-500">
                   {format((n.fechaEmision as any)?.toDate?.() ?? new Date(n.fechaEmision), 'dd/MM/yyyy')}
                 </TableCell>
-                <TableCell className="text-right font-semibold">{currency(n.total)}</TableCell>
+                <TableCell className="text-right font-bold">{currency(n.total)}</TableCell>
                 <TableCell className="text-center">
                   <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${BADGE_ESTADO[n.estado] ?? ''}`}>
                     {n.estado}
                   </span>
-                </TableCell>
-                <TableCell className="font-mono text-xs text-slate-400">
-                  {n.numeroAutorizacion ?? '—'}
                 </TableCell>
               </TableRow>
             ))}

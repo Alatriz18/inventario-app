@@ -2,13 +2,12 @@
 
 import { useEffect, useState, useMemo } from 'react';
 import { format } from 'date-fns';
-import { Plus, Send, Download, Eye, FileX } from 'lucide-react';
+import { Plus, Send, FileX, ChevronDown, ChevronUp } from 'lucide-react';
 import { toast } from 'sonner';
 
 import PageHeader  from '@/components/shared/PageHeader';
 import { Button }  from '@/components/ui/button';
 import { Input }   from '@/components/ui/input';
-import { Badge }   from '@/components/ui/badge';
 import { Skeleton }from '@/components/ui/skeleton';
 import { Label }   from '@/components/ui/label';
 import { Textarea }from '@/components/ui/textarea';
@@ -20,14 +19,15 @@ import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from '@/components/ui/table';
 
-import { NotaCredito, MotivoNotaCredito, ItemNotaCredito } from '@/types';
-import { subscribeToNotasCredito, createNotaCredito, updateNotaCredito } from '@/lib/firebase/notas-credito';
-import { subscribeToComprobantes, Comprobante } from '@/lib/firebase/comprobantes';
-import { getConfigSRI, incrementarSecuencial } from '@/lib/firebase/config-sri';
-import { getConfigEmpresa }         from '@/lib/firebase/config-empresa';
-import { generarClaveAcceso }       from '@/lib/sri/clave-acceso';
-import { generarXMLNotaCredito }    from '@/lib/sri/generador-nota-credito';
-import { useAuth }                  from '@/context/AuthContext';
+import { NotaCredito, MotivoNotaCredito, ItemNotaCredito, Venta } from '@/types';
+import { subscribeToNotasCredito, createNotaCredito } from '@/lib/firebase/notas-credito';
+import { subscribeToComprobantes, Comprobante }         from '@/lib/firebase/comprobantes';
+import { getVentaById }                                 from '@/lib/firebase/ventas';
+import { getConfigSRI, incrementarSecuencial }          from '@/lib/firebase/config-sri';
+import { generarClaveAcceso }                           from '@/lib/sri/clave-acceso';
+import { generarXMLNotaCredito }                        from '@/lib/sri/generador-nota-credito';
+import { crearAsientoNotaCredito }                      from '@/lib/contabilidad/motor-asientos';
+import { useAuth }                                      from '@/context/AuthContext';
 
 const currency = (v: number) => `$${v.toFixed(2)}`;
 
@@ -44,18 +44,32 @@ const BADGE_ESTADO: Record<string, string> = {
   rechazada:  'bg-red-100 text-red-700',
 };
 
+interface ItemNC {
+  productoId:   string;
+  sku:          string;
+  nombre:       string;
+  cantidadOrig: number;
+  cantidadNC:   number;
+  precioUnitario: number;
+  tieneIVA:     boolean;
+  subtotal:     number;
+}
+
 export default function NotasCreditoPage() {
   const { user } = useAuth();
   const [notas,        setNotas]        = useState<NotaCredito[]>([]);
   const [comprobantes, setComprobantes] = useState<Comprobante[]>([]);
   const [loading,      setLoading]      = useState(true);
+  const [expandedId,   setExpandedId]   = useState<string | null>(null);
 
   // Dialog crear
-  const [dialogOpen,   setDialogOpen]   = useState(false);
-  const [compSel,      setCompSel]      = useState<string>('');
-  const [motivo,       setMotivo]       = useState<MotivoNotaCredito>('devolucion');
-  const [descripMotivo,setDescripMotivo]= useState('');
-  const [saving,       setSaving]       = useState(false);
+  const [dialogOpen,    setDialogOpen]    = useState(false);
+  const [compSel,       setCompSel]       = useState('');
+  const [motivo,        setMotivo]        = useState<MotivoNotaCredito>('devolucion');
+  const [descripMotivo, setDescripMotivo] = useState('');
+  const [itemsNC,       setItemsNC]       = useState<ItemNC[]>([]);
+  const [loadingVenta,  setLoadingVenta]  = useState(false);
+  const [saving,        setSaving]        = useState(false);
 
   useEffect(() => {
     const u1 = subscribeToNotasCredito(d => { setNotas(d); setLoading(false); });
@@ -73,28 +87,69 @@ export default function NotasCreditoPage() {
     [comprobantes, compSel]
   );
 
+  // Al seleccionar un comprobante, cargar los ítems de la venta
+  const handleSelectComp = async (id: string) => {
+    setCompSel(id);
+    setItemsNC([]);
+    if (!id) return;
+    const comp = comprobantes.find(c => c.id === id);
+    if (!comp?.ventaId) return;
+    setLoadingVenta(true);
+    try {
+      const venta = await getVentaById(comp.ventaId);
+      if (!venta) return;
+      setItemsNC(venta.items.map(i => ({
+        productoId:     i.productoId,
+        sku:            i.sku,
+        nombre:         i.nombre,
+        cantidadOrig:   i.cantidad,
+        cantidadNC:     i.cantidad,
+        precioUnitario: i.precioUnitario,
+        tieneIVA:       true,
+        subtotal:       i.subtotal,
+      })));
+    } catch { toast.error('No se pudieron cargar los ítems'); }
+    finally { setLoadingVenta(false); }
+  };
+
+  const updateCantidad = (idx: number, val: number) => {
+    setItemsNC(prev => prev.map((it, i) => {
+      if (i !== idx) return it;
+      const cant = Math.max(0, Math.min(it.cantidadOrig, val));
+      return { ...it, cantidadNC: cant, subtotal: cant * it.precioUnitario };
+    }));
+  };
+
+  const totales = useMemo(() => {
+    const subtotal = itemsNC.reduce((s, i) => s + i.subtotal, 0);
+    const iva      = itemsNC.filter(i => i.tieneIVA).reduce((s, i) => s + i.subtotal * 0.15, 0);
+    return { subtotal, iva, total: subtotal + iva };
+  }, [itemsNC]);
+
   const resetDialog = () => {
     setCompSel('');
     setMotivo('devolucion');
     setDescripMotivo('');
+    setItemsNC([]);
   };
 
   const handleEmitir = async () => {
     if (!user) return;
-    if (!compSel) { toast.error('Selecciona el comprobante origen'); return; }
+    if (!compSel)             { toast.error('Selecciona el comprobante origen'); return; }
     if (!descripMotivo.trim()) { toast.error('Ingresa la descripción del motivo'); return; }
+    if (totales.total <= 0)    { toast.error('El monto de la NC no puede ser $0.00'); return; }
+
+    const comp = comprobantes.find(c => c.id === compSel);
+    if (!comp) return;
 
     setSaving(true);
     try {
       const configSRI = await getConfigSRI();
-      const configEmp = await getConfigEmpresa();
       if (!configSRI) throw new Error('Configure primero los datos SRI');
 
-      const comp = comprobantes.find(c => c.id === compSel);
-      if (!comp) throw new Error('Comprobante no encontrado');
-
-      const secuencial  = await incrementarSecuencial('secuencialNotaCredito');
-      const fechaEmision= new Date();
+      const secuencial   = await incrementarSecuencial('secuencialNotaCredito');
+      const fechaEmision = new Date();
+      const fechaOrigen  = (comp.fechaEmision as any)?.toDate?.() ?? new Date(comp.fechaEmision);
 
       const claveAcceso = generarClaveAcceso({
         fecha:           fechaEmision,
@@ -106,53 +161,56 @@ export default function NotasCreditoPage() {
         secuencial,
       });
 
-      const numeroNC = `${configSRI.establecimiento.padStart(3,'0')}-${configSRI.puntoEmision.padStart(3,'0')}-${String(secuencial).padStart(9,'0')}`;
+      const secStr  = String(secuencial).padStart(9, '0');
+      const serie   = `${configSRI.establecimiento.padStart(3,'0')}-${configSRI.puntoEmision.padStart(3,'0')}`;
+      const numeroNC = `${serie}-${secStr}`;
+      const numDocOrigen = `${comp.serie}-${comp.secuencial}`;
 
-      // Items: por simplicidad, un ítem genérico con el total de la factura original
-      // En producción se podría mostrar los ítems de la venta original
-      const items: ItemNotaCredito[] = [{
-        codigoPrincipal:       'NC',
-        descripcion:           descripMotivo,
-        cantidad:              1,
-        precioUnitario:        0,
-        descuento:             0,
-        precioTotalSinImpuesto:0,
-        tieneIVA:              false,
-      }];
+      // Ítems para el XML
+      const itemsXML: ItemNotaCredito[] = itemsNC
+        .filter(i => i.cantidadNC > 0)
+        .map(i => ({
+          codigoPrincipal:        i.sku,
+          descripcion:            i.nombre,
+          cantidad:               i.cantidadNC,
+          precioUnitario:         i.precioUnitario,
+          descuento:              0,
+          precioTotalSinImpuesto: i.subtotal,
+          tieneIVA:               i.tieneIVA,
+        }));
 
-      const fechaOrigen = (comp.fechaEmision as any)?.toDate?.() ?? new Date(comp.fechaEmision);
+      const subtotal15 = itemsNC.filter(i => i.tieneIVA).reduce((s, i) => s + i.subtotal, 0);
+      const subtotal0  = itemsNC.filter(i => !i.tieneIVA).reduce((s, i) => s + i.subtotal, 0);
 
-      const datosNC = {
+      const xml = generarXMLNotaCredito({
         claveAcceso,
         secuencial,
         fechaEmision,
-        ambiente:    configSRI.ambiente,
-        ruc:         configSRI.ruc,
-        razonSocial: configSRI.razonSocial,
-        nombreComercial: configEmp?.nombreComercial,
-        establecimiento: configSRI.establecimiento,
-        puntoEmision:    configSRI.puntoEmision,
-        direccionMatriz: configSRI.direccionMatriz,
-        obligadoContabilidad: configSRI.obligadoContabilidad,
-        contribuyenteEspecial: configSRI.contribuyenteEspecial,
-        codDocModificado: '01',
-        numDocModificado: comp.secuencial,
-        fechaEmisionDocSustento: fechaOrigen,
-        tipoIdComprador: '07',
-        identificacion:  '9999999999999',
-        razonSocialComprador: 'Consumidor Final',
-        motivo:          descripMotivo,
-        items,
-        subtotal15:  0,
-        subtotal0:   0,
-        totalDescuento: 0,
-        iva:         0,
-        total:       0,
-      };
+        ambiente:               configSRI.ambiente,
+        ruc:                    configSRI.ruc,
+        razonSocial:            configSRI.razonSocial,
+        establecimiento:        configSRI.establecimiento,
+        puntoEmision:           configSRI.puntoEmision,
+        direccionMatriz:        configSRI.direccionMatriz,
+        obligadoContabilidad:   configSRI.obligadoContabilidad,
+        contribuyenteEspecial:  configSRI.contribuyenteEspecial,
+        codDocModificado:       '01',
+        numDocModificado:       numDocOrigen,
+        fechaEmisionDocSustento:fechaOrigen,
+        tipoIdComprador:        comp.clienteIdentificacion === '9999999999999' ? '07' :
+                                comp.clienteIdentificacion.length === 13 ? '04' : '05',
+        identificacion:         comp.clienteIdentificacion,
+        razonSocialComprador:   comp.clienteNombre,
+        motivo:                 descripMotivo,
+        items:                  itemsXML,
+        subtotal15,
+        subtotal0,
+        totalDescuento:         0,
+        iva:                    totales.iva,
+        total:                  totales.total,
+      });
 
-      const xml = generarXMLNotaCredito(datosNC);
-
-      // Enviar a SRI usando la misma API de procesar
+      // Enviar al SRI
       const resp = await fetch('/api/sri/procesar', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -167,16 +225,16 @@ export default function NotasCreditoPage() {
       const result = await resp.json();
 
       const estado: NotaCredito['estado'] =
-        result.autorizado ? 'autorizada' :
-        result.rechazado  ? 'rechazada'  : 'pendiente';
+        result.estado === 'AUTORIZADO' ? 'autorizada' :
+        result.estado === 'DEVUELTA'   ? 'rechazada'  : 'pendiente';
 
       const ncData: Omit<NotaCredito, 'id' | 'createdAt'> = {
         comprobanteOrigenId:     compSel,
-        numeroComprobanteOrigen: comp.secuencial,
+        numeroComprobanteOrigen: numDocOrigen,
         fechaEmisionOrigen:      fechaOrigen,
         clienteId:               '',
-        clienteNombre:           'Consumidor Final',
-        clienteIdentificacion:   '9999999999999',
+        clienteNombre:           comp.clienteNombre,
+        clienteIdentificacion:   comp.clienteIdentificacion,
         tipo:                    'nota_credito',
         secuencial:              numeroNC,
         claveAcceso,
@@ -186,22 +244,36 @@ export default function NotasCreditoPage() {
         motivo,
         descripcionMotivo:       descripMotivo,
         fechaEmision,
-        items,
-        subtotal: 0,
-        iva:      0,
-        total:    0,
-        usuarioId:    user.uid,
-        usuarioNombre:user.nombre ?? user.email ?? 'Usuario',
+        items:                   itemsXML,
+        subtotal:                totales.subtotal,
+        iva:                     totales.iva,
+        total:                   totales.total,
+        xmlUrl:                  result.xmlFirmadoB64,
+        usuarioId:               user.uid,
+        usuarioNombre:           user.nombre ?? user.email ?? 'Usuario',
       };
 
-      await createNotaCredito(ncData);
+      const ncId = await createNotaCredito(ncData);
 
-      if (result.autorizado) {
-        toast.success(`Nota de crédito ${numeroNC} autorizada por SRI`);
-      } else if (result.rechazado) {
-        toast.warning(`SRI rechazó la nota de crédito: ${result.mensajes?.join(', ') ?? ''}`);
+      // Asiento contable (background)
+      crearAsientoNotaCredito({
+        notaCreditoId: ncId,
+        fecha:         fechaEmision,
+        clienteNombre: comp.clienteNombre,
+        tieneIVA:      subtotal15 > 0,
+        subtotal:      totales.subtotal,
+        iva:           totales.iva,
+        total:         totales.total,
+        usuarioId:     user.uid,
+        usuarioNombre: user.nombre ?? user.email ?? 'Usuario',
+      }).catch(() => {});
+
+      if (estado === 'autorizada') {
+        toast.success(`Nota de Crédito ${numeroNC} autorizada por el SRI`);
+      } else if (estado === 'rechazada') {
+        toast.warning(`SRI rechazó la NC: ${result.mensajes?.join(', ') ?? ''}`);
       } else {
-        toast.info('Nota de crédito guardada como pendiente');
+        toast.info(`NC guardada como pendiente — ${result.mensajes?.join(', ') ?? ''}`);
       }
 
       setDialogOpen(false);
@@ -230,45 +302,80 @@ export default function NotasCreditoPage() {
         <Table>
           <TableHeader>
             <TableRow className="bg-slate-50">
-              <TableHead>N° Nota Crédito</TableHead>
-              <TableHead>Comprobante origen</TableHead>
+              <TableHead>N° NC</TableHead>
+              <TableHead>Factura origen</TableHead>
+              <TableHead>Cliente</TableHead>
               <TableHead>Motivo</TableHead>
-              <TableHead>Fecha emisión</TableHead>
+              <TableHead className="text-right">Total</TableHead>
+              <TableHead>Fecha</TableHead>
               <TableHead className="text-center">Estado</TableHead>
-              <TableHead>N° Autorización</TableHead>
+              <TableHead />
             </TableRow>
           </TableHeader>
           <TableBody>
             {loading ? (
               Array.from({ length: 4 }).map((_, i) => (
-                <TableRow key={i}>{Array.from({ length: 6 }).map((_, j) => (
+                <TableRow key={i}>{Array.from({ length: 8 }).map((_, j) => (
                   <TableCell key={j}><Skeleton className="h-4 w-full" /></TableCell>
                 ))}</TableRow>
               ))
             ) : notas.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={6} className="text-center py-12 text-slate-400">
+                <TableCell colSpan={8} className="text-center py-12 text-slate-400">
                   <FileX className="h-10 w-10 mx-auto mb-2 opacity-30" />
                   No hay notas de crédito emitidas.
                 </TableCell>
               </TableRow>
             ) : notas.map(n => (
-              <TableRow key={n.id}>
-                <TableCell className="font-mono text-sm">{n.secuencial}</TableCell>
-                <TableCell className="text-sm text-slate-500">{n.numeroComprobanteOrigen}</TableCell>
-                <TableCell className="text-sm">{MOTIVOS.find(m => m.value === n.motivo)?.label ?? n.motivo}</TableCell>
-                <TableCell className="text-sm text-slate-500">
-                  {format((n.fechaEmision as any)?.toDate?.() ?? new Date(n.fechaEmision), 'dd/MM/yyyy')}
-                </TableCell>
-                <TableCell className="text-center">
-                  <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${BADGE_ESTADO[n.estado] ?? ''}`}>
-                    {n.estado}
-                  </span>
-                </TableCell>
-                <TableCell className="font-mono text-xs text-slate-400">
-                  {n.numeroAutorizacion ?? '—'}
-                </TableCell>
-              </TableRow>
+              <>
+                <TableRow key={n.id} className="cursor-pointer hover:bg-slate-50/50"
+                  onClick={() => setExpandedId(expandedId === n.id ? null : n.id)}>
+                  <TableCell className="font-mono text-sm">{n.secuencial}</TableCell>
+                  <TableCell className="text-sm text-slate-500">{n.numeroComprobanteOrigen}</TableCell>
+                  <TableCell className="text-sm">{n.clienteNombre}</TableCell>
+                  <TableCell className="text-sm">{MOTIVOS.find(m => m.value === n.motivo)?.label ?? n.motivo}</TableCell>
+                  <TableCell className="text-right font-semibold text-sm">{currency(n.total)}</TableCell>
+                  <TableCell className="text-sm text-slate-500">
+                    {format((n.fechaEmision as any)?.toDate?.() ?? new Date(n.fechaEmision), 'dd/MM/yyyy')}
+                  </TableCell>
+                  <TableCell className="text-center">
+                    <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${BADGE_ESTADO[n.estado] ?? ''}`}>
+                      {n.estado}
+                    </span>
+                  </TableCell>
+                  <TableCell>
+                    {expandedId === n.id
+                      ? <ChevronUp className="h-4 w-4 text-slate-400" />
+                      : <ChevronDown className="h-4 w-4 text-slate-400" />}
+                  </TableCell>
+                </TableRow>
+                {expandedId === n.id && (
+                  <TableRow key={`${n.id}-detail`}>
+                    <TableCell colSpan={8} className="bg-slate-50 p-4">
+                      <div className="space-y-2 text-xs text-slate-600">
+                        <p><strong>Motivo:</strong> {n.descripcionMotivo}</p>
+                        {n.numeroAutorizacion && (
+                          <p><strong>N° autorización:</strong> <span className="font-mono">{n.numeroAutorizacion}</span></p>
+                        )}
+                        <div className="grid grid-cols-3 gap-3 mt-2">
+                          <div className="bg-white rounded-lg p-2 border">
+                            <p className="text-slate-400">Subtotal</p>
+                            <p className="font-semibold">{currency(n.subtotal)}</p>
+                          </div>
+                          <div className="bg-white rounded-lg p-2 border">
+                            <p className="text-slate-400">IVA</p>
+                            <p className="font-semibold">{currency(n.iva)}</p>
+                          </div>
+                          <div className="bg-white rounded-lg p-2 border">
+                            <p className="text-slate-400">Total NC</p>
+                            <p className="font-bold text-red-600">{currency(n.total)}</p>
+                          </div>
+                        </div>
+                      </div>
+                    </TableCell>
+                  </TableRow>
+                )}
+              </>
             ))}
           </TableBody>
         </Table>
@@ -276,64 +383,125 @@ export default function NotasCreditoPage() {
 
       {/* Dialog emitir */}
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
-        <DialogContent className="max-w-lg">
+        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>Emitir Nota de Crédito</DialogTitle>
           </DialogHeader>
           <div className="space-y-4">
+
+            {/* Factura origen */}
             <div>
-              <Label>Comprobante origen (factura autorizada) *</Label>
-              <Select value={compSel} onValueChange={setCompSel}>
+              <Label>Factura origen (autorizada) *</Label>
+              <Select value={compSel} onValueChange={handleSelectComp}>
                 <SelectTrigger className="mt-1">
                   <SelectValue placeholder="Seleccionar factura…" />
                 </SelectTrigger>
                 <SelectContent>
                   {compAutorizados.map(c => (
                     <SelectItem key={c.id} value={c.id}>
-                      {c.secuencial} — {format((c.fechaEmision as any)?.toDate?.() ?? new Date(c.fechaEmision), 'dd/MM/yyyy')}
+                      {c.serie}-{c.secuencial} — {c.clienteNombre} —{' '}
+                      {format((c.fechaEmision as any)?.toDate?.() ?? new Date(c.fechaEmision), 'dd/MM/yyyy')}
                     </SelectItem>
                   ))}
                 </SelectContent>
               </Select>
             </div>
-            <div>
-              <Label>Motivo *</Label>
-              <Select value={motivo} onValueChange={v => setMotivo(v as MotivoNotaCredito)}>
-                <SelectTrigger className="mt-1">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {MOTIVOS.map(m => (
-                    <SelectItem key={m.value} value={m.value}>{m.label}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-            <div>
-              <Label>Descripción del motivo *</Label>
-              <Textarea
-                value={descripMotivo}
-                onChange={e => setDescripMotivo(e.target.value)}
-                placeholder="Ej: Devolución de 5 unidades de Producto X por defecto de fabricación"
-                className="mt-1 resize-none"
-                rows={3}
-              />
-            </div>
+
+            {/* Info cliente */}
             {compSelObj && (
-              <div className="bg-slate-50 rounded-lg p-3 text-xs text-slate-500 space-y-1">
-                <p>Comprobante: <strong className="text-slate-700">{compSelObj.secuencial}</strong></p>
-                <p>Fecha: <strong className="text-slate-700">
-                  {format((compSelObj.fechaEmision as any)?.toDate?.() ?? new Date(compSelObj.fechaEmision), 'dd/MM/yyyy')}
-                </strong></p>
-                <p className="text-yellow-600 font-medium mt-2">
-                  La NC se enviará al SRI con monto $0.00. Para NC con monto, registra los ítems manualmente.
-                </p>
+              <div className="bg-blue-50 rounded-lg px-3 py-2 text-xs text-blue-700 flex gap-4">
+                <span><strong>Cliente:</strong> {compSelObj.clienteNombre}</span>
+                <span><strong>ID:</strong> {compSelObj.clienteIdentificacion}</span>
+                <span><strong>Total factura:</strong> {currency(compSelObj.total)}</span>
+              </div>
+            )}
+
+            {/* Motivo */}
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <Label>Motivo *</Label>
+                <Select value={motivo} onValueChange={v => setMotivo(v as MotivoNotaCredito)}>
+                  <SelectTrigger className="mt-1"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    {MOTIVOS.map(m => (
+                      <SelectItem key={m.value} value={m.value}>{m.label}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div>
+                <Label>Descripción *</Label>
+                <Textarea value={descripMotivo} onChange={e => setDescripMotivo(e.target.value)}
+                  placeholder="Ej: Devolución por defecto de fabricación"
+                  className="mt-1 resize-none h-10 text-sm" rows={1} />
+              </div>
+            </div>
+
+            {/* Ítems */}
+            {loadingVenta ? (
+              <div className="text-sm text-slate-400 py-4 text-center">Cargando ítems de la factura...</div>
+            ) : itemsNC.length > 0 && (
+              <div>
+                <Label className="mb-2 block">Ítems a incluir en la NC</Label>
+                <div className="border rounded-lg overflow-hidden">
+                  <table className="w-full text-xs">
+                    <thead className="bg-slate-50">
+                      <tr>
+                        <th className="text-left px-3 py-2 font-medium text-slate-500">Producto</th>
+                        <th className="text-center px-2 py-2 font-medium text-slate-500 w-20">Cant. orig.</th>
+                        <th className="text-center px-2 py-2 font-medium text-slate-500 w-24">Cant. NC</th>
+                        <th className="text-right px-3 py-2 font-medium text-slate-500 w-24">Subtotal</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {itemsNC.map((it, idx) => (
+                        <tr key={idx} className="border-t">
+                          <td className="px-3 py-2">
+                            <p className="font-medium">{it.nombre}</p>
+                            <p className="text-slate-400">{it.sku} · {currency(it.precioUnitario)}/u</p>
+                          </td>
+                          <td className="text-center px-2 py-2 text-slate-400">{it.cantidadOrig}</td>
+                          <td className="px-2 py-2">
+                            <Input
+                              type="number" min="0" max={it.cantidadOrig} step="1"
+                              value={it.cantidadNC}
+                              onChange={e => updateCantidad(idx, Number(e.target.value))}
+                              className="h-7 text-center text-xs w-20 mx-auto"
+                            />
+                          </td>
+                          <td className="text-right px-3 py-2 font-semibold">
+                            {currency(it.subtotal)}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+
+            {/* Totales */}
+            {itemsNC.length > 0 && (
+              <div className="bg-slate-50 rounded-lg p-3 space-y-1 text-sm">
+                <div className="flex justify-between text-slate-500">
+                  <span>Subtotal sin IVA</span>
+                  <span>{currency(totales.subtotal)}</span>
+                </div>
+                <div className="flex justify-between text-slate-500">
+                  <span>IVA 15%</span>
+                  <span>{currency(totales.iva)}</span>
+                </div>
+                <div className="flex justify-between font-bold text-base border-t pt-1">
+                  <span>Total NC</span>
+                  <span className="text-red-600">{currency(totales.total)}</span>
+                </div>
               </div>
             )}
           </div>
+
           <DialogFooter>
             <Button variant="outline" onClick={() => setDialogOpen(false)}>Cancelar</Button>
-            <Button onClick={handleEmitir} disabled={saving}>
+            <Button onClick={handleEmitir} disabled={saving || totales.total <= 0}>
               <Send className="mr-2 h-4 w-4" />
               {saving ? 'Enviando…' : 'Emitir y enviar al SRI'}
             </Button>

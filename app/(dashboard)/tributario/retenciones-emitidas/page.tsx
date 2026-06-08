@@ -175,8 +175,8 @@ export default function RetencionesEmitidasPage() {
       const result = await resp.json();
 
       const estado: RetencionEmitida['estado'] =
-        result.autorizado ? 'autorizado' :
-        result.rechazado  ? 'rechazado'  : 'pendiente';
+        result.estado === 'AUTORIZADO' ? 'autorizado' :
+        result.estado === 'DEVUELTA'   ? 'rechazado'  : 'pendiente';
 
       const retFuente = lineasXML
         .filter(l => l.tipo === 'fuente_ir')
@@ -227,8 +227,10 @@ export default function RetencionesEmitidasPage() {
         usuarioNombre:   user.nombre ?? user.email ?? 'Usuario',
       });
 
-      if (result.autorizado) {
+      if (estado === 'autorizado') {
         toast.success(`Retención ${numeroRet} autorizada por SRI`);
+      } else if (estado === 'rechazado') {
+        toast.warning(`SRI rechazó: ${result.mensajes?.join(', ') ?? ''}`);
       } else {
         toast.info('Retención guardada — ' + (result.mensajes?.join(', ') ?? ''));
       }

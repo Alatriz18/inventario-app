@@ -62,7 +62,15 @@ export default function ConfiguracionSRIPage() {
   const [infoCert,      setInfoCert]      = useState<InfoCertificado | null>(null);
 
   const { register, handleSubmit, reset, setValue, getValues, formState: { errors } } =
-    useForm<ConfigForm>({ resolver: zodResolver(schema) });
+    useForm<ConfigForm>({
+      resolver: zodResolver(schema),
+      defaultValues: {
+        ambiente:             '1',
+        obligadoContabilidad: 'NO',
+        establecimiento:      '001',
+        puntoEmision:         '001',
+      },
+    });
 
   useEffect(() => {
     getConfigSRI().then(cfg => {
@@ -145,11 +153,22 @@ export default function ConfiguracionSRIPage() {
         secuencialGuia:        cfg?.secuencialGuia        ?? 1,
       });
       toast.success('Configuración guardada correctamente');
-    } catch {
-      toast.error('Error al guardar la configuración');
+    } catch (e: any) {
+      console.error('[ConfigSRI] Error al guardar:', e);
+      const msg = e?.code === 'permission-denied'
+        ? 'Sin permisos en Firestore — actualiza las reglas de seguridad en Firebase Console'
+        : (e?.message ?? 'Error al guardar la configuración');
+      toast.error(msg);
     } finally {
       setSaving(false);
     }
+  };
+
+  const onValidationError = (errs: Record<string, any>) => {
+    console.error('[ConfigSRI] Errores de validación:', errs);
+    const primer = Object.values(errs)[0];
+    const msg = primer?.message ?? 'Revisa los campos obligatorios';
+    toast.error(`Formulario incompleto: ${msg}`);
   };
 
   const fmtFecha = (iso?: string) => {
@@ -374,7 +393,7 @@ export default function ConfiguracionSRIPage() {
 
         <Button
           className="w-full h-12"
-          onClick={() => handleSubmit(onSubmit)()}
+          onClick={() => handleSubmit(onSubmit, onValidationError)()}
           disabled={saving}
         >
           <Save className="mr-2 h-4 w-4" />

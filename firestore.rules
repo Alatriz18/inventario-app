@@ -33,7 +33,26 @@ service cloud.firestore {
       allow write: if isAdmin();
     }
 
-    // Inventario
+    // ── Configuración del sistema ─────────────────────────────────────────
+
+    // config_sri contiene el certificado .p12 — lectura staff (para emitir), escritura solo admin
+    match /config_sri/{id} {
+      allow read: if isStaff();
+      allow write: if isAdmin();
+    }
+
+    match /config_empresa/{id} {
+      allow read: if isStaff();
+      allow write: if isAdmin();
+    }
+
+    match /config_contable/{id} {
+      allow read: if isStaff();
+      allow write: if isContador();
+    }
+
+    // ── Inventario ────────────────────────────────────────────────────────
+
     match /productos/{id} {
       allow read: if isStaff();
       allow write: if isAdmin() || hasRole('bodeguero');
@@ -79,7 +98,8 @@ service cloud.firestore {
       allow update, delete: if isAdmin();
     }
 
-    // Ventas
+    // ── Ventas ────────────────────────────────────────────────────────────
+
     match /ventas/{id} {
       allow read: if isStaff();
       allow create: if isAdmin() || hasRole('vendedor');
@@ -87,19 +107,46 @@ service cloud.firestore {
       allow delete: if false;
     }
 
-    // Facturación
+    // ── Facturación SRI ───────────────────────────────────────────────────
+
     match /comprobantes/{id} {
       allow read: if isStaff();
       allow write: if isAdmin() || hasRole('vendedor');
     }
 
-    // Cuentas por pagar
+    match /notas_credito/{id} {
+      allow read: if isStaff();
+      allow write: if isAdmin() || hasRole('vendedor') || hasRole('contador');
+    }
+
+    match /notas_debito/{id} {
+      allow read: if isStaff();
+      allow write: if isAdmin() || hasRole('vendedor') || hasRole('contador');
+    }
+
+    // ── Cuentas por Cobrar ────────────────────────────────────────────────
+
+    match /cuentas_cobrar/{id} {
+      allow read: if isStaff();
+      allow create: if isAdmin() || hasRole('vendedor') || hasRole('contador');
+      allow update: if isAdmin() || hasRole('vendedor') || hasRole('contador');
+      allow delete: if isAdmin();
+    }
+
+    // ── Cuentas por Pagar ─────────────────────────────────────────────────
+
     match /facturas_proveedor/{id} {
       allow read: if isStaff();
       allow write: if isAdmin() || hasRole('contador') || hasRole('bodeguero');
     }
 
-    // Contabilidad
+    match /pagos_proveedor/{id} {
+      allow read: if isStaff();
+      allow write: if isAdmin() || hasRole('contador');
+    }
+
+    // ── Contabilidad ──────────────────────────────────────────────────────
+
     match /cuentas_contables/{id} {
       allow read: if isStaff();
       allow write: if isContador();
@@ -122,12 +169,8 @@ service cloud.firestore {
       allow write: if isContador();
     }
 
-    match /config_contable/{id} {
-      allow read: if isStaff();
-      allow write: if isContador();
-    }
+    // ── Tributario ────────────────────────────────────────────────────────
 
-    // Tributario
     match /retenciones_config/{id} {
       allow read: if isStaff();
       allow write: if isContador();
@@ -136,6 +179,39 @@ service cloud.firestore {
     match /ice_config/{id} {
       allow read: if isStaff();
       allow write: if isContador();
+    }
+
+    match /retenciones_emitidas/{id} {
+      allow read: if isStaff();
+      allow create: if isAdmin() || hasRole('contador') || hasRole('vendedor');
+      allow update: if isAdmin() || hasRole('contador');
+      allow delete: if isAdmin();
+    }
+
+    match /retenciones_recibidas/{id} {
+      allow read: if isStaff();
+      allow create: if isAdmin() || hasRole('contador') || hasRole('vendedor');
+      allow update: if isAdmin() || hasRole('contador');
+      allow delete: if isAdmin();
+    }
+
+    // ── Activos Fijos ─────────────────────────────────────────────────────
+
+    match /activos_fijos/{id} {
+      allow read: if isStaff();
+      allow write: if isAdmin() || hasRole('contador');
+    }
+
+    // ── Conciliación Bancaria ─────────────────────────────────────────────
+
+    match /cuentas_bancarias/{id} {
+      allow read: if isStaff();
+      allow write: if isAdmin() || hasRole('contador');
+    }
+
+    match /movimientos_bancarios/{id} {
+      allow read: if isStaff();
+      allow write: if isAdmin() || hasRole('contador');
     }
   }
 }

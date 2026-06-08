@@ -27,9 +27,21 @@ export async function POST(req: NextRequest) {
     const notAfter   = cert?.validity.notAfter  ? new Date(cert.validity.notAfter  as any).toISOString() : '';
     const serialHex  = cert?.serialNumber ?? '';
 
-    // Extraer RUC del CN (últimos 13 dígitos numéricos del CN)
-    const rucMatch = subjectCN.match(/(\d{13})$/);
-    const rucEnCert = rucMatch ? rucMatch[1] : 'No encontrado en CN';
+    // Extraer todos los campos del Subject
+    const allSubjectFields = cert?.subject.attributes.map((a: any) =>
+      `${a.shortName || a.name}=${a.value}`
+    ) ?? [];
+
+    // Buscar RUC (13 dígitos) en TODOS los campos del certificado
+    const allSubjectStr = allSubjectFields.join(' ');
+    const rucMatchAny   = allSubjectStr.match(/\b(\d{13})\b/);
+    // También intentar en OU específicamente (BCE pone "ruc:XXXXXXXXX001" a veces)
+    const subjectOU  = cert?.subject.getField('OU')?.value ?? '';
+    const subjectSerial = cert?.subject.getField('serialNumber')?.value ?? '';
+    const rucMatchOU    = subjectOU.match(/(\d{13})/);
+    const rucMatchSer   = subjectSerial.match(/(\d{13})/);
+
+    const rucEnCert = rucMatchSer?.[1] ?? rucMatchOU?.[1] ?? rucMatchAny?.[1] ?? 'No encontrado en ningún campo';
 
     // Extraer RUC del XML (campo <ruc>)
     const rucEnXML = xml.match(/<ruc>(\d+)<\/ruc>/)?.[1] ?? 'No encontrado en XML';
@@ -39,8 +51,16 @@ export async function POST(req: NextRequest) {
 
     // ── Diagnóstico ──
     const problemas: string[] = [];
-    if (rucEnCert !== 'No encontrado en CN' && rucEnXML !== rucEnCert) {
+    const rucEnCertFound = !rucEnCert.startsWith('No encontrado');
+    if (rucEnCertFound && rucEnXML !== rucEnCert) {
       problemas.push(`RUC en XML (${rucEnXML}) no coincide con RUC en certificado (${rucEnCert})`);
+    }
+    if (!rucEnCertFound) {
+      problemas.push(
+        `RUC no encontrado en ningún campo del certificado. ` +
+        `Campos sujeto: ${allSubjectFields.join(' | ')}. ` +
+        `El certificado puede ser personal (cédula), no de empresa.`
+      );
     }
     if (!xml.includes('id="comprobante"') && !xml.includes('Id="comprobante"')) {
       problemas.push('El XML no tiene el atributo id="comprobante" en el elemento raíz');
@@ -57,10 +77,13 @@ export async function POST(req: NextRequest) {
       certificado: {
         cn:       subjectCN,
         org:      subjectO,
+        ou:       subjectOU,
+        serialNumber: subjectSerial,
         emisor:   issuerCN,
         vence:    notAfter,
         serial:   serialHex,
         rucEnCert,
+        todosCamposSujeto: allSubjectFields,
       },
       xml: {
         rucEnXML,

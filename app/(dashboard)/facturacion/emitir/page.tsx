@@ -2,7 +2,7 @@
 
 import { useEffect, useState, Suspense } from 'react';
 import { toast } from 'sonner';
-import { FileText, Loader2, CheckCircle, XCircle, Bug } from 'lucide-react';
+import { FileText, Loader2, CheckCircle, XCircle, Bug, Download } from 'lucide-react';
 import { format } from 'date-fns';
 import { useSearchParams } from 'next/navigation';
 import PageHeader  from '@/components/shared/PageHeader';
@@ -46,6 +46,7 @@ function EmitirComprobanteInner() {
   const [resultado,    setResultado]    = useState<any>(null);
   const [diagnostico,  setDiagnostico]  = useState<any>(null);
   const [diagLoading,  setDiagLoading]  = useState(false);
+  const [xmlPreview,   setXmlPreview]   = useState<string | null>(null);
 
   // Solo ventas completadas sin comprobante
   const ventasSinComp = ventas.filter(
@@ -241,6 +242,60 @@ function EmitirComprobanteInner() {
     }
   };
 
+  const descargarXML = async () => {
+    if (!ventaSeleccionada) return;
+    try {
+      const config = await getConfigSRI();
+      if (!config) { toast.error('Configura el SRI primero'); return; }
+      const sec = tipo === 'factura' ? (config.secuencialFactura ?? 1) : (config.secuencialNotaVenta ?? 1);
+      const { generarClaveAcceso: gca } = await import('@/lib/sri/clave-acceso');
+      const claveAcceso = gca({
+        fecha: new Date(), tipoComprobante: tipo === 'factura' ? '01' : '18',
+        ruc: config.ruc, ambiente: config.ambiente,
+        establecimiento: config.establecimiento, puntoEmision: config.puntoEmision, secuencial: sec,
+      });
+      const tipoId = ventaSeleccionada.clienteIdentificacion === '9999999999999' ? '07'
+        : ventaSeleccionada.clienteIdentificacion.length === 13 ? '04' : '05';
+      const items = ventaSeleccionada.items.map(i => ({
+        codigoPrincipal: i.sku, descripcion: i.nombre, cantidad: i.cantidad,
+        precioUnitario: i.precioUnitario, descuento: 0,
+        precioTotalSinImpuesto: i.subtotal, tieneIVA: tipo === 'factura', precioTotal: i.subtotal,
+      }));
+      const base = ventaSeleccionada.subtotal;
+      const iva  = tipo === 'factura' ? base * 0.15 : 0;
+      const { generarXMLFactura: gxf } = await import('@/lib/sri/generador-factura');
+      const { generarXMLNotaVenta: gxn } = await import('@/lib/sri/generador-nota-venta');
+      const xml = tipo === 'factura'
+        ? gxf({ claveAcceso, secuencial: sec, fechaEmision: new Date(), ambiente: config.ambiente,
+            ruc: config.ruc, razonSocial: config.razonSocial, nombreComercial: config.nombreComercial,
+            establecimiento: config.establecimiento, puntoEmision: config.puntoEmision,
+            direccionMatriz: config.direccionMatriz, contribuyenteEspecial: config.contribuyenteEspecial,
+            obligadoContabilidad: config.obligadoContabilidad, tipoIdComprador: tipoId,
+            identificacion: ventaSeleccionada.clienteIdentificacion,
+            razonSocialComprador: ventaSeleccionada.clienteNombre,
+            items, subtotal15: base, subtotal0: 0, totalDescuento: 0, iva, total: ventaSeleccionada.total, formaPago: '01' })
+        : gxn({ claveAcceso, secuencial: sec, fechaEmision: new Date(), ambiente: config.ambiente,
+            ruc: config.ruc, razonSocial: config.razonSocial, nombreComercial: config.nombreComercial,
+            establecimiento: config.establecimiento, puntoEmision: config.puntoEmision,
+            direccionMatriz: config.direccionMatriz, tipoIdComprador: tipoId,
+            identificacion: ventaSeleccionada.clienteIdentificacion,
+            razonSocialComprador: ventaSeleccionada.clienteNombre,
+            items, totalSinImpuestos: base, totalDescuento: 0, importeTotal: ventaSeleccionada.total, formaPago: '01' });
+      setXmlPreview(xml);
+      // Descarga como archivo
+      const blob = new Blob([xml], { type: 'application/xml' });
+      const url  = URL.createObjectURL(blob);
+      const a    = document.createElement('a');
+      a.href     = url;
+      a.download = `${tipo}_${claveAcceso}.xml`;
+      a.click();
+      URL.revokeObjectURL(url);
+      toast.success('XML descargado');
+    } catch (e: any) {
+      toast.error('Error al generar XML: ' + e.message);
+    }
+  };
+
   const diagnosticarFirma = async () => {
     if (!ventaSeleccionada || !user) return;
     setDiagLoading(true);
@@ -396,13 +451,19 @@ function EmitirComprobanteInner() {
           </div>
         )}
 
-        {/* Botón diagnóstico */}
+        {/* Botones diagnóstico + XML */}
         {ventaId && (
-          <Button variant="outline" className="w-full" onClick={diagnosticarFirma} disabled={diagLoading}>
-            {diagLoading
-              ? <><Loader2 className="mr-2 h-4 w-4 animate-spin" />Analizando...</>
-              : <><Bug className="mr-2 h-4 w-4" />Diagnosticar Firma (sin enviar al SRI)</>}
-          </Button>
+          <div className="flex gap-2">
+            <Button variant="outline" className="flex-1" onClick={diagnosticarFirma} disabled={diagLoading}>
+              {diagLoading
+                ? <><Loader2 className="mr-2 h-4 w-4 animate-spin" />Analizando...</>
+                : <><Bug className="mr-2 h-4 w-4" />Diagnosticar Firma</>}
+            </Button>
+            <Button variant="outline" className="flex-1" onClick={descargarXML}>
+              <Download className="mr-2 h-4 w-4" />
+              Descargar XML
+            </Button>
+          </div>
         )}
 
         {/* Panel de diagnóstico */}
@@ -412,10 +473,12 @@ function EmitirComprobanteInner() {
               {diagnostico.problemas?.length === 0 ? '✅ Sin problemas detectados' : `❌ ${diagnostico.problemas?.length} problema(s)`}
             </p>
             {diagnostico.problemas?.map((p: string, i: number) => (
-              <p key={i} className="text-red-600">• {p}</p>
+              <p key={i} className="text-red-600 break-words">• {p}</p>
             ))}
             <div className="border-t pt-2 space-y-1 text-slate-600">
               <p><strong>Cert CN:</strong> {diagnostico.certificado?.cn}</p>
+              <p><strong>Cert OU:</strong> {diagnostico.certificado?.ou || '(vacío)'}</p>
+              <p><strong>Cert serialNumber:</strong> {diagnostico.certificado?.serialNumber || '(vacío)'}</p>
               <p><strong>RUC en cert:</strong> {diagnostico.certificado?.rucEnCert}</p>
               <p><strong>RUC en XML:</strong> {diagnostico.xml?.rucEnXML}</p>
               <p><strong>Razón social:</strong> {diagnostico.xml?.razonSocialEnXML}</p>
@@ -424,7 +487,28 @@ function EmitirComprobanteInner() {
               <p><strong>Firma generada:</strong> {diagnostico.firma?.exito ? '✅ Sí' : `❌ ${diagnostico.firma?.error}`}</p>
               <p><strong>ds:Signature presente:</strong> {diagnostico.firma?.tieneDsSignature ? '✅' : '❌'}</p>
             </div>
+            {diagnostico.certificado?.todosCamposSujeto?.length > 0 && (
+              <div className="border-t pt-2">
+                <p className="font-sans font-semibold text-slate-700 mb-1">Todos los campos del certificado:</p>
+                {diagnostico.certificado.todosCamposSujeto.map((f: string, i: number) => (
+                  <p key={i} className="text-slate-500 break-words">{f}</p>
+                ))}
+              </div>
+            )}
             <p className="text-slate-500 italic font-sans">{diagnostico.diagnostico}</p>
+          </div>
+        )}
+
+        {/* Vista previa XML */}
+        {xmlPreview && (
+          <div className="rounded-xl border p-4 bg-slate-50">
+            <div className="flex justify-between items-center mb-2">
+              <p className="font-semibold text-sm">XML generado ({xmlPreview.length} chars)</p>
+              <button className="text-xs text-slate-400 hover:text-slate-600" onClick={() => setXmlPreview(null)}>✕ Cerrar</button>
+            </div>
+            <pre className="text-xs text-slate-600 overflow-auto max-h-64 bg-white border rounded p-3 whitespace-pre-wrap break-words">
+              {xmlPreview}
+            </pre>
           </div>
         )}
 

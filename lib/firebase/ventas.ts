@@ -3,7 +3,7 @@ import {
   query, orderBy, serverTimestamp, runTransaction,
 } from 'firebase/firestore';
 import { db } from './config';
-import { Venta } from '@/types';
+import { Venta, EstadoCxC } from '@/types';
 
 const COL = 'ventas';
 
@@ -64,6 +64,35 @@ export async function createVenta(
       createdAt:             serverTimestamp(),
     };
     if (venta.comprobanteId) ventaData.comprobanteId = venta.comprobanteId;
+    if (venta.esCxC)        ventaData.esCxC        = true;
+    if (venta.diasCredito)  ventaData.diasCredito  = venta.diasCredito;
+
+    // 3b. Si es crédito, crear CxC en la misma transacción
+    let cxcId: string | undefined;
+    if (venta.esCxC && venta.diasCredito) {
+      const cxcRef = doc(collection(db, 'cuentas_cobrar'));
+      cxcId = cxcRef.id;
+      const venc = new Date(venta.fecha);
+      venc.setDate(venc.getDate() + venta.diasCredito);
+      tx.set(cxcRef, {
+        ventaId:               ventaRef.id,
+        clienteId:             venta.clienteId,
+        clienteNombre:         venta.clienteNombre,
+        clienteIdentificacion: venta.clienteIdentificacion,
+        fechaEmision:          venta.fecha,
+        fechaVencimiento:      venc,
+        diasCredito:           venta.diasCredito,
+        total:                 venta.total,
+        saldoPendiente:        venta.total,
+        estado:                'pendiente' as EstadoCxC,
+        cobros:                [],
+        usuarioId,
+        usuarioNombre,
+        createdAt:             serverTimestamp(),
+      });
+      ventaData.cxcId = cxcId;
+    }
+
     tx.set(ventaRef, ventaData);
 
     // 4. Movimientos
@@ -86,6 +115,13 @@ export async function createVenta(
 
     return ventaRef.id;
   });
+}
+
+export async function getVentaById(id: string): Promise<Venta | null> {
+  const { getDoc } = await import('firebase/firestore');
+  const snap = await getDoc(doc(db, COL, id));
+  if (!snap.exists()) return null;
+  return { id: snap.id, ...snap.data() } as Venta;
 }
 
 export async function anularVenta(

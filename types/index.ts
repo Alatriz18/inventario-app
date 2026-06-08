@@ -157,7 +157,7 @@ export interface ItemVenta {
 }
 
 export type EstadoVenta = 'completada' | 'anulada';
-export type MetodoPago = 'efectivo' | 'tarjeta' | 'transferencia';
+export type MetodoPago = 'efectivo' | 'tarjeta' | 'transferencia' | 'credito';
 
 export interface Venta {
   id: string;
@@ -175,6 +175,9 @@ export interface Venta {
   usuarioId: string;
   usuarioNombre: string;
   comprobanteId?: string;
+  esCxC?: boolean;       // true si es venta a crédito
+  diasCredito?: number;  // días de crédito pactados
+  cxcId?: string;        // ID del documento en cuentas_cobrar
 }
 
 // ─── COMPROBANTES ──────────────────────────────────────────────────────────

@@ -2,17 +2,15 @@
 
 import { useEffect, useState, useMemo } from 'react';
 import { format, differenceInDays } from 'date-fns';
-import { es } from 'date-fns/locale';
-import { DollarSign, Clock, AlertTriangle, CheckCircle, Download, Plus, Search } from 'lucide-react';
+import { DollarSign, Clock, AlertTriangle, CheckCircle, Download, Plus, Search, X } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { toast } from 'sonner';
 
 import PageHeader  from '@/components/shared/PageHeader';
 import { Button }  from '@/components/ui/button';
 import { Input }   from '@/components/ui/input';
-import { Badge }   from '@/components/ui/badge';
 import { Skeleton }from '@/components/ui/skeleton';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from '@/components/ui/table';
@@ -22,11 +20,12 @@ import {
 import { Label }  from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 
-import { CuentaCobrar, CobroCxC, MetodoPago } from '@/types';
+import { CuentaCobrar, CobroCxC, MetodoPago, Cliente } from '@/types';
 import {
-  subscribeToCxC, registrarCobroCxC, actualizarEstadosVencidos,
+  subscribeToCxC, registrarCobroCxC, actualizarEstadosVencidos, crearCuentaCobrar,
 } from '@/lib/firebase/cuentas-cobrar';
 import { crearAsientoCobro } from '@/lib/contabilidad/motor-asientos';
+import { subscribeToClientes } from '@/lib/firebase/clientes';
 import { useAuth } from '@/context/AuthContext';
 
 const currency = (v: number) => `$${v.toFixed(2)}`;
@@ -55,10 +54,21 @@ export default function CxCPage() {
   const [retIVA,     setRetIVA]     = useState('');
   const [saving,     setSaving]     = useState(false);
 
+  // Nueva CxC manual
+  const [nuevaOpen,     setNuevaOpen]     = useState(false);
+  const [clientes,      setClientes]      = useState<Cliente[]>([]);
+  const [clienteBusq,   setClienteBusq]   = useState('');
+  const [clienteSel,    setClienteSel]    = useState<Cliente | null>(null);
+  const [nuevoMonto,    setNuevoMonto]    = useState('');
+  const [nuevosDias,    setNuevosDias]    = useState('30');
+  const [nuevaDesc,     setNuevaDesc]     = useState('');
+  const [savingNueva,   setSavingNueva]   = useState(false);
+
   useEffect(() => {
     actualizarEstadosVencidos().catch(() => {});
     const unsub = subscribeToCxC(data => { setCxcList(data); setLoading(false); });
-    return unsub;
+    const unsubCli = subscribeToClientes(setClientes);
+    return () => { unsub(); unsubCli(); };
   }, []);
 
   // ── Filtros ──
@@ -99,6 +109,52 @@ export default function CxCPage() {
     });
     return grupos;
   }, [cxcList]);
+
+  // ── Clientes filtrados ──
+  const clientesFiltrados = clienteBusq.length >= 2
+    ? clientes.filter(c => c.activo &&
+        (c.nombre.toLowerCase().includes(clienteBusq.toLowerCase()) ||
+         c.identificacion.includes(clienteBusq))).slice(0, 5)
+    : [];
+
+  // ── Crear CxC manual ──
+  const handleNuevaCxC = async () => {
+    if (!user || !clienteSel) { toast.error('Selecciona un cliente'); return; }
+    const monto = parseFloat(nuevoMonto);
+    const dias  = parseInt(nuevosDias);
+    if (isNaN(monto) || monto <= 0) { toast.error('Monto inválido'); return; }
+    if (isNaN(dias)  || dias  <= 0) { toast.error('Días inválidos'); return; }
+    setSavingNueva(true);
+    try {
+      const venc = new Date();
+      venc.setDate(venc.getDate() + dias);
+      await crearCuentaCobrar({
+        ventaId:               '',
+        clienteId:             clienteSel.id,
+        clienteNombre:         clienteSel.nombre,
+        clienteIdentificacion: clienteSel.identificacion,
+        fechaEmision:          new Date(),
+        fechaVencimiento:      venc,
+        diasCredito:           dias,
+        total:                 monto,
+        saldoPendiente:        monto,
+        notas:                 nuevaDesc || undefined,
+        usuarioId:             user.uid,
+        usuarioNombre:         user.nombre ?? user.email ?? 'Usuario',
+      });
+      toast.success('Cuenta por cobrar creada');
+      setNuevaOpen(false);
+      setClienteSel(null);
+      setClienteBusq('');
+      setNuevoMonto('');
+      setNuevosDias('30');
+      setNuevaDesc('');
+    } catch (e: any) {
+      toast.error(e.message ?? 'Error al crear CxC');
+    } finally {
+      setSavingNueva(false);
+    }
+  };
 
   // ── Registrar cobro ──
   const abrirCobro = (cxc: CuentaCobrar) => {
@@ -177,9 +233,14 @@ export default function CxCPage() {
         title="Cuentas por Cobrar"
         description="Gestión de créditos a clientes, cobros y aging"
         action={
-          <Button variant="outline" size="sm" onClick={exportar}>
-            <Download className="mr-2 h-4 w-4" /> Exportar
-          </Button>
+          <div className="flex gap-2">
+            <Button size="sm" onClick={() => setNuevaOpen(true)}>
+              <Plus className="mr-2 h-4 w-4" /> Nueva CxC
+            </Button>
+            <Button variant="outline" size="sm" onClick={exportar}>
+              <Download className="mr-2 h-4 w-4" /> Exportar
+            </Button>
+          </div>
         }
       />
 
@@ -307,6 +368,75 @@ export default function CxCPage() {
           </TableBody>
         </Table>
       </div>
+
+      {/* Dialog nueva CxC manual */}
+      <Dialog open={nuevaOpen} onOpenChange={setNuevaOpen}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Nueva Cuenta por Cobrar</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            {/* Buscar cliente */}
+            <div>
+              <Label>Cliente *</Label>
+              {clienteSel ? (
+                <div className="mt-1 flex items-center justify-between bg-slate-50 rounded-lg px-3 py-2">
+                  <div>
+                    <p className="font-medium text-sm">{clienteSel.nombre}</p>
+                    <p className="text-xs text-slate-400">{clienteSel.identificacion}</p>
+                  </div>
+                  <button onClick={() => { setClienteSel(null); setClienteBusq(''); }}>
+                    <X className="h-4 w-4 text-slate-400 hover:text-slate-600" />
+                  </button>
+                </div>
+              ) : (
+                <div className="mt-1 relative">
+                  <Input
+                    placeholder="Buscar por nombre o cédula/RUC..."
+                    value={clienteBusq}
+                    onChange={e => setClienteBusq(e.target.value)}
+                  />
+                  {clientesFiltrados.length > 0 && (
+                    <div className="absolute top-full left-0 right-0 z-20 mt-1 bg-white border rounded-lg shadow overflow-hidden">
+                      {clientesFiltrados.map(c => (
+                        <button key={c.id}
+                          onClick={() => { setClienteSel(c); setClienteBusq(''); }}
+                          className="w-full text-left px-3 py-2 hover:bg-slate-50 border-b last:border-0 text-sm">
+                          <p className="font-medium">{c.nombre}</p>
+                          <p className="text-xs text-slate-400">{c.identificacion}</p>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <Label>Monto ($) *</Label>
+                <Input type="number" step="0.01" className="mt-1"
+                  value={nuevoMonto} onChange={e => setNuevoMonto(e.target.value)} />
+              </div>
+              <div>
+                <Label>Días de crédito *</Label>
+                <Input type="number" min="1" className="mt-1"
+                  value={nuevosDias} onChange={e => setNuevosDias(e.target.value)} />
+              </div>
+            </div>
+            <div>
+              <Label>Descripción / Referencia</Label>
+              <Input className="mt-1" placeholder="Ej: Factura 001-001-0000005"
+                value={nuevaDesc} onChange={e => setNuevaDesc(e.target.value)} />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setNuevaOpen(false)}>Cancelar</Button>
+            <Button onClick={handleNuevaCxC} disabled={savingNueva}>
+              {savingNueva ? 'Guardando…' : 'Crear CxC'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* Dialog cobro */}
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>

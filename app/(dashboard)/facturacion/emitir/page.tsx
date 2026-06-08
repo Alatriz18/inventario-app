@@ -117,7 +117,8 @@ function EmitirComprobanteInner() {
       const descuento = subtotal * (ventaSeleccionada.descuentoGlobal / 100);
       const base      = subtotal - descuento;
       const iva       = tipo === 'factura' ? base * 0.15 : 0;
-      const total     = ventaSeleccionada.total;
+      // El total del XML debe incluir el IVA (el POS guarda precios sin IVA)
+      const total     = tipo === 'factura' ? base + iva : ventaSeleccionada.total;
 
       // 6. Generar XML
       let xml: string;
@@ -263,6 +264,7 @@ function EmitirComprobanteInner() {
       }));
       const base = ventaSeleccionada.subtotal;
       const iva  = tipo === 'factura' ? base * 0.15 : 0;
+      const total = tipo === 'factura' ? base + iva : ventaSeleccionada.total;
       const { generarXMLFactura: gxf } = await import('@/lib/sri/generador-factura');
       const { generarXMLNotaVenta: gxn } = await import('@/lib/sri/generador-nota-venta');
       const xml = tipo === 'factura'
@@ -273,7 +275,7 @@ function EmitirComprobanteInner() {
             obligadoContabilidad: config.obligadoContabilidad, tipoIdComprador: tipoId,
             identificacion: ventaSeleccionada.clienteIdentificacion,
             razonSocialComprador: ventaSeleccionada.clienteNombre,
-            items, subtotal15: base, subtotal0: 0, totalDescuento: 0, iva, total: ventaSeleccionada.total, formaPago: '01' })
+            items, subtotal15: base, subtotal0: 0, totalDescuento: 0, iva, total, formaPago: '01' })
         : gxn({ claveAcceso, secuencial: sec, fechaEmision: new Date(), ambiente: config.ambiente,
             ruc: config.ruc, razonSocial: config.razonSocial, nombreComercial: config.nombreComercial,
             establecimiento: config.establecimiento, puntoEmision: config.puntoEmision,
@@ -333,7 +335,7 @@ function EmitirComprobanteInner() {
         tipoIdComprador: tipoId, identificacion: ventaSeleccionada.clienteIdentificacion,
         razonSocialComprador: ventaSeleccionada.clienteNombre,
         items, subtotal15: base, subtotal0: 0, totalDescuento: 0,
-        iva, total: ventaSeleccionada.total, formaPago: '01',
+        iva, total: base + iva, formaPago: '01',
       });
 
       const res  = await fetch('/api/sri/debug-xml', {

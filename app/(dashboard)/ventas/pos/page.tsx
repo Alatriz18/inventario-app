@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation';
 import { toast } from 'sonner';
 import {
   Search, Trash2, Plus, Minus, ShoppingCart, User,
-  Banknote, CreditCard, ArrowRightLeft, CheckCircle, UserPlus,
+  Banknote, CreditCard, ArrowRightLeft, CheckCircle, UserPlus, Clock,
 } from 'lucide-react';
 
 import { Button }    from '@/components/ui/button';
@@ -26,6 +26,7 @@ import { subscribeToProductos } from '@/lib/firebase/productos';
 import { subscribeToClientes }  from '@/lib/firebase/clientes';
 import { createVenta }          from '@/lib/firebase/ventas';
 import { useAuth }              from '@/context/AuthContext';
+import Link from 'next/link';
 
 // ─── Consumidor Final por defecto ────────────────────────────────────────────
 const CONSUMIDOR_FINAL: Cliente = {
@@ -61,8 +62,10 @@ export default function POSPage() {
   const [metodoPago,     setMetodoPago]     = useState<MetodoPago>('efectivo');
   const [descuento,      setDescuento]      = useState(0);
   const [montoPagado,    setMontoPagado]    = useState('');
+  const [diasCredito,    setDiasCredito]    = useState(30);
   const [saving,         setSaving]         = useState(false);
   const [successId,      setSuccessId]      = useState<string | null>(null);
+  const [esCxC,          setEsCxC]          = useState(false);
   const [searchCliente,  setSearchCliente]  = useState('');
   const [showClientes,   setShowClientes]   = useState(false);
   const [quickCliente,   setQuickCliente]   = useState(false); // ← dentro del componente
@@ -185,6 +188,9 @@ export default function POSPage() {
     if (metodoPago === 'efectivo' && Number(montoPagado) < total) {
       toast.error('El monto pagado es insuficiente'); return;
     }
+    if (metodoPago === 'credito' && cliente.id === 'consumidor_final') {
+      toast.error('Selecciona un cliente identificado para ventas a crédito'); return;
+    }
 
     setSaving(true);
     try {
@@ -213,6 +219,8 @@ export default function POSPage() {
           gananciaTotal,
           metodoPago,
           estado:                'completada',
+          esCxC:                 metodoPago === 'credito' || undefined,
+          diasCredito:           metodoPago === 'credito' ? diasCredito : undefined,
           usuarioId:             user.uid,
           usuarioNombre:         user.nombre,
         },
@@ -238,10 +246,12 @@ export default function POSPage() {
         iva:           parseFloat(ivaTotal.toFixed(2)),
         total,
         costoVenta:    parseFloat(costoVenta.toFixed(2)),
+        esCxC:         metodoPago === 'credito',
         usuarioId:     user.uid,
         usuarioNombre: user.nombre,
       }).catch(() => {});
 
+      setEsCxC(metodoPago === 'credito');
       // Reset
       setCart([]);
       setCliente(CONSUMIDOR_FINAL);
@@ -419,24 +429,47 @@ export default function POSPage() {
         {/* Método de pago */}
         <div className="bg-white rounded-xl border p-4 space-y-3">
           <Label className="text-sm font-semibold">Método de pago</Label>
-          <div className="grid grid-cols-3 gap-2">
+          <div className="grid grid-cols-2 gap-2">
             {([
               { value: 'efectivo',      label: 'Efectivo',      icon: Banknote },
               { value: 'tarjeta',       label: 'Tarjeta',       icon: CreditCard },
-              { value: 'transferencia', label: 'Transferencia', icon: ArrowRightLeft },
+              { value: 'transferencia', label: 'Transfer.',     icon: ArrowRightLeft },
+              { value: 'credito',       label: 'Crédito',       icon: Clock },
             ] as const).map(({ value, label, icon: Icon }) => (
               <button key={value}
                 onClick={() => setMetodoPago(value)}
-                className={`flex flex-col items-center gap-1 p-2 rounded-lg border text-xs font-medium transition-colors ${
+                className={`flex items-center gap-1.5 p-2 rounded-lg border text-xs font-medium transition-colors ${
                   metodoPago === value
-                    ? 'bg-slate-900 text-white border-slate-900'
+                    ? value === 'credito'
+                      ? 'bg-amber-600 text-white border-amber-600'
+                      : 'bg-slate-900 text-white border-slate-900'
                     : 'hover:bg-slate-50 text-slate-600'
                 }`}>
-                <Icon className="h-4 w-4" />
+                <Icon className="h-3.5 w-3.5 shrink-0" />
                 {label}
               </button>
             ))}
           </div>
+
+          {metodoPago === 'credito' && (
+            <div className="space-y-1.5">
+              <Label className="text-xs text-amber-700 font-semibold">Días de crédito</Label>
+              <div className="flex gap-1.5">
+                {[15, 30, 60, 90].map(d => (
+                  <button key={d}
+                    onClick={() => setDiasCredito(d)}
+                    className={`flex-1 py-1.5 rounded border text-xs font-medium transition-colors ${
+                      diasCredito === d ? 'bg-amber-600 text-white border-amber-600' : 'hover:bg-amber-50 text-slate-600'
+                    }`}>
+                    {d}d
+                  </button>
+                ))}
+              </div>
+              {cliente.id === 'consumidor_final' && (
+                <p className="text-xs text-red-500">Selecciona un cliente identificado</p>
+              )}
+            </div>
+          )}
 
           {metodoPago === 'efectivo' && (
             <div className="space-y-1.5">
@@ -496,11 +529,15 @@ export default function POSPage() {
 
         {/* Botón confirmar */}
         <Button
-          className="h-14 text-base font-bold"
+          className={`h-14 text-base font-bold ${metodoPago === 'credito' ? 'bg-amber-600 hover:bg-amber-700' : ''}`}
           disabled={saving || cart.length === 0}
           onClick={confirmarVenta}
         >
-          {saving ? 'Procesando...' : `Cobrar ${currency(total)}`}
+          {saving
+            ? 'Procesando...'
+            : metodoPago === 'credito'
+              ? `Venta a crédito ${currency(total)}`
+              : `Cobrar ${currency(total)}`}
         </Button>
       </div>
 
@@ -546,22 +583,35 @@ export default function POSPage() {
             <DialogTitle className="sr-only">Venta registrada</DialogTitle>
           </DialogHeader>
           <div className="flex flex-col items-center gap-4 py-2">
-            <CheckCircle className="h-14 w-14 text-green-500" />
+            <CheckCircle className={`h-14 w-14 ${esCxC ? 'text-amber-500' : 'text-green-500'}`} />
             <div className="text-center">
-              <h2 className="text-xl font-bold text-slate-900">¡Venta completada!</h2>
-              <p className="text-sm text-slate-500 mt-1">Stock actualizado correctamente.</p>
+              <h2 className="text-xl font-bold text-slate-900">
+                {esCxC ? '¡Venta a crédito registrada!' : '¡Venta completada!'}
+              </h2>
+              <p className="text-sm text-slate-500 mt-1">
+                {esCxC
+                  ? `Vence en ${diasCredito} días — registrada en Cuentas por Cobrar.`
+                  : 'Stock actualizado correctamente.'}
+              </p>
             </div>
 
             <div className="bg-slate-50 rounded-xl p-4 w-full space-y-1.5 text-sm">
               <div className="flex justify-between">
-                <span className="text-slate-500">Total cobrado</span>
+                <span className="text-slate-500">{esCxC ? 'Total a cobrar' : 'Total cobrado'}</span>
                 <span className="font-bold">{currency(total)}</span>
               </div>
-              {metodoPago === 'efectivo' && Number(montoPagado) > 0 && (
+              {!esCxC && metodoPago === 'efectivo' && Number(montoPagado) > 0 && (
                 <div className="flex justify-between text-green-600">
                   <span>Cambio</span>
                   <span className="font-bold">{currency(cambio)}</span>
                 </div>
+              )}
+              {esCxC && (
+                <Link href="/cuentas-por-cobrar"
+                  onClick={() => setSuccessId(null)}
+                  className="block w-full text-center py-2 mt-1 rounded-lg bg-amber-50 text-amber-700 text-xs font-semibold hover:bg-amber-100 transition-colors">
+                  Ver Cuentas por Cobrar →
+                </Link>
               )}
             </div>
 

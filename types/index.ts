@@ -393,6 +393,13 @@ export interface ConfigContable {
   cuentaCxPProveedores:    string;
   cuentaRetFuenteClientes: string;
   cuentaRetIVAClientes:    string;
+  // Cuentas adicionales (opcionales — con defaults razonables)
+  cuentaUtilidadEjercicio?:   string; // 3.x — para asiento de cierre
+  cuentaCapital?:              string; // 3.x — para asiento de apertura
+  cuentaProvisionCartera?:     string; // 1.2.x — provisión cuentas incobrables
+  cuentaGastoProvision?:       string; // 5.x   — gasto por provisión
+  cuentaRetFuenteProveedores?: string; // 2.1.x — retención recibida de proveedores / pagos
+  cuentaRetIVAProveedores?:    string; // 2.1.x — retención IVA recibida
 }
 
 export interface PeriodoContable {
@@ -722,4 +729,37 @@ export interface ConfigICE {
   tarifaAdValorem?:  number;
   unidad?:     string;
   activo:      boolean;
+}
+
+// ─── RETENCIONES RECIBIDAS (clientes nos retienen al pagar) ────────────────
+
+export interface LineaRetencionRecibida {
+  tipo:          'fuente_ir' | 'iva';
+  codigo:        string;
+  descripcion:   string;
+  porcentaje:    number;
+  baseImponible: number;
+  valorRetenido: number;
+}
+
+export interface RetencionRecibida {
+  id:                  string;
+  ventaId:             string;           // Venta o comprobante al que aplica
+  numeroComprobante:   string;           // Ej: 001-001-000000001
+  clienteId:           string;
+  clienteNombre:       string;
+  clienteIdentificacion: string;
+  // Datos del comprobante de retención recibido
+  numeroRetencion:     string;           // Número que emitió el cliente
+  fechaEmision:        Date;
+  ejercicioFiscal:     string;           // MM/YYYY
+  lineas:              LineaRetencionRecibida[];
+  totalRetenido:       number;
+  retFuente:           number;
+  retIVA:              number;
+  // Contabilidad
+  asientoId?:          string;
+  usuarioId:           string;
+  usuarioNombre:       string;
+  createdAt:           Date;
 }

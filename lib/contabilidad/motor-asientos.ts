@@ -539,6 +539,210 @@ export async function crearAsientoDepreciacion(p: ParamsDepreciacion): Promise<s
 }
 
 // ─────────────────────────────────────────────────────────────────────────
+// RETENCIÓN RECIBIDA (cliente nos retiene)
+// ─────────────────────────────────────────────────────────────────────────
+
+interface ParamsRetencionRecibida extends ParamsBase {
+  retencionId:   string;
+  fecha:         Date;
+  clienteNombre: string;
+  retFuente:     number;
+  retIVA:        number;
+  totalRetenido: number;
+}
+
+export async function crearAsientoRetencionRecibida(p: ParamsRetencionRecibida): Promise<string | null> {
+  try {
+    const config  = await getConfigSegura();
+    if (!config) return null;
+    const cuentas = await getCuentasCached();
+
+    const cuentaRetFuente = (config as any).cuentaRetFuenteProveedores ?? '1.1.06.01';
+    const cuentaRetIVA    = (config as any).cuentaRetIVAProveedores    ?? '1.1.06.02';
+
+    const lineas: AsientoLinea[] = [];
+
+    if (p.retFuente > 0) {
+      lineas.push(buildLinea(cuentas, cuentaRetFuente,
+        p.retFuente, 0, `Ret. fuente recibida de ${p.clienteNombre}`));
+    }
+    if (p.retIVA > 0) {
+      lineas.push(buildLinea(cuentas, cuentaRetIVA,
+        p.retIVA, 0, `Ret. IVA recibida de ${p.clienteNombre}`));
+    }
+    // CR: CxC Clientes (reduce la cuenta por cobrar)
+    lineas.push(buildLinea(cuentas, config.cuentaCxCClientes,
+      0, p.totalRetenido, `Retención comprobante ${p.clienteNombre}`));
+
+    return await createAsiento({
+      fecha:          p.fecha,
+      concepto:       `Retención recibida de ${p.clienteNombre}`,
+      tipo:           'manual',
+      referenciaId:   p.retencionId,
+      referenciaTipo: 'retencion_recibida',
+      lineas,
+      totalDebe:      lineas.reduce((s, l) => s + l.debe,  0),
+      totalHaber:     lineas.reduce((s, l) => s + l.haber, 0),
+      estado:         'confirmado',
+      bloqueado:      false,
+      editadoManualmente: false,
+      usuarioId:      p.usuarioId,
+      usuarioNombre:  p.usuarioNombre,
+      createdAt:      new Date(),
+    });
+  } catch { return null; }
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// PROVISIÓN DE CARTERA INCOBRABLE
+// ─────────────────────────────────────────────────────────────────────────
+
+interface ParamsProvisionCartera extends ParamsBase {
+  provisionId: string;
+  fecha:       Date;
+  monto:       number;
+  descripcion: string;
+}
+
+export async function crearAsientoProvisionCartera(p: ParamsProvisionCartera): Promise<string | null> {
+  try {
+    const config  = await getConfigSegura();
+    if (!config) return null;
+    const cuentas = await getCuentasCached();
+
+    const cuentaGasto    = (config as any).cuentaGastoProvision    ?? '5.2.04';
+    const cuentaProvision = (config as any).cuentaProvisionCartera ?? '1.2.01';
+
+    const lineas: AsientoLinea[] = [
+      buildLinea(cuentas, cuentaGasto,    p.monto, 0, p.descripcion),
+      buildLinea(cuentas, cuentaProvision, 0, p.monto, 'Provisión cuentas incobrables'),
+    ];
+
+    return await createAsiento({
+      fecha:          p.fecha,
+      concepto:       p.descripcion,
+      tipo:           'manual',
+      referenciaId:   p.provisionId,
+      referenciaTipo: 'provision_cartera',
+      lineas,
+      totalDebe:      p.monto,
+      totalHaber:     p.monto,
+      estado:         'confirmado',
+      bloqueado:      false,
+      editadoManualmente: false,
+      usuarioId:      p.usuarioId,
+      usuarioNombre:  p.usuarioNombre,
+      createdAt:      new Date(),
+    });
+  } catch { return null; }
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// ASIENTO DE APERTURA (inicio de período)
+// ─────────────────────────────────────────────────────────────────────────
+
+export interface LineaApertura {
+  cuentaCodigo: string;
+  debe:         number;
+  haber:        number;
+}
+
+interface ParamsApertura extends ParamsBase {
+  periodoId:  string;
+  fecha:      Date;
+  anio:       number;
+  lineas:     LineaApertura[];
+}
+
+export async function crearAsientoApertura(p: ParamsApertura): Promise<string | null> {
+  try {
+    const cuentas = await getCuentasCached();
+
+    const lineas: AsientoLinea[] = p.lineas.map(l =>
+      buildLinea(cuentas, l.cuentaCodigo, l.debe, l.haber, 'Saldo inicial')
+    );
+
+    return await createAsiento({
+      fecha:          p.fecha,
+      concepto:       `Asiento de apertura ${p.anio}`,
+      tipo:           'apertura',
+      referenciaId:   p.periodoId,
+      referenciaTipo: 'periodo',
+      lineas,
+      totalDebe:      lineas.reduce((s, l) => s + l.debe,  0),
+      totalHaber:     lineas.reduce((s, l) => s + l.haber, 0),
+      estado:         'confirmado',
+      bloqueado:      false,
+      editadoManualmente: false,
+      usuarioId:      p.usuarioId,
+      usuarioNombre:  p.usuarioNombre,
+      createdAt:      new Date(),
+    });
+  } catch { return null; }
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// ASIENTO DE CIERRE (fin de período — cierra ingresos y gastos a utilidad)
+// ─────────────────────────────────────────────────────────────────────────
+
+interface ParamsCierre extends ParamsBase {
+  periodoId:        string;
+  fecha:            Date;
+  anio:             number;
+  totalIngresos:    number;
+  totalGastos:      number;
+  utilidad:         number; // puede ser negativo (pérdida)
+}
+
+export async function crearAsientoCierre(p: ParamsCierre): Promise<string | null> {
+  try {
+    const config  = await getConfigSegura();
+    if (!config) return null;
+    const cuentas = await getCuentasCached();
+
+    const cuentaIngresos  = config.cuentaVentas12;
+    const cuentaGastos    = config.cuentaCostoVentas;
+    const cuentaUtilidad  = (config as any).cuentaUtilidadEjercicio ?? '3.4.01';
+
+    const lineas: AsientoLinea[] = [];
+
+    // Cierra Ingresos: DB Ingresos / CR Utilidad
+    lineas.push(buildLinea(cuentas, cuentaIngresos,
+      p.totalIngresos, 0, `Cierre ingresos ${p.anio}`));
+
+    // Cierra Gastos: CR Gastos / DB Utilidad
+    lineas.push(buildLinea(cuentas, cuentaGastos,
+      0, p.totalGastos, `Cierre gastos ${p.anio}`));
+
+    // Resultado neto a Utilidad/Pérdida del ejercicio
+    if (p.utilidad >= 0) {
+      lineas.push(buildLinea(cuentas, cuentaUtilidad,
+        0, p.utilidad, `Utilidad del ejercicio ${p.anio}`));
+    } else {
+      lineas.push(buildLinea(cuentas, cuentaUtilidad,
+        Math.abs(p.utilidad), 0, `Pérdida del ejercicio ${p.anio}`));
+    }
+
+    return await createAsiento({
+      fecha:          p.fecha,
+      concepto:       `Asiento de cierre ${p.anio}`,
+      tipo:           'cierre',
+      referenciaId:   p.periodoId,
+      referenciaTipo: 'periodo',
+      lineas,
+      totalDebe:      lineas.reduce((s, l) => s + l.debe,  0),
+      totalHaber:     lineas.reduce((s, l) => s + l.haber, 0),
+      estado:         'confirmado',
+      bloqueado:      false,
+      editadoManualmente: false,
+      usuarioId:      p.usuarioId,
+      usuarioNombre:  p.usuarioNombre,
+      createdAt:      new Date(),
+    });
+  } catch { return null; }
+}
+
+// ─────────────────────────────────────────────────────────────────────────
 // AJUSTE DE INVENTARIO
 // ─────────────────────────────────────────────────────────────────────────
 

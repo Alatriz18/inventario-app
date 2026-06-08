@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, Suspense } from 'react';
 import { toast } from 'sonner';
 import { FileText, Loader2, CheckCircle, XCircle } from 'lucide-react';
 import { format } from 'date-fns';
@@ -8,8 +8,6 @@ import { useSearchParams } from 'next/navigation';
 import PageHeader  from '@/components/shared/PageHeader';
 import { Button }  from '@/components/ui/button';
 import { Label }   from '@/components/ui/label';
-import { Badge }   from '@/components/ui/badge';
-import { Separator}from '@/components/ui/separator';
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from '@/components/ui/select';
@@ -22,7 +20,7 @@ import { generarXMLNotaVenta } from '@/lib/sri/generador-nota-venta';
 import { generarClaveAcceso }  from '@/lib/sri/clave-acceso';
 import { Venta } from '@/types';
 import { useAuth } from '@/context/AuthContext';
-const searchParams = useSearchParams();
+
 const FORMA_PAGO_MAP: Record<string, string> = {
   efectivo:      '01',
   tarjeta:       '16',
@@ -37,8 +35,9 @@ const TIPO_ID_MAP: Record<string, string> = {
   identificacion_exterior:'08',
 };
 
-export default function EmitirComprobantePage() {
-  const { user }  = useAuth();
+function EmitirComprobanteInner() {
+  const { user }      = useAuth();
+  const searchParams  = useSearchParams();
   const [ventas,   setVentas]   = useState<Venta[]>([]);
   const [ventaId,  setVentaId]  = useState('');
   const [tipo,     setTipo]     = useState<'factura' | 'nota_venta'>('factura');
@@ -50,12 +49,14 @@ export default function EmitirComprobantePage() {
   const ventasSinComp = ventas.filter(
     v => v.estado === 'completada' && !v.comprobanteId
   );
-useEffect(() => {
-  const ventaIdParam = searchParams.get('ventaId');
-  const tipoParam    = searchParams.get('tipo');
-  if (ventaIdParam) setVentaId(ventaIdParam);
-  if (tipoParam === 'factura' || tipoParam === 'nota_venta') setTipo(tipoParam);
-}, [searchParams]);
+
+  useEffect(() => {
+    const ventaIdParam = searchParams.get('ventaId');
+    const tipoParam    = searchParams.get('tipo');
+    if (ventaIdParam) setVentaId(ventaIdParam);
+    if (tipoParam === 'factura' || tipoParam === 'nota_venta') setTipo(tipoParam);
+  }, [searchParams]);
+
   useEffect(() => {
     return subscribeToVentas((data) => { setVentas(data); setLoading(false); });
   }, []);
@@ -360,5 +361,13 @@ useEffect(() => {
         </Button>
       </div>
     </div>
+  );
+}
+
+export default function EmitirComprobantePage() {
+  return (
+    <Suspense fallback={<div className="p-6 text-slate-400">Cargando...</div>}>
+      <EmitirComprobanteInner />
+    </Suspense>
   );
 }

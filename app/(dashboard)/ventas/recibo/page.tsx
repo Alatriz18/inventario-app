@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, Suspense } from 'react';
 import { useSearchParams }      from 'next/navigation';
 import { toast }                from 'sonner';
 import { FileText, Download, Eye, Printer } from 'lucide-react';
@@ -62,7 +62,7 @@ function inferirTipoId(id: string): string {
   return '06';
 }
 
-export default function ReciboInternoPage() {
+function ReciboInternoInner() {
   const searchParams = useSearchParams();
   const [ventas,   setVentas]   = useState<Venta[]>([]);
   const [loading,  setLoading]  = useState(true);
@@ -193,5 +193,13 @@ export default function ReciboInternoPage() {
         </div>
       )}
     </div>
+  );
+}
+
+export default function ReciboInternoPage() {
+  return (
+    <Suspense fallback={<div className="p-6 text-slate-400">Cargando...</div>}>
+      <ReciboInternoInner />
+    </Suspense>
   );
 }

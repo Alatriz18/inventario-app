@@ -17,9 +17,17 @@ function c14n(xml: string): string {
     .replace(/\r/g, '\n');
 }
 
-function sha1b64(input: string): string {
+/** SHA1 de cadena binaria (ej: DER bytes). Cada char = 1 byte. */
+function sha1b64(binaryStr: string): string {
   const md = forge.md.sha1.create();
-  md.update(input, 'utf8');
+  md.update(binaryStr); // binary mode, NO 'utf8' — certDer son bytes binarios
+  return forge.util.encode64(md.digest().getBytes());
+}
+
+/** SHA1 de texto (ej: XML canonicalizado). Convierte correctamente chars no-ASCII. */
+function sha1b64text(text: string): string {
+  const md = forge.md.sha1.create();
+  md.update(forge.util.encodeUtf8(text));
   return forge.util.encode64(md.digest().getBytes());
 }
 
@@ -45,8 +53,16 @@ export function firmarXML(
     const keyBags  = p12.getBags({ bagType: forge.pki.oids.pkcs8ShroudedKeyBag });
     const certBags = p12.getBags({ bagType: forge.pki.oids.certBag });
 
-    const privateKey = keyBags[forge.pki.oids.pkcs8ShroudedKeyBag]?.[0]?.key;
-    const cert       = certBags[forge.pki.oids.certBag]?.[0]?.cert;
+    const keyBagList  = keyBags[forge.pki.oids.pkcs8ShroudedKeyBag] ?? [];
+    const certBagList = certBags[forge.pki.oids.certBag] ?? [];
+
+    const privateKey = keyBagList[0]?.key;
+
+    // Buscar el cert del titular (no-CA). Si el P12 tiene CA intermediaria, evitarla.
+    const cert = certBagList.find(bag => {
+      const bc = bag.cert?.extensions?.find((ext: any) => ext.name === 'basicConstraints');
+      return !bc?.cA;
+    })?.cert ?? certBagList[0]?.cert;
 
     if (!privateKey || !cert) {
       return { xmlFirmado: '', error: 'Certificado inválido o contraseña incorrecta' };
@@ -110,12 +126,11 @@ export function firmarXML(
 
     // ── Digests ───────────────────────────────────────────────────────────
 
-    // Digest del documento: aplicar enveloped-signature (no-op antes de inyectar)
-    // luego exc-c14n (minimal: c14n del XML limpio)
-    const xmlDigest = sha1b64(c14n(xml));
+    // Digest del documento (texto canonical → UTF-8 bytes → SHA1)
+    const xmlDigest = sha1b64text(c14n(xml));
 
-    // Digest de SignedProperties canonicalizadas
-    const spDigest  = sha1b64(c14n(signedPropsXML));
+    // Digest de SignedProperties (texto canonical → UTF-8 bytes → SHA1)
+    const spDigest  = sha1b64text(c14n(signedPropsXML));
 
     // ── SignedInfo ────────────────────────────────────────────────────────
     // All self-closing tags expanded per C14N spec (empty elements become open+close pairs).
@@ -144,7 +159,7 @@ export function firmarXML(
     // ── Firmar SignedInfo canonicalizado ──────────────────────────────────
     const signedInfoC14N = c14n(signedInfoXML);
     const md = forge.md.sha1.create();
-    md.update(signedInfoC14N, 'utf8');
+    md.update(forge.util.encodeUtf8(signedInfoC14N)); // texto → UTF-8 bytes → SHA1
     const sigValue = forge.util.encode64((privateKey as any).sign(md));
 
     // ── Bloque Signature completo ─────────────────────────────────────────

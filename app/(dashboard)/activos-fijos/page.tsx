@@ -162,7 +162,7 @@ export default function ActivosFijosPage() {
         cuentaDepAcumCodigo: activoDepSel.cuentaDepAcumCodigo ?? '1.2.01.01',
         cuentaGastoDepCodigo:activoDepSel.cuentaGastoDepCodigo ?? '5.2.01',
         usuarioId:           user.uid,
-        usuarioNombre:       user.displayName ?? user.email ?? 'Usuario',
+        usuarioNombre:       user.nombre ?? user.email ?? 'Usuario',
       });
 
       await registrarDepreciacionMensual(

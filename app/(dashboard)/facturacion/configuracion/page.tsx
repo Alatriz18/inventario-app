@@ -1,48 +1,67 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { useForm }  from 'react-hook-form';
+import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
 import { toast } from 'sonner';
-import { Settings, Upload, Eye, EyeOff, Save } from 'lucide-react';
+import {
+  Settings, Upload, Eye, EyeOff, Save,
+  ShieldCheck, ShieldAlert, Loader2, CheckCircle2, AlertTriangle,
+} from 'lucide-react';
+import { format } from 'date-fns';
+import { es } from 'date-fns/locale';
 
-import PageHeader  from '@/components/shared/PageHeader';
-import { Button }  from '@/components/ui/button';
-import { Input }   from '@/components/ui/input';
-import { Label }   from '@/components/ui/label';
-import { Separator}from '@/components/ui/separator';
-import { Badge }   from '@/components/ui/badge';
+import PageHeader from '@/components/shared/PageHeader';
+import { Button } from '@/components/ui/button';
+import { Input }  from '@/components/ui/input';
+import { Label }  from '@/components/ui/label';
+import { Badge }  from '@/components/ui/badge';
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from '@/components/ui/select';
 
-import { getConfigSRI, saveConfigSRI, ConfigSRI } from '@/lib/firebase/config-sri';
+import { getConfigSRI, saveConfigSRI } from '@/lib/firebase/config-sri';
+
+interface InfoCertificado {
+  valido:         boolean;
+  titular?:       string;
+  organizacion?:  string;
+  emisor?:        string;
+  validoDesde?:   string;
+  validoHasta?:   string;
+  diasRestantes?: number;
+  vencido?:       boolean;
+  expiraPronto?:  boolean;
+  error?:         string;
+}
 
 const schema = z.object({
-  ruc:                  z.string().length(13, 'El RUC debe tener 13 dígitos'),
-  razonSocial:          z.string().min(1, 'Requerido'),
-  nombreComercial:      z.string().optional(),
-  direccionMatriz:      z.string().min(1, 'Requerido'),
-  establecimiento:      z.string().length(3, 'Debe tener 3 dígitos'),
-  puntoEmision:         z.string().length(3, 'Debe tener 3 dígitos'),
-  ambiente:             z.enum(['1', '2']),
-  certificadoPassword:  z.string().min(1, 'Requerido'),
-  contribuyenteEspecial:z.string().optional(),
-  obligadoContabilidad: z.enum(['SI', 'NO']),
+  ruc:                   z.string().length(13, 'El RUC debe tener 13 dígitos'),
+  razonSocial:           z.string().min(1, 'Requerido'),
+  nombreComercial:       z.string().optional(),
+  direccionMatriz:       z.string().min(1, 'Requerido'),
+  establecimiento:       z.string().length(3, 'Debe tener 3 dígitos'),
+  puntoEmision:          z.string().length(3, 'Debe tener 3 dígitos'),
+  ambiente:              z.enum(['1', '2']),
+  certificadoPassword:   z.string().min(1, 'Requerido'),
+  contribuyenteEspecial: z.string().optional(),
+  obligadoContabilidad:  z.enum(['SI', 'NO']),
 });
 
 type ConfigForm = z.infer<typeof schema>;
 
 export default function ConfiguracionSRIPage() {
-  const [loading,      setLoading]      = useState(true);
-  const [saving,       setSaving]       = useState(false);
-  const [showPassword, setShowPassword] = useState(false);
-  const [p12Base64,    setP12Base64]    = useState('');
-  const [p12Nombre,    setP12Nombre]    = useState('');
-  const [tieneCert,    setTieneCert]    = useState(false);
+  const [loading,       setLoading]       = useState(true);
+  const [saving,        setSaving]        = useState(false);
+  const [verificando,   setVerificando]   = useState(false);
+  const [showPassword,  setShowPassword]  = useState(false);
+  const [p12Base64,     setP12Base64]     = useState('');
+  const [p12Nombre,     setP12Nombre]     = useState('');
+  const [tieneCert,     setTieneCert]     = useState(false);
+  const [infoCert,      setInfoCert]      = useState<InfoCertificado | null>(null);
 
-  const { register, handleSubmit, reset, setValue, formState: { errors } } =
+  const { register, handleSubmit, reset, setValue, getValues, formState: { errors } } =
     useForm<ConfigForm>({ resolver: zodResolver(schema) });
 
   useEffect(() => {
@@ -71,14 +90,42 @@ export default function ConfiguracionSRIPage() {
     const file = e.target.files?.[0];
     if (!file) return;
     setP12Nombre(file.name);
+    setInfoCert(null);
     const reader = new FileReader();
     reader.onload = (ev) => {
       const b64 = (ev.target?.result as string).split(',')[1];
       setP12Base64(b64);
       setTieneCert(true);
-      toast.success('Certificado cargado correctamente');
+      toast.success('Certificado cargado — ingresa la contraseña y haz clic en Verificar');
     };
     reader.readAsDataURL(file);
+  };
+
+  const verificarCertificado = async () => {
+    if (!p12Base64) { toast.error('Primero carga el archivo .p12'); return; }
+    const password = getValues('certificadoPassword');
+    if (!password)  { toast.error('Ingresa la contraseña del certificado'); return; }
+
+    setVerificando(true);
+    setInfoCert(null);
+    try {
+      const res = await fetch('/api/sri/test-firma', {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify({ p12Base64, password }),
+      });
+      const data: InfoCertificado = await res.json();
+      setInfoCert(data);
+      if (data.valido) {
+        toast.success('Certificado válido y listo para firmar comprobantes SRI');
+      } else {
+        toast.error(data.error ?? 'Certificado inválido');
+      }
+    } catch {
+      toast.error('Error al verificar el certificado');
+    } finally {
+      setVerificando(false);
+    }
   };
 
   const onSubmit = async (data: ConfigForm) => {
@@ -103,6 +150,11 @@ export default function ConfiguracionSRIPage() {
     } finally {
       setSaving(false);
     }
+  };
+
+  const fmtFecha = (iso?: string) => {
+    if (!iso) return '—';
+    try { return format(new Date(iso), 'dd MMM yyyy', { locale: es }); } catch { return iso; }
   };
 
   if (loading) return <div className="p-6 text-slate-400">Cargando configuración...</div>;
@@ -156,7 +208,7 @@ export default function ConfiguracionSRIPage() {
           </div>
         </div>
 
-        {/* Establecimiento */}
+        {/* Establecimiento y ambiente */}
         <div className="bg-white rounded-xl border p-6 space-y-4">
           <h3 className="font-semibold text-slate-700">Establecimiento y Ambiente</h3>
           <div className="grid grid-cols-3 gap-4">
@@ -175,14 +227,14 @@ export default function ConfiguracionSRIPage() {
               <Select onValueChange={v => setValue('ambiente', v as '1' | '2')} defaultValue="1">
                 <SelectTrigger><SelectValue /></SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="1">🧪 Pruebas (Certificación)</SelectItem>
-                  <SelectItem value="2">🚀 Producción</SelectItem>
+                  <SelectItem value="1">Pruebas (Certificación)</SelectItem>
+                  <SelectItem value="2">Producción</SelectItem>
                 </SelectContent>
               </Select>
             </div>
           </div>
           <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 text-sm text-amber-700">
-            ⚠️ Inicia siempre en ambiente de <strong>Pruebas</strong> hasta validar todos los comprobantes con el SRI antes de pasar a Producción.
+            Inicia siempre en ambiente de <strong>Pruebas</strong> hasta validar todos los comprobantes con el SRI antes de pasar a Producción.
           </div>
         </div>
 
@@ -190,6 +242,7 @@ export default function ConfiguracionSRIPage() {
         <div className="bg-white rounded-xl border p-6 space-y-4">
           <h3 className="font-semibold text-slate-700">Certificado Digital (.p12)</h3>
 
+          {/* Upload */}
           <div className="flex items-center gap-4">
             <label className="cursor-pointer">
               <input type="file" accept=".p12,.pfx" className="hidden" onChange={handleP12} />
@@ -200,14 +253,13 @@ export default function ConfiguracionSRIPage() {
             </label>
             {tieneCert && (
               <div className="flex items-center gap-2">
-                <Badge variant="default" className="bg-green-600">
-                  ✓ Certificado cargado
-                </Badge>
+                <Badge className="bg-green-600">Certificado cargado</Badge>
                 {p12Nombre && <span className="text-xs text-slate-400">{p12Nombre}</span>}
               </div>
             )}
           </div>
 
+          {/* Contraseña */}
           <div className="space-y-1.5">
             <Label>Contraseña del certificado *</Label>
             <div className="relative">
@@ -229,9 +281,94 @@ export default function ConfiguracionSRIPage() {
             )}
           </div>
 
+          {/* Botón verificar */}
+          <Button
+            type="button"
+            variant="outline"
+            onClick={verificarCertificado}
+            disabled={verificando || !tieneCert}
+            className="w-full"
+          >
+            {verificando
+              ? <><Loader2 className="mr-2 h-4 w-4 animate-spin" />Verificando certificado...</>
+              : <><ShieldCheck className="mr-2 h-4 w-4" />Verificar Firma Digital</>
+            }
+          </Button>
+
+          {/* Resultado de verificación */}
+          {infoCert && (
+            <div className={`rounded-lg border p-4 space-y-3 ${
+              infoCert.valido
+                ? infoCert.vencido
+                  ? 'bg-red-50 border-red-200'
+                  : infoCert.expiraPronto
+                    ? 'bg-amber-50 border-amber-200'
+                    : 'bg-green-50 border-green-200'
+                : 'bg-red-50 border-red-200'
+            }`}>
+              {infoCert.valido ? (
+                <>
+                  <div className="flex items-center gap-2">
+                    {infoCert.vencido
+                      ? <ShieldAlert className="h-5 w-5 text-red-600 shrink-0" />
+                      : infoCert.expiraPronto
+                        ? <AlertTriangle className="h-5 w-5 text-amber-600 shrink-0" />
+                        : <CheckCircle2 className="h-5 w-5 text-green-600 shrink-0" />
+                    }
+                    <span className={`font-semibold text-sm ${
+                      infoCert.vencido ? 'text-red-700' : infoCert.expiraPronto ? 'text-amber-700' : 'text-green-700'
+                    }`}>
+                      {infoCert.vencido
+                        ? 'Certificado VENCIDO — no puede firmar comprobantes'
+                        : infoCert.expiraPronto
+                          ? `Certificado válido — vence en ${infoCert.diasRestantes} días`
+                          : `Certificado válido — firma digital OK`
+                      }
+                    </span>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-2 text-xs">
+                    <div>
+                      <p className="text-slate-500 font-medium">Titular</p>
+                      <p className="text-slate-800">{infoCert.titular || '—'}</p>
+                    </div>
+                    {infoCert.organizacion && infoCert.organizacion !== infoCert.titular && (
+                      <div>
+                        <p className="text-slate-500 font-medium">Organización</p>
+                        <p className="text-slate-800">{infoCert.organizacion}</p>
+                      </div>
+                    )}
+                    <div>
+                      <p className="text-slate-500 font-medium">Emisor</p>
+                      <p className="text-slate-800">{infoCert.emisor || '—'}</p>
+                    </div>
+                    <div>
+                      <p className="text-slate-500 font-medium">Válido desde</p>
+                      <p className="text-slate-800">{fmtFecha(infoCert.validoDesde)}</p>
+                    </div>
+                    <div>
+                      <p className="text-slate-500 font-medium">Válido hasta</p>
+                      <p className={`font-semibold ${infoCert.vencido ? 'text-red-700' : infoCert.expiraPronto ? 'text-amber-700' : 'text-slate-800'}`}>
+                        {fmtFecha(infoCert.validoHasta)}
+                        {infoCert.diasRestantes !== undefined && infoCert.diasRestantes >= 0
+                          ? ` (${infoCert.diasRestantes} días)`
+                          : ''}
+                      </p>
+                    </div>
+                  </div>
+                </>
+              ) : (
+                <div className="flex items-center gap-2">
+                  <ShieldAlert className="h-5 w-5 text-red-600 shrink-0" />
+                  <span className="text-sm font-semibold text-red-700">{infoCert.error}</span>
+                </div>
+              )}
+            </div>
+          )}
+
           <div className="text-xs text-slate-400 space-y-1">
-            <p>• El certificado es emitido por el Banco Central del Ecuador (BCE) o entidades autorizadas.</p>
-            <p>• Se almacena de forma cifrada en tu base de datos Firestore.</p>
+            <p>El certificado es emitido por el Banco Central del Ecuador (BCE) o entidades autorizadas.</p>
+            <p>Se almacena en tu base de datos Firestore y se usa para firmar cada comprobante electrónico.</p>
           </div>
         </div>
 

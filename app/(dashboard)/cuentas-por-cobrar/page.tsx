@@ -129,9 +129,9 @@ export default function CxCPage() {
         metodoPago,
         referencia:   refCobro || undefined,
         usuarioId:    user.uid,
-        usuarioNombre:user.displayName ?? user.email ?? 'Usuario',
+        usuarioNombre:user.nombre ?? user.email ?? 'Usuario',
       };
-      await registrarCobroCxC(cxcSel.id, cobro, user.uid, user.displayName ?? user.email ?? 'Usuario');
+      await registrarCobroCxC(cxcSel.id, cobro, user.uid, user.nombre ?? user.email ?? 'Usuario');
 
       // Asiento contable
       await crearAsientoCobro({
@@ -143,7 +143,7 @@ export default function CxCPage() {
         retFuente:    rf,
         retIVA:       ri,
         usuarioId:    user.uid,
-        usuarioNombre:user.displayName ?? user.email ?? 'Usuario',
+        usuarioNombre:user.nombre ?? user.email ?? 'Usuario',
       });
 
       toast.success('Cobro registrado exitosamente');

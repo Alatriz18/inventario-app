@@ -168,7 +168,7 @@ export default function NotasDebitoPage() {
         iva,
         total:              totalND + iva,
         usuarioId:          user.uid,
-        usuarioNombre:      user.displayName ?? user.email ?? 'Usuario',
+        usuarioNombre:      user.nombre ?? user.email ?? 'Usuario',
       });
 
       if (result.autorizado) {

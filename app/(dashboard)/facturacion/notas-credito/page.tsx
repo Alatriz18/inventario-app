@@ -191,7 +191,7 @@ export default function NotasCreditoPage() {
         iva:      0,
         total:    0,
         usuarioId:    user.uid,
-        usuarioNombre:user.displayName ?? user.email ?? 'Usuario',
+        usuarioNombre:user.nombre ?? user.email ?? 'Usuario',
       };
 
       await createNotaCredito(ncData);

@@ -31,7 +31,7 @@ import {
 } from '@/components/ui/table';
 
 import { crearAsientoPago } from '@/lib/contabilidad/motor-asientos';
-import { FacturaProveedor, Proveedor, MetodoPago } from '@/types';
+import { FacturaProveedor, Proveedor } from '@/types';
 import {
   subscribeToFacturasProveedor,
   createFacturaProveedor,
@@ -529,7 +529,7 @@ export default function FacturasProveedorPage() {
               </div>
               <div className="space-y-1.5">
                 <Label>Método de pago *</Label>
-                <Select onValueChange={v => pagoForm.setValue('metodoPago', v as MetodoPago)}
+                <Select onValueChange={v => pagoForm.setValue('metodoPago', v as 'efectivo' | 'tarjeta' | 'transferencia')}
                   defaultValue="transferencia">
                   <SelectTrigger><SelectValue /></SelectTrigger>
                   <SelectContent>

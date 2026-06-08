@@ -19,9 +19,9 @@ import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from '@/components/ui/table';
 
-import { NotaDebito, Comprobante, RazonNotaDebito } from '@/types';
+import { NotaDebito, RazonNotaDebito } from '@/types';
 import { subscribeToNotasDebito, createNotaDebito }from '@/lib/firebase/notas-debito';
-import { subscribeToComprobantes }                  from '@/lib/firebase/comprobantes';
+import { subscribeToComprobantes, Comprobante } from '@/lib/firebase/comprobantes';
 import { getConfigSRI, incrementarSecuencial }      from '@/lib/firebase/config-sri';
 import { getConfigEmpresa }                         from '@/lib/firebase/config-empresa';
 import { generarClaveAcceso }                       from '@/lib/sri/clave-acceso';

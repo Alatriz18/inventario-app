@@ -20,9 +20,9 @@ import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from '@/components/ui/table';
 
-import { NotaCredito, Comprobante, MotivoNotaCredito, ItemNotaCredito } from '@/types';
+import { NotaCredito, MotivoNotaCredito, ItemNotaCredito } from '@/types';
 import { subscribeToNotasCredito, createNotaCredito, updateNotaCredito } from '@/lib/firebase/notas-credito';
-import { subscribeToComprobantes }  from '@/lib/firebase/comprobantes';
+import { subscribeToComprobantes, Comprobante } from '@/lib/firebase/comprobantes';
 import { getConfigSRI, incrementarSecuencial } from '@/lib/firebase/config-sri';
 import { getConfigEmpresa }         from '@/lib/firebase/config-empresa';
 import { generarClaveAcceso }       from '@/lib/sri/clave-acceso';

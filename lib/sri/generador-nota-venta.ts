@@ -16,13 +16,15 @@ export interface DatosNotaVenta {
   ambiente:        '1' | '2';
   ruc:             string;
   razonSocial:     string;
-  nombreComercial?: string;
-  establecimiento: string;
-  puntoEmision:    string;
-  direccionMatriz: string;
+  nombreComercial?:      string;
+  establecimiento:       string;
+  puntoEmision:          string;
+  direccionMatriz:       string;
+  obligadoContabilidad?: 'SI' | 'NO';
+  contribuyenteEspecial?: string;
   // Comprador
-  tipoIdComprador: string;
-  identificacion:  string;
+  tipoIdComprador:      string;
+  identificacion:       string;
   razonSocialComprador: string;
   // Items
   items:           ItemNotaVenta[];
@@ -58,15 +60,16 @@ export function generarXMLNotaVenta(d: DatosNotaVenta): string {
   it.ele('ptoEmi').txt(ptoEmi);
   it.ele('secuencial').txt(secStr);
   it.ele('dirMatriz').txt(d.direccionMatriz);
+  if (d.contribuyenteEspecial) it.ele('contribuyenteEspecial').txt(d.contribuyenteEspecial);
 
   const inf = doc.ele('infoNotaVenta');
   inf.ele('fechaEmision').txt(fechaStr);
   inf.ele('dirEstablecimiento').txt(d.direccionMatriz);
-  inf.ele('obligadoContabilidad').txt('NO');
+  inf.ele('obligadoContabilidad').txt(d.obligadoContabilidad ?? 'NO');
   inf.ele('tipoIdentificacionComprador').txt(d.tipoIdComprador);
   inf.ele('razonSocialComprador').txt(d.razonSocialComprador);
   inf.ele('identificacionComprador').txt(d.identificacion);
-  inf.ele('contribuyenteEspecial').txt('');
+  if (d.contribuyenteEspecial) inf.ele('contribuyenteEspecial').txt(d.contribuyenteEspecial);
   inf.ele('totalSinImpuestos').txt(d.totalSinImpuestos.toFixed(2));
   inf.ele('totalDescuento').txt(d.totalDescuento.toFixed(2));
   inf.ele('valRetBien10').txt('0.00');

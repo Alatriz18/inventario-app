@@ -61,7 +61,7 @@ export default function ConfiguracionSRIPage() {
   const [tieneCert,     setTieneCert]     = useState(false);
   const [infoCert,      setInfoCert]      = useState<InfoCertificado | null>(null);
 
-  const { register, handleSubmit, reset, setValue, getValues, formState: { errors } } =
+  const { register, handleSubmit, reset, setValue, getValues, watch, formState: { errors } } =
     useForm<ConfigForm>({
       resolver: zodResolver(schema),
       defaultValues: {
@@ -71,6 +71,9 @@ export default function ConfiguracionSRIPage() {
         puntoEmision:         '001',
       },
     });
+
+  const watchAmbiente             = watch('ambiente');
+  const watchObligadoContabilidad = watch('obligadoContabilidad');
 
   useEffect(() => {
     getConfigSRI().then(cfg => {
@@ -211,7 +214,10 @@ export default function ConfiguracionSRIPage() {
             </div>
             <div className="space-y-1.5">
               <Label>Obligado a llevar contabilidad</Label>
-              <Select onValueChange={v => setValue('obligadoContabilidad', v as 'SI' | 'NO')} defaultValue="NO">
+              <Select
+                value={watchObligadoContabilidad}
+                onValueChange={v => setValue('obligadoContabilidad', v as 'SI' | 'NO')}
+              >
                 <SelectTrigger><SelectValue /></SelectTrigger>
                 <SelectContent>
                   <SelectItem value="NO">No</SelectItem>
@@ -243,7 +249,10 @@ export default function ConfiguracionSRIPage() {
             </div>
             <div className="space-y-1.5">
               <Label>Ambiente SRI *</Label>
-              <Select onValueChange={v => setValue('ambiente', v as '1' | '2')} defaultValue="1">
+              <Select
+                value={watchAmbiente}
+                onValueChange={v => setValue('ambiente', v as '1' | '2')}
+              >
                 <SelectTrigger><SelectValue /></SelectTrigger>
                 <SelectContent>
                   <SelectItem value="1">Pruebas (Certificación)</SelectItem>

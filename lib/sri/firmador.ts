@@ -260,8 +260,17 @@ export function firmarXML(
     //   Reference 1: etsi:SignedProperties
     //   Reference 2: ds:KeyInfo / Certificate
     //   Reference 3: Documento (#comprobante)
+    //
+    // CRÍTICO — C14N inclusivo y propagación de namespaces:
+    // El ds:Signature declara xmlns:etsi. Con C14N inclusivo (REC-xml-c14n-20010315),
+    // cuando el SRI canonicaliza el ds:SignedInfo para VERIFICAR la firma,
+    // hereda xmlns:etsi del ancestro ds:Signature aunque no lo use.
+    // Por eso debemos incluir xmlns:etsi en el SignedInfo al FIRMAR,
+    // para que el string que firmamos sea idéntico al que el SRI verificará.
     const signedInfoXML = [
-      `<ds:SignedInfo xmlns:ds="http://www.w3.org/2000/09/xmldsig#"`,
+      `<ds:SignedInfo`,
+        ` xmlns:ds="http://www.w3.org/2000/09/xmldsig#"`,
+        ` xmlns:etsi="http://uri.etsi.org/01903/v1.3.2#"`,
         ` Id="Signature-SignedInfo${ts}">`,
         `<ds:CanonicalizationMethod Algorithm="http://www.w3.org/TR/2001/REC-xml-c14n-20010315"></ds:CanonicalizationMethod>`,
         `<ds:SignatureMethod Algorithm="http://www.w3.org/2000/09/xmldsig#rsa-sha1"></ds:SignatureMethod>`,

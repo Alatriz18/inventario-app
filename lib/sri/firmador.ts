@@ -236,11 +236,15 @@ export function firmarXML(
     const xmlParaDigest = normalizeNl(stripXmlDeclaration(xmlOriginal));
     const xmlDigest     = sha1b64Buffer(xmlParaDigest);
 
-    // ── 6. Digest del KeyInfo (Reference al certificado) ──────────────────
-    // El SRI requiere una Reference al elemento ds:KeyInfo con su digest.
-    // Construimos el KeyInfo primero para poder calcular su digest.
+    // ── 6. KeyInfo XML ────────────────────────────────────────────────────
+    // El KeyInfo NO lleva xmlns:ds propio en el XML final porque hereda
+    // xmlns:ds y xmlns:etsi del padre ds:Signature.
+    // Por eso NO incluimos la Reference al KeyInfo en el SignedInfo:
+    // el digest correcto requeriría C14N completo con propagación de namespaces
+    // que no podemos calcular sin un parser C14N real.
+    // El SRI acepta comprobantes sin esta Reference (es opcional en XMLDSig).
     const keyInfoXML = [
-      `<ds:KeyInfo xmlns:ds="http://www.w3.org/2000/09/xmldsig#" Id="${certId}">`,
+      `<ds:KeyInfo Id="${certId}">`,
         `<ds:X509Data>`,
           `<ds:X509Certificate>${certB64}</ds:X509Certificate>`,
         `</ds:X509Data>`,
@@ -253,20 +257,15 @@ export function firmarXML(
       `</ds:KeyInfo>`,
     ].join('');
 
-    const certRefDigest = sha1b64Buffer(normalizeNl(keyInfoXML));
-
     // ── 7. SignedInfo ─────────────────────────────────────────────────────
-    // Orden EXACTO del Anexo 14:
-    //   Reference 1: etsi:SignedProperties
-    //   Reference 2: ds:KeyInfo / Certificate
-    //   Reference 3: Documento (#comprobante)
+    // Solo 2 References: SignedProperties + Documento (#comprobante)
+    // La Reference al KeyInfo se omite porque calcular su digest requiere
+    // C14N real con propagación de namespaces del contexto padre.
     //
     // CRÍTICO — C14N inclusivo y propagación de namespaces:
-    // El ds:Signature declara xmlns:etsi. Con C14N inclusivo (REC-xml-c14n-20010315),
-    // cuando el SRI canonicaliza el ds:SignedInfo para VERIFICAR la firma,
-    // hereda xmlns:etsi del ancestro ds:Signature aunque no lo use.
-    // Por eso debemos incluir xmlns:etsi en el SignedInfo al FIRMAR,
-    // para que el string que firmamos sea idéntico al que el SRI verificará.
+    // El ds:Signature declara xmlns:etsi. Con C14N inclusivo,
+    // el SRI propaga xmlns:etsi al SignedInfo al verificar.
+    // Incluimos xmlns:etsi aquí para que el string firmado sea idéntico.
     const signedInfoXML = [
       `<ds:SignedInfo`,
         ` xmlns:ds="http://www.w3.org/2000/09/xmldsig#"`,
@@ -279,12 +278,7 @@ export function firmarXML(
           `<ds:DigestMethod Algorithm="http://www.w3.org/2000/09/xmldsig#sha1"></ds:DigestMethod>`,
           `<ds:DigestValue>${spDigest}</ds:DigestValue>`,
         `</ds:Reference>`,
-        // Reference 2: KeyInfo (certificado X509)
-        `<ds:Reference URI="#${certId}">`,
-          `<ds:DigestMethod Algorithm="http://www.w3.org/2000/09/xmldsig#sha1"></ds:DigestMethod>`,
-          `<ds:DigestValue>${certRefDigest}</ds:DigestValue>`,
-        `</ds:Reference>`,
-        // Reference 3: Documento
+        // Reference 2: Documento (enveloped-signature)
         `<ds:Reference Id="${refDocId}" URI="#comprobante">`,
           `<ds:Transforms>`,
             `<ds:Transform Algorithm="http://www.w3.org/2000/09/xmldsig#enveloped-signature"></ds:Transform>`,

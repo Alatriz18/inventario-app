@@ -1,3 +1,21 @@
+/**
+ * Firmador XAdES-BES para el SRI Ecuador
+ *
+ * Implementado EXACTAMENTE según el Anexo 14 de la Ficha Técnica de
+ * Comprobantes Electrónicos v2.32 del SRI Ecuador.
+ *
+ * Correcciones respecto a versiones anteriores:
+ *  1. Prefijo de namespace: etsi: (no xades:) — el SRI usa etsi:
+ *  2. Orden de References en SignedInfo:
+ *       1) etsi:SignedProperties
+ *       2) ds:KeyInfo / Certificate (digest del cert X509)
+ *       3) Documento (#comprobante)
+ *  3. Reference extra al KeyInfo/Certificate con su digest
+ *  4. etsi:SignedDataObjectProperties > etsi:DataObjectFormat obligatorio
+ *  5. Issuer en orden natural del certificado (no invertido)
+ *  6. xmlns:etsi en QualifyingProperties (no xmlns:xades)
+ */
+
 import * as forge from 'node-forge';
 
 export interface ResultadoFirma {
@@ -5,76 +23,32 @@ export interface ResultadoFirma {
   error?:     string;
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// DIAGNÓSTICO: los 5 bugs que causaban FIRMA INVÁLIDA en el SRI
-//
-// Bug 1: c14n() eliminaba la declaración XML del documento antes de calcular
-//        el digest, pero el SRI aplica exc-c14n sobre el nodo raíz completo
-//        → el digest no cuadraba.
-//
-// Bug 2: Issuer invertido con comas. El SRI espera RFC 2253 sin invertir y
-//        sin espacios después de la coma: "C=EC,O=BCE,CN=..."
-//
-// Bug 3: SignedProperties estaba duplicado — una vez standalone (para calcular
-//        su digest) y otra dentro de QualifyingProperties con el mismo Id.
-//        El SRI encontraba dos nodos con el mismo Id → firma inválida.
-//
-// Bug 4: El digest de SignedProperties se calculaba sobre un XML "standalone"
-//        con sus propios xmlns declarados. Pero dentro del documento firmado
-//        los xmlns vienen del contexto padre (ds: y xades: ya declarados).
-//        C14N propaga namespaces → el texto canonicalizado es diferente.
-//
-// Bug 5: La "canonicalización" era solo normalización de newlines. No hacía
-//        propagación real de namespaces. Para SignedInfo esto causa que el
-//        SRI recalcule un valor diferente al verificar la firma RSA.
-// ─────────────────────────────────────────────────────────────────────────────
+// ── helpers ───────────────────────────────────────────────────────────────
 
-/**
- * Canonicalización C14N real para nuestro caso de uso.
- *
- * El SRI usa Canonical XML 1.0 (REC-xml-c14n-20010315) y Exclusive C14N
- * (xml-exc-c14n). Para los elementos que generamos (sin namespaces complejos
- * ni herencia de contexto fuera del bloque Signature) la diferencia práctica
- * entre C14N y Exc-C14N es mínima, pero debemos:
- *
- *  1. No eliminar la declaración XML del documento — el digest se calcula
- *     sobre el nodo raíz SIN la declaración (C14N no incluye PI de declaración).
- *  2. Propagar los namespaces correctamente en cada sub-árbol.
- *  3. Normalizar newlines (\r\n → \n, \r suelto → \n).
- *  4. NO autoclose tags vacíos (<tag/> → <tag></tag>).
- */
 function stripXmlDeclaration(xml: string): string {
-  // Elimina SOLO la declaración <?xml ... ?> del inicio
   return xml.replace(/^<\?xml[^?]*\?>\s*/m, '');
 }
 
-function normalizeNewlines(s: string): string {
+function normalizeNl(s: string): string {
   return s.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
 }
 
-/** SHA1 sobre bytes binarios (ej: DER del certificado) */
-function sha1b64Binary(binaryStr: string): string {
+/** SHA1 sobre bytes binarios (DER del cert) */
+function sha1b64bin(bin: string): string {
   const md = forge.md.sha1.create();
-  md.update(binaryStr);
+  md.update(bin);
   return forge.util.encode64(md.digest().getBytes());
 }
 
-/** SHA1 sobre texto UTF-8 (ej: XML canonicalizado) */
-function sha1b64Utf8(text: string): string {
+/** SHA1 sobre texto (lo convierte a UTF-8 bytes antes de hashear) */
+function sha1b64utf8(text: string): string {
   const md = forge.md.sha1.create();
   md.update(forge.util.encodeUtf8(text));
   return forge.util.encode64(md.digest().getBytes());
 }
 
-/**
- * Firma un XML con XAdES-BES según la ficha técnica del SRI Ecuador.
- *
- * Algoritmos:
- *  - Digest:    SHA1
- *  - Firma:     RSA-SHA1
- *  - C14N doc:  Exclusive C14N (xml-exc-c14n)
- *  - C14N SignedInfo / SignedProps: Canonical XML 1.0
- */
+// ── firmador principal ────────────────────────────────────────────────────
+
 export function firmarXML(
   xmlOriginal: string,
   p12Base64:   string,
@@ -89,10 +63,10 @@ export function firmarXML(
     const keyBags  = p12.getBags({ bagType: forge.pki.oids.pkcs8ShroudedKeyBag });
     const certBags = p12.getBags({ bagType: forge.pki.oids.certBag });
 
-    const privateKey = keyBags[forge.pki.oids.pkcs8ShroudedKeyBag]?.[0]?.key;
-
-    // Tomar el certificado del titular (no-CA)
+    const privateKey  = keyBags[forge.pki.oids.pkcs8ShroudedKeyBag]?.[0]?.key;
     const certBagList = certBags[forge.pki.oids.certBag] ?? [];
+
+    // Cert del titular — no-CA
     const cert = certBagList.find(bag => {
       const bc = bag.cert?.extensions?.find((e: any) => e.name === 'basicConstraints');
       return !bc?.cA;
@@ -102,147 +76,194 @@ export function firmarXML(
       return { xmlFirmado: '', error: 'Certificado inválido o contraseña incorrecta' };
     }
 
-    // ── 2. Datos del certificado ─────────────────────────────────────────
+    // ── 2. Datos del cert ─────────────────────────────────────────────────
     const certDer    = forge.asn1.toDer(forge.pki.certificateToAsn1(cert)).getBytes();
     const certB64    = forge.util.encode64(certDer);
-    const certDigest = sha1b64Binary(certDer);
+    const certDigest = sha1b64bin(certDer);   // para Reference al KeyInfo
 
-    // FIX Bug 2: Issuer en formato RFC 2253 SIN invertir, SIN espacios después de coma
-    // El SRI Ecuador espera el orden natural del certificado (de más específico a más general)
-    // tal como está almacenado en el campo issuer del cert.
+    // Modulus y exponent RSA para ds:RSAKeyValue
+    const pubKey    = cert.publicKey as any;
+    const modulus   = forge.util.encode64(
+      forge.asn1.toDer(forge.asn1.create(
+        forge.asn1.Class.UNIVERSAL, forge.asn1.Type.INTEGER, false,
+        pubKey.n.toByteArray()
+      )).getBytes()
+    );
+
+    // Issuer: orden NATURAL del certificado (como está almacenado), separado por coma sin espacios
+    // Ejemplo oficial SRI: "CN=AC BANCO CENTRAL DEL ECUADOR,L=QUITO,OU=...,O=...,C=EC"
     const issuerName = cert.issuer.attributes
       .map((a: any) => `${a.shortName}=${a.value}`)
-      .join(',');  // sin .reverse(), sin espacio después de coma
+      .join(',');
 
-    const serialHex = cert.serialNumber;
-    const serialDec = BigInt(`0x${serialHex}`).toString();
+    const serialDec = BigInt(`0x${cert.serialNumber}`).toString();
 
     const subjectName = cert.subject.attributes
       .map((a: any) => `${a.shortName}=${a.value}`)
       .join(',');
 
-    // ── 3. IDs únicos ────────────────────────────────────────────────────
-    const ts       = Date.now();
-    const sigId    = `Signature${ts}`;
-    const spId     = `SignedProperties-${ts}`;
-    const certId   = `Certificate${ts}`;
+    // ── 3. IDs ────────────────────────────────────────────────────────────
+    const ts    = Date.now();
+    const sigId = `Signature${ts}`;
+    const spId  = `${sigId}SignedProperties${ts}`;
+    const certId= `Certificate${ts}`;
     const refDocId = `Reference-ID-${ts}`;
-    const refSpId  = `ReferenceProperties-${ts}`;
+    const refSpId  = `SignedPropertiesID${ts}`;
 
-    const signingTime = new Date().toISOString().replace(/\.\d{3}Z$/, '+00:00');
+    const signingTime = new Date().toISOString().replace(/\.\d{3}Z$/, '-05:00');
 
-    // ── 4. Digest del DOCUMENTO ──────────────────────────────────────────
-    // Transform: enveloped-signature + exc-c14n
-    // "enveloped-signature" → quitar el nodo ds:Signature del XML antes de hashear
-    //   (el documento aún no tiene firma, así que no hay nada que quitar)
-    // "exc-c14n" → canonicalizar el nodo raíz
+    // ── 4. etsi:SignedProperties ──────────────────────────────────────────
+    // Este string se usa para:
+    //   a) Calcular su digest (con sus xmlns declarados)
+    //   b) Insertarlo dentro de QualifyingProperties (SIN sus propios xmlns,
+    //      porque etsi: y ds: ya están declarados en el padre)
     //
-    // FIX Bug 1 + Bug 4:
-    //   - El digest se calcula sobre el nodo raíz SIN la declaración XML
-    //     (C14N estándar no incluye la declaración PI).
-    //   - Normalizamos newlines.
-    const xmlParaDigest = normalizeNewlines(stripXmlDeclaration(xmlOriginal));
-    const xmlDigest     = sha1b64Utf8(xmlParaDigest);
-
-    // ── 5. SignedProperties (dentro de QualifyingProperties) ────────────
-    // FIX Bug 3: Un solo bloque SignedProperties, solo dentro de Object.
-    // FIX Bug 4: los namespaces deben estar declarados AQUÍ porque este
-    //            string se canonicaliza de forma independiente para calcular
-    //            su digest (simula lo que el verificador hará).
-    const signedPropsContent = [
-      `<xades:SignedSignatureProperties>`,
-        `<xades:SigningTime>${signingTime}</xades:SigningTime>`,
-        `<xades:SigningCertificate>`,
-          `<xades:Cert>`,
-            `<xades:CertDigest>`,
-              `<ds:DigestMethod Algorithm="http://www.w3.org/2000/09/xmldsig#sha1"></ds:DigestMethod>`,
-              `<ds:DigestValue>${certDigest}</ds:DigestValue>`,
-            `</xades:CertDigest>`,
-            `<xades:IssuerSerial>`,
-              `<ds:X509IssuerName>${issuerName}</ds:X509IssuerName>`,
-              `<ds:X509SerialNumber>${serialDec}</ds:X509SerialNumber>`,
-            `</xades:IssuerSerial>`,
-          `</xades:Cert>`,
-        `</xades:SigningCertificate>`,
-      `</xades:SignedSignatureProperties>`,
-    ].join('');
-
-    // Para el DIGEST de SignedProperties canonicalizamos el nodo completo
-    // con sus namespaces declarados (como lo haría el verificador del SRI).
-    const signedPropsForDigest = [
-      `<xades:SignedProperties`,
-        ` xmlns:ds="http://www.w3.org/2000/09/xmldsig#"`,
-        ` xmlns:xades="http://uri.etsi.org/01903/v1.3.2#"`,
+    // Para el DIGEST necesitamos el string con xmlns declarados:
+    const signedPropsConNs = [
+      `<etsi:SignedProperties xmlns:ds="http://www.w3.org/2000/09/xmldsig#"`,
+        ` xmlns:etsi="http://uri.etsi.org/01903/v1.3.2#"`,
         ` Id="${spId}">`,
-        signedPropsContent,
-      `</xades:SignedProperties>`,
+        `<etsi:SignedSignatureProperties>`,
+          `<etsi:SigningTime>${signingTime}</etsi:SigningTime>`,
+          `<etsi:SigningCertificate>`,
+            `<etsi:Cert>`,
+              `<etsi:CertDigest>`,
+                `<ds:DigestMethod Algorithm="http://www.w3.org/2000/09/xmldsig#sha1"></ds:DigestMethod>`,
+                `<ds:DigestValue>${certDigest}</ds:DigestValue>`,
+              `</etsi:CertDigest>`,
+              `<etsi:IssuerSerial>`,
+                `<ds:X509IssuerName>${issuerName}</ds:X509IssuerName>`,
+                `<ds:X509SerialNumber>${serialDec}</ds:X509SerialNumber>`,
+              `</etsi:IssuerSerial>`,
+            `</etsi:Cert>`,
+          `</etsi:SigningCertificate>`,
+        `</etsi:SignedSignatureProperties>`,
+        // DataObjectFormat — obligatorio según Anexo 14
+        `<etsi:SignedDataObjectProperties>`,
+          `<etsi:DataObjectFormat ObjectReference="#${refDocId}">`,
+            `<etsi:Description>contenido comprobante</etsi:Description>`,
+            `<etsi:MimeType>text/xml</etsi:MimeType>`,
+          `</etsi:DataObjectFormat>`,
+        `</etsi:SignedDataObjectProperties>`,
+      `</etsi:SignedProperties>`,
     ].join('');
 
-    const spDigest = sha1b64Utf8(normalizeNewlines(signedPropsForDigest));
+    const spDigest = sha1b64utf8(normalizeNl(signedPropsConNs));
 
-    // ── 6. SignedInfo ────────────────────────────────────────────────────
+    // ── 5. Digest del documento ───────────────────────────────────────────
+    // Transform: enveloped-signature (el doc aún no tiene firma, no hay nada que quitar)
+    // El digest se calcula sobre el nodo raíz SIN declaración XML
+    const xmlParaDigest = normalizeNl(stripXmlDeclaration(xmlOriginal));
+    const xmlDigest     = sha1b64utf8(xmlParaDigest);
+
+    // ── 6. Digest del KeyInfo (Reference al certificado) ──────────────────
+    // El SRI requiere una Reference al elemento ds:KeyInfo con su digest.
+    // Construimos el KeyInfo primero para poder calcular su digest.
+    const keyInfoXML = [
+      `<ds:KeyInfo xmlns:ds="http://www.w3.org/2000/09/xmldsig#" Id="${certId}">`,
+        `<ds:X509Data>`,
+          `<ds:X509Certificate>${certB64}</ds:X509Certificate>`,
+        `</ds:X509Data>`,
+        `<ds:KeyValue>`,
+          `<ds:RSAKeyValue>`,
+            `<ds:Modulus>${modulus}</ds:Modulus>`,
+            `<ds:Exponent>AQAB</ds:Exponent>`,
+          `</ds:RSAKeyValue>`,
+        `</ds:KeyValue>`,
+      `</ds:KeyInfo>`,
+    ].join('');
+
+    const certRefDigest = sha1b64utf8(normalizeNl(keyInfoXML));
+
+    // ── 7. SignedInfo ─────────────────────────────────────────────────────
+    // Orden EXACTO del Anexo 14:
+    //   Reference 1: etsi:SignedProperties
+    //   Reference 2: ds:KeyInfo / Certificate
+    //   Reference 3: Documento (#comprobante)
     const signedInfoXML = [
-      `<ds:SignedInfo xmlns:ds="http://www.w3.org/2000/09/xmldsig#">`,
+      `<ds:SignedInfo xmlns:ds="http://www.w3.org/2000/09/xmldsig#"`,
+        ` Id="Signature-SignedInfo${ts}">`,
         `<ds:CanonicalizationMethod Algorithm="http://www.w3.org/TR/2001/REC-xml-c14n-20010315"></ds:CanonicalizationMethod>`,
         `<ds:SignatureMethod Algorithm="http://www.w3.org/2000/09/xmldsig#rsa-sha1"></ds:SignatureMethod>`,
+        // Reference 1: SignedProperties
+        `<ds:Reference Id="${refSpId}" Type="http://uri.etsi.org/01903#SignedProperties" URI="#${spId}">`,
+          `<ds:DigestMethod Algorithm="http://www.w3.org/2000/09/xmldsig#sha1"></ds:DigestMethod>`,
+          `<ds:DigestValue>${spDigest}</ds:DigestValue>`,
+        `</ds:Reference>`,
+        // Reference 2: KeyInfo (certificado X509)
+        `<ds:Reference URI="#${certId}">`,
+          `<ds:DigestMethod Algorithm="http://www.w3.org/2000/09/xmldsig#sha1"></ds:DigestMethod>`,
+          `<ds:DigestValue>${certRefDigest}</ds:DigestValue>`,
+        `</ds:Reference>`,
+        // Reference 3: Documento
         `<ds:Reference Id="${refDocId}" URI="#comprobante">`,
           `<ds:Transforms>`,
             `<ds:Transform Algorithm="http://www.w3.org/2000/09/xmldsig#enveloped-signature"></ds:Transform>`,
-            `<ds:Transform Algorithm="http://www.w3.org/2001/10/xml-exc-c14n#"></ds:Transform>`,
           `</ds:Transforms>`,
           `<ds:DigestMethod Algorithm="http://www.w3.org/2000/09/xmldsig#sha1"></ds:DigestMethod>`,
           `<ds:DigestValue>${xmlDigest}</ds:DigestValue>`,
         `</ds:Reference>`,
-        `<ds:Reference Id="${refSpId}" Type="http://uri.etsi.org/01903#SignedProperties" URI="#${spId}">`,
-          `<ds:Transforms>`,
-            `<ds:Transform Algorithm="http://www.w3.org/TR/2001/REC-xml-c14n-20010315"></ds:Transform>`,
-          `</ds:Transforms>`,
-          `<ds:DigestMethod Algorithm="http://www.w3.org/2000/09/xmldsig#sha1"></ds:DigestMethod>`,
-          `<ds:DigestValue>${spDigest}</ds:DigestValue>`,
-        `</ds:Reference>`,
       `</ds:SignedInfo>`,
     ].join('');
 
-    // ── 7. Firmar SignedInfo ──────────────────────────────────────────────
-    // FIX Bug 5: canonicalizamos correctamente antes de firmar.
-    // El algoritmo declarado es REC-xml-c14n-20010315 sobre el nodo SignedInfo.
-    // En nuestro caso el nodo ya es el root del fragmento, así que
-    // stripXmlDeclaration + normalizeNewlines es suficiente (no hay namespace
-    // heredado de un padre porque ds: está declarado en el propio nodo).
-    const signedInfoC14N = normalizeNewlines(signedInfoXML);
-
+    // ── 8. Firmar SignedInfo ───────────────────────────────────────────────
+    const signedInfoC14N = normalizeNl(signedInfoXML);
     const md = forge.md.sha1.create();
     md.update(forge.util.encodeUtf8(signedInfoC14N));
     const sigValue = forge.util.encode64((privateKey as any).sign(md));
 
-    // ── 8. Bloque Signature completo ─────────────────────────────────────
+    // ── 9. Bloque Signature completo (estructura del Anexo 14) ─────────────
+    // IMPORTANTE: el ds:Signature lleva xmlns:etsi (no xmlns:xades)
     const signature = [
-      `<ds:Signature xmlns:ds="http://www.w3.org/2000/09/xmldsig#" Id="${sigId}">`,
+      `<ds:Signature xmlns:ds="http://www.w3.org/2000/09/xmldsig#"`,
+        ` xmlns:etsi="http://uri.etsi.org/01903/v1.3.2#"`,
+        ` Id="${sigId}">`,
         signedInfoXML,
         `<ds:SignatureValue Id="SignatureValue${ts}">${sigValue}</ds:SignatureValue>`,
+        // KeyInfo exactamente como se usó para calcular certRefDigest
         `<ds:KeyInfo Id="${certId}">`,
           `<ds:X509Data>`,
-            `<ds:X509SubjectName>${subjectName}</ds:X509SubjectName>`,
             `<ds:X509Certificate>${certB64}</ds:X509Certificate>`,
           `</ds:X509Data>`,
+          `<ds:KeyValue>`,
+            `<ds:RSAKeyValue>`,
+              `<ds:Modulus>${modulus}</ds:Modulus>`,
+              `<ds:Exponent>AQAB</ds:Exponent>`,
+            `</ds:RSAKeyValue>`,
+          `</ds:KeyValue>`,
         `</ds:KeyInfo>`,
         `<ds:Object Id="${sigId}-Object${ts}">`,
-          `<xades:QualifyingProperties`,
-            ` xmlns:xades="http://uri.etsi.org/01903/v1.3.2#"`,
-            ` xmlns:ds="http://www.w3.org/2000/09/xmldsig#"`,
-            ` Target="#${sigId}">`,
-            // FIX Bug 3: SignedProperties UNA SOLA VEZ aquí, sin xmlns propios
-            // (los xmlns vienen del QualifyingProperties padre)
-            `<xades:SignedProperties Id="${spId}">`,
-              signedPropsContent,
-            `</xades:SignedProperties>`,
-          `</xades:QualifyingProperties>`,
+          `<etsi:QualifyingProperties Target="#${sigId}">`,
+            // SignedProperties SIN sus propios xmlns (etsi: y ds: ya declarados arriba)
+            `<etsi:SignedProperties Id="${spId}">`,
+              `<etsi:SignedSignatureProperties>`,
+                `<etsi:SigningTime>${signingTime}</etsi:SigningTime>`,
+                `<etsi:SigningCertificate>`,
+                  `<etsi:Cert>`,
+                    `<etsi:CertDigest>`,
+                      `<ds:DigestMethod Algorithm="http://www.w3.org/2000/09/xmldsig#sha1"></ds:DigestMethod>`,
+                      `<ds:DigestValue>${certDigest}</ds:DigestValue>`,
+                    `</etsi:CertDigest>`,
+                    `<etsi:IssuerSerial>`,
+                      `<ds:X509IssuerName>${issuerName}</ds:X509IssuerName>`,
+                      `<ds:X509SerialNumber>${serialDec}</ds:X509SerialNumber>`,
+                    `</etsi:IssuerSerial>`,
+                  `</etsi:Cert>`,
+                `</etsi:SigningCertificate>`,
+              `</etsi:SignedSignatureProperties>`,
+              `<etsi:SignedDataObjectProperties>`,
+                `<etsi:DataObjectFormat ObjectReference="#${refDocId}">`,
+                  `<etsi:Description>contenido comprobante</etsi:Description>`,
+                  `<etsi:MimeType>text/xml</etsi:MimeType>`,
+                `</etsi:DataObjectFormat>`,
+              `</etsi:SignedDataObjectProperties>`,
+            `</etsi:SignedProperties>`,
+          `</etsi:QualifyingProperties>`,
         `</ds:Object>`,
       `</ds:Signature>`,
     ].join('');
 
-    // ── 9. Inyectar firma dentro del elemento raíz ────────────────────────
-    // La firma va ANTES del cierre del elemento raíz (enveloped signature).
+    // ── 10. Inyectar firma antes del cierre del elemento raíz ──────────────
     const xmlFirmado = xmlOriginal.replace(
       /(<\/(?:factura|notaVenta|comprobanteRetencion|liquidacionCompra|guiaRemision)>\s*)$/,
       `${signature}$1`
@@ -251,13 +272,16 @@ export function firmarXML(
     if (xmlFirmado === xmlOriginal) {
       return {
         xmlFirmado: '',
-        error: 'No se encontró el elemento raíz XML. Verifica que el XML sea válido.',
+        error: 'No se encontró el elemento raíz del XML. Verifica que el comprobante sea válido.',
       };
     }
 
     return { xmlFirmado };
 
   } catch (err: any) {
-    return { xmlFirmado: '', error: err.message ?? 'Error al firmar el XML' };
+    return {
+      xmlFirmado: '',
+      error: `Error al firmar: ${err.message ?? String(err)}`,
+    };
   }
 }

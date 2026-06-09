@@ -209,6 +209,24 @@ function EmitirComprobanteInner() {
 
       const result = await response.json();
 
+      // Si hay error HTTP (400/500), mostrar el mensaje exacto
+      if (!response.ok) {
+        const etapa  = result.etapa  ?? 'desconocida';
+        const detalle = result.error ?? `Error HTTP ${response.status}`;
+        const msgCompleto = `[${etapa.toUpperCase()}] ${detalle}`;
+        toast.error(msgCompleto, { duration: 8000 });
+        setResultado({
+          error:    msgCompleto,
+          etapa,
+          xmlFirmado: result.xmlFirmado,   // puede estar disponible para diagnóstico
+        });
+        await updateComprobante(compId, {
+          estado:      'rechazado',
+          mensajesSRI: [msgCompleto],
+        });
+        return;
+      }
+
       // 9. Actualizar comprobante con resultado
       if (result.estado === 'AUTORIZADO') {
         await updateComprobante(compId, {
@@ -220,13 +238,18 @@ function EmitirComprobanteInner() {
           mensajesSRI:        result.mensajes ?? [],
         });
         toast.success('¡Comprobante autorizado por el SRI!');
-      } else if (result.estado === 'DEVUELTA') {
+      } else if (result.estado === 'DEVUELTA' || result.estado === 'ERROR') {
+        // El SRI devolvió el comprobante con errores — mostrar mensajes exactos
+        const mensajesSRI: string[] = (result.mensajes ?? []).map((m: any) =>
+          typeof m === 'string' ? m : `[${m.identificador ?? '?'}] ${m.mensaje ?? ''} ${m.informacionAdicional ?? ''}`
+        );
         await updateComprobante(compId, {
           estado:        'rechazado',
           xmlFirmadoB64: result.xmlFirmadoB64,
-          mensajesSRI:   result.mensajes ?? [],
+          mensajesSRI,
         });
-        toast.error('Comprobante devuelto por el SRI');
+        setResultado({ ...result, compId, claveAcceso, mensajesSRI });
+        toast.error(`SRI devolvió el comprobante: ${mensajesSRI[0] ?? 'ver detalle'}`);
       } else {
         await updateComprobante(compId, {
           estado:      'rechazado',
@@ -438,22 +461,51 @@ function EmitirComprobanteInner() {
                 resultado.estado === 'AUTORIZADO' ? 'text-green-700' : 'text-red-700'
               }`}>
                 {resultado.estado === 'AUTORIZADO' ? 'Comprobante Autorizado' :
-                 resultado.error ? 'Error' : 'Comprobante Devuelto / Rechazado'}
+                 resultado.error ? `Error en etapa: ${resultado.etapa ?? 'desconocida'}` :
+                 'Comprobante Devuelto / Rechazado'}
               </h3>
             </div>
+
+            {/* Error del servidor (400/500) */}
+            {resultado.error && (
+              <div className="bg-red-100 rounded-lg p-3">
+                <p className="text-xs font-bold text-red-700 mb-1">Detalle del error:</p>
+                <p className="text-xs text-red-800 break-words font-mono">{resultado.error}</p>
+              </div>
+            )}
+
+            {/* Número de autorización */}
             {resultado.numeroAutorizacion && (
               <div>
                 <p className="text-xs text-green-600 font-medium">Número de autorización:</p>
                 <p className="font-mono text-sm text-green-800 break-all">{resultado.numeroAutorizacion}</p>
               </div>
             )}
-            {resultado.mensajes?.length > 0 && (
+
+            {/* Mensajes del SRI (DEVUELTA/RECHAZADO) */}
+            {(resultado.mensajesSRI ?? resultado.mensajes)?.length > 0 && (
               <div>
                 <p className="text-xs font-medium text-slate-600 mb-1">Mensajes del SRI:</p>
-                {resultado.mensajes.map((m: string, i: number) => (
-                  <p key={i} className="text-xs text-slate-600">• {m}</p>
+                {(resultado.mensajesSRI ?? resultado.mensajes).map((m: any, i: number) => (
+                  <p key={i} className="text-xs text-slate-700 font-mono bg-white rounded px-2 py-1 mb-1 break-words">
+                    • {typeof m === 'string' ? m : `[${m.identificador}] ${m.mensaje} ${m.informacionAdicional ?? ''}`}
+                  </p>
                 ))}
               </div>
+            )}
+
+            {/* Botón para ver XML firmado si hay error de firma */}
+            {resultado.xmlFirmado && (
+              <details className="text-xs">
+                <summary className="cursor-pointer text-slate-500 hover:text-slate-700 font-medium">
+                  Ver XML firmado (diagnóstico)
+                </summary>
+                <textarea
+                  readOnly
+                  className="w-full mt-2 h-40 text-xs font-mono bg-slate-900 text-green-400 p-2 rounded"
+                  value={resultado.xmlFirmado}
+                />
+              </details>
             )}
           </div>
         )}

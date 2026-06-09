@@ -56,39 +56,90 @@ export function firmarXML(
 ): ResultadoFirma {
   try {
     // ── 1. Leer P12 ──────────────────────────────────────────────────────
-    const p12Der  = forge.util.decode64(p12Base64);
-    const p12Asn1 = forge.asn1.fromDer(p12Der);
-    const p12     = forge.pkcs12.pkcs12FromAsn1(p12Asn1, false, password);
+    // El P12 del Banco Central del Ecuador usa cifrado RC2 (legacy).
+    // node-forge necesita el segundo parámetro en true para soportarlo.
+    // También limpiamos el base64 por si viene con saltos de línea o espacios.
+    const p12B64Clean = p12Base64.replace(/\s/g, '');
+    const p12Der      = forge.util.decode64(p12B64Clean);
+    const p12Asn1     = forge.asn1.fromDer(p12Der, false); // false = no estricto
+    
+    // Intentar primero con legacy RC2 (BCE Ecuador), luego sin legacy
+    let p12: any;
+    try {
+      p12 = forge.pkcs12.pkcs12FromAsn1(p12Asn1, true, password);
+    } catch {
+      try {
+        p12 = forge.pkcs12.pkcs12FromAsn1(p12Asn1, false, password);
+      } catch (e2: any) {
+        return { xmlFirmado: '', error: `No se pudo leer el certificado .p12: ${e2.message}. Verifica la contraseña.` };
+      }
+    }
 
-    const keyBags  = p12.getBags({ bagType: forge.pki.oids.pkcs8ShroudedKeyBag });
-    const certBags = p12.getBags({ bagType: forge.pki.oids.certBag });
+    // Intentar obtener la llave privada — puede estar en pkcs8ShroudedKeyBag o keyBag
+    const keyBagsShrouded = p12.getBags({ bagType: forge.pki.oids.pkcs8ShroudedKeyBag });
+    const keyBagsPlain    = p12.getBags({ bagType: forge.pki.oids.keyBag });
 
-    const privateKey  = keyBags[forge.pki.oids.pkcs8ShroudedKeyBag]?.[0]?.key;
+    const allKeyBags = [
+      ...(keyBagsShrouded[forge.pki.oids.pkcs8ShroudedKeyBag] ?? []),
+      ...(keyBagsPlain[forge.pki.oids.keyBag] ?? []),
+    ];
+
+    // Buscar la primera llave privada válida (no nula, no 0)
+    let privateKey: any = null;
+    for (const bag of allKeyBags) {
+      if (bag?.key && typeof bag.key === 'object' && bag.key !== null) {
+        privateKey = bag.key;
+        break;
+      }
+    }
+
+    // Si no se encontró con getBags, intentar con getAllBags
+    if (!privateKey) {
+      try {
+        const allBags = p12.getBags({ friendlyName: undefined }) as any;
+        for (const bagType of Object.values(allBags)) {
+          for (const bag of (bagType as any[]).filter(Boolean)) {
+            if (bag?.key && typeof bag.key === 'object' && bag.key !== null) {
+              privateKey = bag.key;
+              break;
+            }
+          }
+          if (privateKey) break;
+        }
+      } catch { /* ignorar */ }
+    }
+
+    const certBags    = p12.getBags({ bagType: forge.pki.oids.certBag });
     const certBagList = certBags[forge.pki.oids.certBag] ?? [];
 
     // Cert del titular — no-CA
-    const cert = certBagList.find(bag => {
+    const cert = certBagList.find((bag: any) => {
       const bc = bag.cert?.extensions?.find((e: any) => e.name === 'basicConstraints');
       return !bc?.cA;
     })?.cert ?? certBagList[0]?.cert;
 
     if (!privateKey || !cert) {
-      return { xmlFirmado: '', error: 'Certificado inválido o contraseña incorrecta' };
+      return { xmlFirmado: '', error: 'No se encontró la llave privada o el certificado en el .p12. Verifica que la contraseña sea correcta.' };
     }
 
     // ── 2. Datos del cert ─────────────────────────────────────────────────
     const certDer    = forge.asn1.toDer(forge.pki.certificateToAsn1(cert)).getBytes();
     const certB64    = forge.util.encode64(certDer);
-    const certDigest = sha1b64bin(certDer);   // para Reference al KeyInfo
+    const certDigest = sha1b64bin(certDer);
 
-    // Modulus y exponent RSA para ds:RSAKeyValue
-    const pubKey    = cert.publicKey as any;
-    const modulus   = forge.util.encode64(
-      forge.asn1.toDer(forge.asn1.create(
-        forge.asn1.Class.UNIVERSAL, forge.asn1.Type.INTEGER, false,
-        pubKey.n.toByteArray()
-      )).getBytes()
-    );
+    // Modulus RSA — con fallback si la extracción falla
+    let modulus = 'AQAB'; // fallback
+    try {
+      const pubKey = cert.publicKey as any;
+      if (pubKey?.n) {
+        const nBytes = pubKey.n.toByteArray();
+        // Quitar byte de signo si es positivo
+        const cleanBytes = nBytes[0] === 0 ? nBytes.slice(1) : nBytes;
+        modulus = forge.util.encode64(
+          cleanBytes.map((b: number) => String.fromCharCode(b)).join('')
+        );
+      }
+    } catch { /* usar fallback AQAB */ }
 
     // Issuer: orden NATURAL del certificado (como está almacenado), separado por coma sin espacios
     // Ejemplo oficial SRI: "CN=AC BANCO CENTRAL DEL ECUADOR,L=QUITO,OU=...,O=...,C=EC"

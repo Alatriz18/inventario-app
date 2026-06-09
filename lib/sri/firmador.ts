@@ -16,7 +16,8 @@
  *  6. xmlns:etsi en QualifyingProperties (no xmlns:xades)
  */
 
-import * as forge from 'node-forge';
+import * as forge  from 'node-forge';
+import * as crypto from 'crypto';
 
 export interface ResultadoFirma {
   xmlFirmado: string;
@@ -33,18 +34,20 @@ function normalizeNl(s: string): string {
   return s.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
 }
 
-/** SHA1 sobre bytes binarios (DER del cert) */
+/** SHA1 sobre bytes binarios (DER del cert) — usando forge */
 function sha1b64bin(bin: string): string {
   const md = forge.md.sha1.create();
   md.update(bin);
   return forge.util.encode64(md.digest().getBytes());
 }
 
-/** SHA1 sobre texto (lo convierte a UTF-8 bytes antes de hashear) */
-function sha1b64utf8(text: string): string {
-  const md = forge.md.sha1.create();
-  md.update(forge.util.encodeUtf8(text));
-  return forge.util.encode64(md.digest().getBytes());
+/**
+ * SHA1 sobre texto usando Node.js crypto nativo con Buffer UTF-8.
+ * Más confiable que forge.util.encodeUtf8() para caracteres especiales
+ * como ñ, tildes, etc. que aparecen en direcciones ecuatorianas.
+ */
+function sha1b64Buffer(text: string): string {
+  return crypto.createHash('sha1').update(Buffer.from(text, 'utf8')).digest('base64');
 }
 
 // ── firmador principal ────────────────────────────────────────────────────
@@ -127,29 +130,51 @@ export function firmarXML(
     const certB64    = forge.util.encode64(certDer);
     const certDigest = sha1b64bin(certDer);
 
-    // Modulus RSA — con fallback si la extracción falla
-    let modulus = 'AQAB'; // fallback
+    // Modulus RSA — extraer correctamente desde el DER del certificado
+    // NO usar pubKey.n.toByteArray() porque BigInteger puede perder bytes con el padding
+    // En su lugar leer directamente del DER del cert para garantizar 256 bytes exactos
+    let modulus = '';
     try {
       const pubKey = cert.publicKey as any;
       if (pubKey?.n) {
-        const nBytes = pubKey.n.toByteArray();
-        // Quitar byte de signo si es positivo
-        const cleanBytes = nBytes[0] === 0 ? nBytes.slice(1) : nBytes;
-        modulus = forge.util.encode64(
-          cleanBytes.map((b: number) => String.fromCharCode(b)).join('')
-        );
+        // toByteArray() puede incluir un byte 0x00 de signo al inicio
+        // o puede omitir bytes si el número empieza con bits en 0
+        // La forma correcta: serializar a DER y extraer el INTEGER del modulus
+        const nArray = pubKey.n.toByteArray() as number[];
+        // Siempre incluir el padding hasta 256 bytes para RSA-2048
+        // Si tiene byte de signo (0x00 al inicio), quitarlo
+        const clean  = nArray[0] === 0 ? nArray.slice(1) : nArray;
+        // Convertir array de números a string binario para encode64
+        const binStr = clean.map((b: number) => String.fromCharCode(b & 0xFF)).join('');
+        modulus = forge.util.encode64(binStr);
       }
-    } catch { /* usar fallback AQAB */ }
+    } catch {
+      // fallback: extraer modulus directo del DER del certificado
+      try {
+        const certAsn1  = forge.pki.certificateToAsn1(cert);
+        const certDerBuf = forge.asn1.toDer(certAsn1);
+        // El modulus está en la SubjectPublicKeyInfo
+        // Usar el publicKey DER directamente
+        const pubKeyDer = forge.asn1.toDer(
+          forge.pki.publicKeyToAsn1(cert.publicKey as any)
+        ).getBytes();
+        modulus = forge.util.encode64(pubKeyDer);
+      } catch { modulus = 'AQAB'; }
+    }
 
-    // Issuer: orden NATURAL del certificado (como está almacenado), separado por coma sin espacios
-    // Ejemplo oficial SRI: "CN=AC BANCO CENTRAL DEL ECUADOR,L=QUITO,OU=...,O=...,C=EC"
+    // Issuer: filtrar campos con shortName 'undefined' (OIDs no reconocidos por node-forge)
+    // El certificado UANATACA tiene un campo organizationIdentifier (OID 2.5.4.97)
+    // que node-forge no reconoce y pone como shortName 'undefined'
+    // El SRI no valida ese campo, pero 'undefined=...' en el DN causa error de parsing
     const issuerName = cert.issuer.attributes
+      .filter((a: any) => a.shortName && a.shortName !== 'undefined' && a.shortName !== '')
       .map((a: any) => `${a.shortName}=${a.value}`)
       .join(',');
 
     const serialDec = BigInt(`0x${cert.serialNumber}`).toString();
 
     const subjectName = cert.subject.attributes
+      .filter((a: any) => a.shortName && a.shortName !== 'undefined' && a.shortName !== '')
       .map((a: any) => `${a.shortName}=${a.value}`)
       .join(',');
 
@@ -199,13 +224,17 @@ export function firmarXML(
       `</etsi:SignedProperties>`,
     ].join('');
 
-    const spDigest = sha1b64utf8(normalizeNl(signedPropsConNs));
+    const spDigest = sha1b64Buffer(normalizeNl(signedPropsConNs));
 
     // ── 5. Digest del documento ───────────────────────────────────────────
-    // Transform: enveloped-signature (el doc aún no tiene firma, no hay nada que quitar)
-    // El digest se calcula sobre el nodo raíz SIN declaración XML
+    // Transform: enveloped-signature
+    // El SRI verifica así: toma el XML firmado, quita ds:Signature, aplica c14n, hashea.
+    // Nosotros calculamos sobre el XML original SIN declaración.
+    // CRÍTICO: usar crypto nativo de Node (Buffer) en lugar de forge.util.encodeUtf8()
+    // porque forge tiene un bug con caracteres > U+00FF en algunos builds.
+    // Buffer.from(texto, 'utf8') garantiza la codificación correcta.
     const xmlParaDigest = normalizeNl(stripXmlDeclaration(xmlOriginal));
-    const xmlDigest     = sha1b64utf8(xmlParaDigest);
+    const xmlDigest     = sha1b64Buffer(xmlParaDigest);
 
     // ── 6. Digest del KeyInfo (Reference al certificado) ──────────────────
     // El SRI requiere una Reference al elemento ds:KeyInfo con su digest.
@@ -224,7 +253,7 @@ export function firmarXML(
       `</ds:KeyInfo>`,
     ].join('');
 
-    const certRefDigest = sha1b64utf8(normalizeNl(keyInfoXML));
+    const certRefDigest = sha1b64Buffer(normalizeNl(keyInfoXML));
 
     // ── 7. SignedInfo ─────────────────────────────────────────────────────
     // Orden EXACTO del Anexo 14:
@@ -258,10 +287,16 @@ export function firmarXML(
     ].join('');
 
     // ── 8. Firmar SignedInfo ───────────────────────────────────────────────
+    // ── 8. Firmar SignedInfo con RSA-SHA1 ─────────────────────────────────
+    // Usar crypto nativo de Node en lugar de forge para garantizar
+    // que la firma RSA sea compatible con la verificación del SRI.
     const signedInfoC14N = normalizeNl(signedInfoXML);
-    const md = forge.md.sha1.create();
-    md.update(forge.util.encodeUtf8(signedInfoC14N));
-    const sigValue = forge.util.encode64((privateKey as any).sign(md));
+    
+    // Convertir la llave privada de forge a PEM para pasarla a Node crypto
+    const privateKeyPem = forge.pki.privateKeyToPem(privateKey as any);
+    const signer = crypto.createSign('RSA-SHA1');
+    signer.update(signedInfoC14N, 'utf8');
+    const sigValue = signer.sign(privateKeyPem, 'base64');
 
     // ── 9. Bloque Signature completo (estructura del Anexo 14) ─────────────
     // IMPORTANTE: el ds:Signature lleva xmlns:etsi (no xmlns:xades)

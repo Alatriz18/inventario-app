@@ -237,14 +237,11 @@ export function firmarXML(
     const xmlDigest     = sha1b64Buffer(xmlParaDigest);
 
     // ── 6. KeyInfo XML ────────────────────────────────────────────────────
-    // El KeyInfo NO lleva xmlns:ds propio en el XML final porque hereda
-    // xmlns:ds y xmlns:etsi del padre ds:Signature.
-    // Por eso NO incluimos la Reference al KeyInfo en el SignedInfo:
-    // el digest correcto requeriría C14N completo con propagación de namespaces
-    // que no podemos calcular sin un parser C14N real.
-    // El SRI acepta comprobantes sin esta Reference (es opcional en XMLDSig).
+    // Para el digest del KeyInfo necesitamos el string CON xmlns:ds propagado
+    // (C14N inclusivo propaga los namespaces del padre ds:Signature al calcular
+    // el digest de este elemento).
     const keyInfoXML = [
-      `<ds:KeyInfo Id="${certId}">`,
+      `<ds:KeyInfo xmlns:ds="http://www.w3.org/2000/09/xmldsig#" xmlns:etsi="http://uri.etsi.org/01903/v1.3.2#" Id="${certId}">`,
         `<ds:X509Data>`,
           `<ds:X509Certificate>${certB64}</ds:X509Certificate>`,
         `</ds:X509Data>`,
@@ -257,15 +254,13 @@ export function firmarXML(
       `</ds:KeyInfo>`,
     ].join('');
 
+    const certRefDigest = sha1b64Buffer(normalizeNl(keyInfoXML));
+
     // ── 7. SignedInfo ─────────────────────────────────────────────────────
-    // Solo 2 References: SignedProperties + Documento (#comprobante)
-    // La Reference al KeyInfo se omite porque calcular su digest requiere
-    // C14N real con propagación de namespaces del contexto padre.
-    //
-    // CRÍTICO — C14N inclusivo y propagación de namespaces:
-    // El ds:Signature declara xmlns:etsi. Con C14N inclusivo,
-    // el SRI propaga xmlns:etsi al SignedInfo al verificar.
-    // Incluimos xmlns:etsi aquí para que el string firmado sea idéntico.
+    // 3 References según Anexo 14 del SRI:
+    //   1) etsi:SignedProperties
+    //   2) ds:KeyInfo (certificado)
+    //   3) Documento (#comprobante)
     const signedInfoXML = [
       `<ds:SignedInfo`,
         ` xmlns:ds="http://www.w3.org/2000/09/xmldsig#"`,
@@ -278,7 +273,12 @@ export function firmarXML(
           `<ds:DigestMethod Algorithm="http://www.w3.org/2000/09/xmldsig#sha1"></ds:DigestMethod>`,
           `<ds:DigestValue>${spDigest}</ds:DigestValue>`,
         `</ds:Reference>`,
-        // Reference 2: Documento (enveloped-signature)
+        // Reference 2: KeyInfo (certificado X509)
+        `<ds:Reference URI="#${certId}">`,
+          `<ds:DigestMethod Algorithm="http://www.w3.org/2000/09/xmldsig#sha1"></ds:DigestMethod>`,
+          `<ds:DigestValue>${certRefDigest}</ds:DigestValue>`,
+        `</ds:Reference>`,
+        // Reference 3: Documento (enveloped-signature)
         `<ds:Reference Id="${refDocId}" URI="#comprobante">`,
           `<ds:Transforms>`,
             `<ds:Transform Algorithm="http://www.w3.org/2000/09/xmldsig#enveloped-signature"></ds:Transform>`,
@@ -289,7 +289,6 @@ export function firmarXML(
       `</ds:SignedInfo>`,
     ].join('');
 
-    // ── 8. Firmar SignedInfo ───────────────────────────────────────────────
     // ── 8. Firmar SignedInfo con RSA-SHA1 ─────────────────────────────────
     // Usar crypto nativo de Node en lugar de forge para garantizar
     // que la firma RSA sea compatible con la verificación del SRI.

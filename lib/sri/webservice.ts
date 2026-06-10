@@ -56,10 +56,24 @@ export async function enviarComprobante(
       : text.includes('DEVUELTA') ? 'DEVUELTA'
       : 'ERROR';
 
-    // Extraer mensajes del XML de respuesta
+    // Extraer mensajes del SRI correctamente
+    // La respuesta tiene: <mensaje><identificador>43</identificador><mensaje>FIRMA NO VÁLIDA</mensaje><informacionAdicional>...</informacionAdicional><tipo>ERROR</tipo></mensaje>
     const mensajes: string[] = [];
-    const msgMatches = text.matchAll(/<mensaje>([\s\S]*?)<\/mensaje>/g);
-    for (const m of msgMatches) mensajes.push(m[1].trim());
+    const bloques = text.matchAll(/<mensaje>[\s\S]*?<identificador>([\s\S]*?)<\/identificador>[\s\S]*?<mensaje>([\s\S]*?)<\/mensaje>(?:[\s\S]*?<informacionAdicional>([\s\S]*?)<\/informacionAdicional>)?/g);
+    for (const m of bloques) {
+      const id   = m[1]?.trim() ?? '?';
+      const msg  = m[2]?.trim() ?? '';
+      const info = m[3]?.trim() ?? '';
+      mensajes.push(`[${id}] ${msg}${info ? ' — ' + info : ''}`);
+    }
+    // Fallback si no hay mensajes estructurados
+    if (mensajes.length === 0) {
+      const raw = text.matchAll(/<mensaje>([\s\S]*?)<\/mensaje>/g);
+      for (const m of raw) {
+        const clean = m[1].trim().replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
+        if (clean) mensajes.push(clean);
+      }
+    }
 
     return { estado, mensajes };
   } catch (err: any) {

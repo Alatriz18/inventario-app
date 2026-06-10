@@ -45,12 +45,13 @@ export async function POST(req: NextRequest) {
     const recepcion = await enviarComprobante(xmlFirmadoB64, amb);
 
     if (recepcion.estado === 'DEVUELTA' || recepcion.estado === 'ERROR') {
+      console.error('[SRI] Comprobante devuelto:', JSON.stringify(recepcion.mensajes));
       return NextResponse.json({
         etapa:        'recepcion',
         estado:       recepcion.estado,
         mensajes:     recepcion.mensajes,
-        xmlFirmadoB64,   // devolver para diagnóstico
-        xmlFirmado,      // texto plano para poder leerlo
+        xmlFirmadoB64,
+        xmlFirmado,
       }, { status: 200 });
     }
 

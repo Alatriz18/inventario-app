@@ -46,6 +46,22 @@ export async function POST(req: NextRequest) {
     // Extraer RUC del XML (campo <ruc>)
     const rucEnXML = xml.match(/<ruc>(\d+)<\/ruc>/)?.[1] ?? 'No encontrado en XML';
 
+    // ── Cadena de certificados en el P12 ──
+    const certBagsFull = p12.getBags({ bagType: forge.pki.oids.certBag });
+    const allCertBags  = certBagsFull[forge.pki.oids.certBag] ?? [];
+    const certChainInfo = allCertBags.map((bag: any, i: number) => {
+      const c = bag?.cert;
+      if (!c) return { index: i, error: 'sin cert' };
+      const bc = c.extensions?.find((e: any) => e.name === 'basicConstraints');
+      return {
+        index:   i,
+        cn:      c.subject.getField('CN')?.value ?? '(sin CN)',
+        isCA:    bc?.cA === true,
+        emisor:  c.issuer.getField('CN')?.value ?? '(sin CN emisor)',
+        serial:  c.serialNumber,
+      };
+    });
+
     // ── Firmar el XML ──
     const { xmlFirmado, error: errorFirma } = firmarXML(xml, p12Base64, password);
 
@@ -74,6 +90,14 @@ export async function POST(req: NextRequest) {
     }
 
     return NextResponse.json({
+      cadenaCertificados: {
+        totalEnP12:    certChainInfo.length,
+        certificados:  certChainInfo,
+        tieneCadena:   certChainInfo.some((c: any) => c.isCA),
+        advertencia:   certChainInfo.length === 1
+          ? 'El P12 solo tiene 1 certificado (sin CA intermedio). Si el SRI no reconoce la CA emisora, la firma será rechazada.'
+          : null,
+      },
       certificado: {
         cn:       subjectCN,
         org:      subjectO,

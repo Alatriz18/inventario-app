@@ -130,6 +130,26 @@ export function firmarXML(
     const certB64    = forge.util.encode64(certDer);
     const certDigest = sha1b64bin(certDer);
 
+    // Certs CA intermedios — incluirlos permite al SRI construir la cadena de confianza
+    // (especialmente necesario para UANATACA CA2 2016 si no está en el trust store del SRI)
+    const caCertB64List: string[] = certBagList
+      .filter((bag: any) => {
+        if (!bag?.cert) return false;
+        const bc = bag.cert.extensions?.find((e: any) => e.name === 'basicConstraints');
+        if (!bc?.cA) return false; // solo CAs
+        const bagDer = forge.asn1.toDer(forge.pki.certificateToAsn1(bag.cert)).getBytes();
+        return bagDer !== certDer; // excluir el cert del titular si por error tiene cA=true
+      })
+      .map((bag: any) => forge.util.encode64(
+        forge.asn1.toDer(forge.pki.certificateToAsn1(bag.cert)).getBytes()
+      ));
+
+    // Contenido de ds:X509Data: primero el cert del titular, luego CAs intermedios
+    const x509DataInner = [
+      `<ds:X509Certificate>${certB64}</ds:X509Certificate>`,
+      ...caCertB64List.map(b64 => `<ds:X509Certificate>${b64}</ds:X509Certificate>`),
+    ].join('');
+
     // Modulus RSA — extraer correctamente desde el DER del certificado
     // NO usar pubKey.n.toByteArray() porque BigInteger puede perder bytes con el padding
     // En su lugar leer directamente del DER del cert para garantizar 256 bytes exactos
@@ -243,7 +263,7 @@ export function firmarXML(
     const keyInfoXML = [
       `<ds:KeyInfo xmlns:ds="http://www.w3.org/2000/09/xmldsig#" xmlns:etsi="http://uri.etsi.org/01903/v1.3.2#" Id="${certId}">`,
         `<ds:X509Data>`,
-          `<ds:X509Certificate>${certB64}</ds:X509Certificate>`,
+          x509DataInner,
         `</ds:X509Data>`,
         `<ds:KeyValue>`,
           `<ds:RSAKeyValue>`,
@@ -308,10 +328,10 @@ export function firmarXML(
         ` Id="${sigId}">`,
         signedInfoXML,
         `<ds:SignatureValue Id="SignatureValue${ts}">${sigValue}</ds:SignatureValue>`,
-        // KeyInfo exactamente como se usó para calcular certRefDigest
+        // KeyInfo exactamente como se usó para calcular certRefDigest (incluye cadena CA)
         `<ds:KeyInfo Id="${certId}">`,
           `<ds:X509Data>`,
-            `<ds:X509Certificate>${certB64}</ds:X509Certificate>`,
+            x509DataInner,
           `</ds:X509Data>`,
           `<ds:KeyValue>`,
             `<ds:RSAKeyValue>`,

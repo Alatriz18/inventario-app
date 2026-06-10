@@ -43,12 +43,17 @@ export default function DebugFirmaPage() {
   const [diag,        setDiag]        = useState<Diagnostico | null>(null);
   const [error,       setError]       = useState('');
   const [usarConfig,  setUsarConfig]  = useState(true);
+  const [enviando,    setEnviando]    = useState(false);
+  const [sri,         setSri]         = useState<any>(null);
+  const [contexto,    setContexto]    = useState<any>(null);
 
   const diagnosticar = async () => {
     setLoading(true);
     setError('');
     setDiag(null);
     setXmlFirmado('');
+    setSri(null);
+    setContexto(null);
     try {
       // Obtener cert de la config SRI
       const config = await getConfigSRI();
@@ -113,6 +118,43 @@ export default function DebugFirmaPage() {
       setError(e.message);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const enviarAlSri = async () => {
+    setEnviando(true);
+    setError('');
+    setSri(null);
+    setContexto(null);
+    try {
+      const config = await getConfigSRI();
+      if (!config?.certificadoP12) {
+        setError('No hay certificado .p12 configurado. Ve a Facturación → Configuración SRI.');
+        return;
+      }
+      const body = {
+        xml:       xml || generarXMLPrueba(),
+        p12Base64: config.certificadoP12,
+        password:  password || config.certificadoPassword,
+        enviar:    true,
+      };
+      const res  = await fetch('/api/sri/debug', {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify(body),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setError(data.error ?? `Error ${res.status}`);
+        return;
+      }
+      setXmlFirmado(data.xmlFirmado ?? '');
+      setSri(data.sri ?? null);
+      setContexto(data.contexto ?? null);
+    } catch (e: any) {
+      setError(e.message);
+    } finally {
+      setEnviando(false);
     }
   };
 
@@ -186,16 +228,79 @@ export default function DebugFirmaPage() {
               className="font-mono text-xs h-32"
             />
           </div>
-          <Button onClick={diagnosticar} disabled={loading} className="w-full">
-            <Bug className="h-4 w-4 mr-2" />
-            {loading ? 'Analizando firma...' : 'Diagnosticar Firma'}
-          </Button>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+            <Button onClick={diagnosticar} disabled={loading || enviando} variant="outline" className="w-full">
+              <Bug className="h-4 w-4 mr-2" />
+              {loading ? 'Analizando firma...' : 'Diagnosticar Firma (local)'}
+            </Button>
+            <Button onClick={enviarAlSri} disabled={loading || enviando} className="w-full">
+              {enviando ? 'Consultando al SRI...' : 'Enviar al SRI y ver motivo exacto'}
+            </Button>
+          </div>
+          <p className="text-xs text-slate-400">
+            "Enviar al SRI" usa el ambiente y la clave de acceso del propio XML. Si el XML tiene
+            <code className="mx-1 px-1 bg-slate-100 rounded">&lt;ambiente&gt;2&lt;/ambiente&gt;</code>
+            se envía a PRODUCCIÓN; para pruebas debe ser 1.
+          </p>
         </div>
 
         {/* Error */}
         {error && (
           <div className="bg-red-50 border border-red-200 rounded-xl p-4 text-sm text-red-700 font-mono">
             {error}
+          </div>
+        )}
+
+        {/* Respuesta REAL del SRI */}
+        {sri && (
+          <div className="bg-white rounded-xl border p-5 space-y-4">
+            <h3 className="font-semibold text-slate-700">Respuesta del SRI</h3>
+
+            {contexto && (
+              <div className="bg-slate-50 rounded p-3 space-y-1 text-xs font-mono">
+                <p><span className="text-slate-400">Enviado a: </span>{contexto.ambienteEnviado}</p>
+                <p><span className="text-slate-400">Clave acceso: </span>{contexto.claveAccesoXML || '(no detectada)'}</p>
+                <p>
+                  <span className="text-slate-400">Certificados en X509Data: </span>
+                  <span className={contexto.certificadosEnX509Data >= 2 ? 'text-green-700' : 'text-amber-600'}>
+                    {contexto.certificadosEnX509Data}
+                  </span>
+                  {contexto.certificadosEnX509Data < 2 &&
+                    <span className="text-amber-600"> (solo hoja — falta cadena CA, p. ej. UANATACA)</span>}
+                </p>
+              </div>
+            )}
+
+            {/* Recepción */}
+            <div className="space-y-2">
+              <div className="flex items-center gap-2">
+                <span className="text-xs font-semibold text-slate-600 uppercase">Recepción</span>
+                <span className={`text-xs font-bold px-2 py-0.5 rounded ${
+                  sri.recepcion?.estado === 'RECIBIDA' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'
+                }`}>{sri.recepcion?.estado ?? '—'}</span>
+              </div>
+              {(sri.recepcion?.mensajes ?? []).map((m: string, i: number) => (
+                <div key={i} className="text-xs font-mono bg-slate-50 rounded p-2 text-slate-700 break-words">{m}</div>
+              ))}
+            </div>
+
+            {/* Autorización — aquí aparece el error 39 con su motivo */}
+            <div className="space-y-2 border-t pt-3">
+              <div className="flex items-center gap-2">
+                <span className="text-xs font-semibold text-slate-600 uppercase">Autorización</span>
+                <span className={`text-xs font-bold px-2 py-0.5 rounded ${
+                  sri.autorizacion?.estado === 'AUTORIZADO' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'
+                }`}>{sri.autorizacion?.estado ?? '—'}</span>
+              </div>
+              {(sri.autorizacion?.mensajes ?? []).length === 0 && sri.autorizacion?.estado === 'AUTORIZADO' && (
+                <div className="text-xs font-mono bg-green-50 rounded p-2 text-green-700">
+                  Nº {sri.autorizacion?.numeroAutorizacion}
+                </div>
+              )}
+              {(sri.autorizacion?.mensajes ?? []).map((m: string, i: number) => (
+                <div key={i} className="text-xs font-mono bg-red-50 rounded p-2 text-red-700 break-words">{m}</div>
+              ))}
+            </div>
           </div>
         )}
 

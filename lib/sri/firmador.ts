@@ -52,10 +52,34 @@ function sha1b64Buffer(text: string): string {
 
 // ── firmador principal ────────────────────────────────────────────────────
 
+/**
+ * Hora de firmado en hora LOCAL de Ecuador (UTC-5) con offset -05:00.
+ *
+ * Bug corregido: la versión anterior hacía
+ *   new Date().toISOString().replace(/\.\d{3}Z$/, '-05:00')
+ * que tomaba la hora UTC y le pegaba "-05:00" SIN convertir, dejando
+ * el SigningTime 5 horas en el futuro. Esto puede provocar rechazos en
+ * la fase de AUTORIZACIÓN del SRI.
+ */
+function getSigningTime(): string {
+  const ec = new Date(Date.now() - 5 * 60 * 60 * 1000); // Ecuador = UTC-5 (sin DST)
+  const p  = (n: number) => String(n).padStart(2, '0');
+  return `${ec.getUTCFullYear()}-${p(ec.getUTCMonth() + 1)}-${p(ec.getUTCDate())}`
+       + `T${p(ec.getUTCHours())}:${p(ec.getUTCMinutes())}:${p(ec.getUTCSeconds())}-05:00`;
+}
+
 export function firmarXML(
-  xmlOriginal: string,
-  p12Base64:   string,
-  password:    string
+  xmlOriginal:   string,
+  p12Base64:     string,
+  password:      string,
+  /**
+   * Certificados intermedios/CA adicionales en Base64 (DER) para incluir en
+   * <ds:X509Data>. Úsalo cuando tu .p12 NO trae la cadena (ej. UANATACA):
+   * descarga el intermedio (la URL está dentro de tu propio cert, campo
+   * "CA Issuers", ej. subordinate2.crt), pásalo a Base64 y mándalo aquí.
+   * El SRI necesita poder construir la cadena de confianza para autorizar.
+   */
+  extraCertsB64: string[] = []
 ): ResultadoFirma {
   try {
     // ── 1. Leer P12 ──────────────────────────────────────────────────────
@@ -144,10 +168,19 @@ export function firmarXML(
         forge.asn1.toDer(forge.pki.certificateToAsn1(bag.cert)).getBytes()
       ));
 
+    // Combinar CAs del .p12 + intermedios pasados manualmente (sin duplicar)
+    const todasCAsB64 = [...caCertB64List];
+    for (const extra of extraCertsB64) {
+      const limpio = extra.replace(/\s/g, '');
+      if (limpio && limpio !== certB64 && !todasCAsB64.includes(limpio)) {
+        todasCAsB64.push(limpio);
+      }
+    }
+
     // Contenido de ds:X509Data: primero el cert del titular, luego CAs intermedios
     const x509DataInner = [
       `<ds:X509Certificate>${certB64}</ds:X509Certificate>`,
-      ...caCertB64List.map(b64 => `<ds:X509Certificate>${b64}</ds:X509Certificate>`),
+      ...todasCAsB64.map(b64 => `<ds:X509Certificate>${b64}</ds:X509Certificate>`),
     ].join('');
 
     // Modulus RSA — extraer correctamente desde el DER del certificado
@@ -206,7 +239,7 @@ export function firmarXML(
     const refDocId = `Reference-ID-${ts}`;
     const refSpId  = `SignedPropertiesID${ts}`;
 
-    const signingTime = new Date().toISOString().replace(/\.\d{3}Z$/, '-05:00');
+    const signingTime = getSigningTime();
 
     // ── 4. etsi:SignedProperties ──────────────────────────────────────────
     // Este string se usa para:

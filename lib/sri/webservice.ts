@@ -121,8 +121,22 @@ export async function autorizarComprobante(
     const fechaAut = text.match(/<fechaAutorizacion>(.*?)<\/fechaAutorizacion>/)?.[1];
 
     const mensajes: string[] = [];
-    const msgMatches = text.matchAll(/<mensaje>([\s\S]*?)<\/mensaje>/g);
-    for (const m of msgMatches) mensajes.push(m[1].trim());
+    // Capturar identificador + mensaje + informacionAdicional (el motivo REAL del 39 está aquí)
+    const bloques = text.matchAll(/<mensaje>[\s\S]*?<identificador>([\s\S]*?)<\/identificador>[\s\S]*?<mensaje>([\s\S]*?)<\/mensaje>(?:[\s\S]*?<informacionAdicional>([\s\S]*?)<\/informacionAdicional>)?/g);
+    for (const m of bloques) {
+      const id   = m[1]?.trim() ?? '?';
+      const msg  = m[2]?.trim() ?? '';
+      const info = m[3]?.trim() ?? '';
+      mensajes.push(`[${id}] ${msg}${info ? ' — ' + info : ''}`);
+    }
+    // Fallback si la respuesta no trae mensajes estructurados
+    if (mensajes.length === 0) {
+      const raw = text.matchAll(/<mensaje>([\s\S]*?)<\/mensaje>/g);
+      for (const m of raw) {
+        const clean = m[1].trim().replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
+        if (clean) mensajes.push(clean);
+      }
+    }
 
     // XML autorizado completo
     const xmlMatch = text.match(/<comprobante><!\[CDATA\[([\s\S]*?)\]\]><\/comprobante>/);

@@ -219,9 +219,22 @@ export function firmarXML(
     // El certificado UANATACA tiene un campo organizationIdentifier (OID 2.5.4.97)
     // que node-forge no reconoce y pone como shortName 'undefined'
     // El SRI no valida ese campo, pero 'undefined=...' en el DN causa error de parsing
+    // IssuerName en orden INVERTIDO (RFC4514) — el SRI lo espera así, no al derecho.
+    // Además incluye el campo 2.5.4.97 (organizationIdentifier) que node-forge no
+    // reconoce, codificado como #<DER hex> (UTF8String). Sin esto, el SRI rechaza
+    // certificados UANATACA con "El certificado firmante no es válido" (error 39).
     const issuerName = cert.issuer.attributes
-      .filter((a: any) => a.shortName && a.shortName !== 'undefined' && a.shortName !== '')
-      .map((a: any) => `${a.shortName}=${a.value}`)
+      .map((a: any) => {
+        if (a.type === '2.5.4.97') {
+          const b   = Buffer.from(String(a.value), 'utf8');
+          const der = Buffer.concat([Buffer.from([0x0c, b.length]), b]);
+          return `2.5.4.97=#${der.toString('hex')}`;
+        }
+        const name = (a.shortName && a.shortName !== 'undefined' && a.shortName !== '')
+          ? a.shortName : a.type;
+        return `${name}=${a.value}`;
+      })
+      .reverse()
       .join(',');
 
     const serialDec = BigInt(`0x${cert.serialNumber}`).toString();

@@ -44,11 +44,18 @@ export function subscribeToComprobantes(
   });
 }
 
+/** Firestore NO acepta valores undefined. Esto los elimina antes de escribir. */
+function sinUndefined<T extends Record<string, unknown>>(obj: T): Partial<T> {
+  return Object.fromEntries(
+    Object.entries(obj).filter(([, v]) => v !== undefined),
+  ) as Partial<T>;
+}
+
 export async function createComprobante(
   data: Omit<Comprobante, 'id'>
 ): Promise<string> {
   const ref = await addDoc(collection(db, COL), {
-    ...data,
+    ...sinUndefined(data as Record<string, unknown>),
     createdAt: serverTimestamp(),
   });
   return ref.id;
@@ -58,5 +65,5 @@ export async function updateComprobante(
   id: string,
   data: Partial<Omit<Comprobante, 'id'>>
 ): Promise<void> {
-  await updateDoc(doc(db, COL, id), data);
+  await updateDoc(doc(db, COL, id), sinUndefined(data as Record<string, unknown>));
 }

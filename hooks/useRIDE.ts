@@ -15,6 +15,7 @@ import { toast } from 'sonner';
 import { getConfigSRI } from '@/lib/firebase/config-sri';
 import { getConfigEmail } from '@/lib/firebase/config-email';
 import { getConfigEmpresa } from '@/lib/firebase/config-empresa';
+import { getVentaById } from '@/lib/firebase/ventas';
 import { Comprobante }  from '@/lib/firebase/comprobantes';
 import {
   DatosRIDE, descargarRIDE, abrirRIDEenNuevaPestana, generarRIDE,
@@ -59,14 +60,29 @@ export function useRIDE() {
       else if (r === 'general') regimenLeyenda = 'CONTRIBUYENTE RÉGIMEN GENERAL';
     } catch { /* opcional */ }
 
-    // Parsear el XML autorizado o firmado para extraer los ítems
-    // Si no hay XML disponible usamos los datos del comprobante directamente
-    const items = extraerItemsDeComprobante(comp);
-
     const tipoDoc =
       comp.tipo === 'factura'    ? 'factura'
       : comp.tipo === 'nota_venta' ? 'nota_venta'
       : 'factura';
+
+    // Ítems reales: se toman de la venta vinculada; si no, fallback genérico
+    let items = extraerItemsDeComprobante(comp);
+    if (comp.ventaId) {
+      try {
+        const venta = await getVentaById(comp.ventaId);
+        if (venta?.items?.length) {
+          items = venta.items.map(i => ({
+            codigo:         i.sku,
+            descripcion:    i.nombre,
+            cantidad:       i.cantidad,
+            precioUnitario: i.precioUnitario,
+            descuento:      i.descuento ?? 0,
+            subtotal:       i.subtotal,
+            tieneIVA:       tipoDoc === 'factura',
+          }));
+        }
+      } catch { /* usa fallback */ }
+    }
 
     const subtotal15 = tipoDoc === 'factura' ? comp.subtotal : 0;
     const subtotal0  = tipoDoc === 'nota_venta' ? comp.subtotal : 0;

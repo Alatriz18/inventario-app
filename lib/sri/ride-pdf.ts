@@ -560,7 +560,7 @@ function renderTotales(doc: jsPDF, datos: DatosRIDE, y: number): number {
     label(doc, 'Forma de Pago', MARGIN + 3, startY + 3.4, 6.5);
     label(doc, 'Valor', MARGIN + fpW - 16, startY + 3.4, 6.5);
     box(doc, MARGIN, startY + 5, fpW, 5);
-    value(doc, (FORMA_PAGO_LABEL[datos.formaPago] ?? datos.formaPago).slice(0, 42), MARGIN + 3, startY + 8.4, 6);
+    value(doc, (FORMA_PAGO_LABEL[datos.formaPago] ?? datos.formaPago).slice(0, 55), MARGIN + 3, startY + 8.4, 5.5);
     doc.setFont(FONT, 'normal'); doc.setFontSize(6.5); doc.setTextColor(...hex(BLACK));
     doc.text(usd(datos.total), MARGIN + fpW - 2, startY + 8.4, { align: 'right' });
   }

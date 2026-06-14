@@ -51,6 +51,12 @@ service cloud.firestore {
       allow write: if isContador();
     }
 
+    // config_email contiene credenciales SMTP — lectura staff (para enviar), escritura admin
+    match /config_email/{id} {
+      allow read: if isStaff();
+      allow write: if isAdmin();
+    }
+
     // ── Inventario ────────────────────────────────────────────────────────
 
     match /productos/{id} {
@@ -136,6 +142,12 @@ service cloud.firestore {
     // ── Cuentas por Pagar ─────────────────────────────────────────────────
 
     match /facturas_proveedor/{id} {
+      allow read: if isStaff();
+      allow write: if isAdmin() || hasRole('contador') || hasRole('bodeguero');
+    }
+
+    // Notas de crédito / débito recibidas de proveedores (importadas por XML)
+    match /documentos_recibidos/{id} {
       allow read: if isStaff();
       allow write: if isAdmin() || hasRole('contador') || hasRole('bodeguero');
     }

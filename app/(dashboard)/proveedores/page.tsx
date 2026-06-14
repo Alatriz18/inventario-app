@@ -54,6 +54,11 @@ const schema = z.object({
   cuentaCxP:          z.string().optional(),
   cuentaGasto:        z.string().optional(),
   cuentaIVACompras:   z.string().optional(),
+  bancoNombre:          z.string().optional(),
+  bancoCodigo:          z.string().optional(),
+  tipoCuentaBancaria:   z.enum(['corriente','ahorros']).optional(),
+  numeroCuentaBancaria: z.string().optional(),
+  emailPago:            z.string().optional(),
   activo:             z.boolean(),
   notas:              z.string().optional(),
 });
@@ -98,6 +103,8 @@ export default function ProveedoresPage() {
     pais: 'Ecuador', codigoPais: 'EC', provincia: '', ciudad: '', direccion: '',
     tipoPago: 'contado', diasCredito: 30, codigoSustento: '01',
     cuentaCxP: '', cuentaGasto: '', cuentaIVACompras: '',
+    bancoNombre: '', bancoCodigo: '', tipoCuentaBancaria: 'corriente',
+    numeroCuentaBancaria: '', emailPago: '',
     activo: true, notas: '',
   });
 
@@ -124,6 +131,9 @@ export default function ProveedoresPage() {
       codigoSustento: p.codigoSustento ?? '01',
       cuentaCxP: p.cuentaCxP ?? '', cuentaGasto: p.cuentaGasto ?? '',
       cuentaIVACompras: p.cuentaIVACompras ?? '',
+      bancoNombre: p.bancoNombre ?? '', bancoCodigo: p.bancoCodigo ?? '',
+      tipoCuentaBancaria: p.tipoCuentaBancaria ?? 'corriente',
+      numeroCuentaBancaria: p.numeroCuentaBancaria ?? '', emailPago: p.emailPago ?? '',
       activo: p.activo, notas: p.notas ?? '',
     });
     setDialogOpen(true);
@@ -450,6 +460,43 @@ export default function ProveedoresPage() {
                 <div className="space-y-1.5">
                   <Label className="text-xs">Cuenta IVA Compras</Label>
                   <Input placeholder="ej: 1.1.04.001" {...register('cuentaIVACompras')} />
+                </div>
+              </div>
+            </div>
+
+            {/* DATOS BANCARIOS (para pagos por archivo TXT) */}
+            <div>
+              <div className="flex items-center gap-2 mb-1">
+                <p className="text-sm font-semibold text-slate-700">Datos Bancarios</p>
+                <span className="text-xs text-slate-400">(para pagos por transferencia / archivo)</span>
+              </div>
+              <div className="grid grid-cols-3 gap-3">
+                <div className="space-y-1.5">
+                  <Label className="text-xs">Banco</Label>
+                  <Input placeholder="Banco Pichincha" {...register('bancoNombre')} />
+                </div>
+                <div className="space-y-1.5">
+                  <Label className="text-xs">Código del banco (IFI)</Label>
+                  <Input placeholder="ej: 0010" {...register('bancoCodigo')} />
+                </div>
+                <div className="space-y-1.5">
+                  <Label className="text-xs">Tipo de cuenta</Label>
+                  <Select onValueChange={v => setValue('tipoCuentaBancaria', v as 'corriente'|'ahorros')}
+                    defaultValue={editing?.tipoCuentaBancaria ?? 'corriente'}>
+                    <SelectTrigger><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="corriente">Corriente</SelectItem>
+                      <SelectItem value="ahorros">Ahorros</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-1.5">
+                  <Label className="text-xs">Número de cuenta</Label>
+                  <Input placeholder="2100xxxxxx" {...register('numeroCuentaBancaria')} />
+                </div>
+                <div className="space-y-1.5 col-span-2">
+                  <Label className="text-xs">Email para aviso de pago</Label>
+                  <Input placeholder="pagos@proveedor.com" {...register('emailPago')} />
                 </div>
               </div>
             </div>

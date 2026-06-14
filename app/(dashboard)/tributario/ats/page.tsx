@@ -22,7 +22,13 @@ import { Venta, FacturaProveedor, RetencionEmitida } from '@/types';
 import { subscribeToVentas }              from '@/lib/firebase/ventas';
 import { subscribeToFacturasProveedor }   from '@/lib/firebase/facturas-proveedor';
 import { subscribeToRetencionesEmitidas } from '@/lib/firebase/retenciones-emitidas';
+import { subscribeToComprobantes, Comprobante } from '@/lib/firebase/comprobantes';
 import { getConfigSRI }                   from '@/lib/firebase/config-sri';
+
+const COD_DOC_ATS: Record<string, string> = {
+  factura: '01', nota_venta: '18', nota_credito: '04',
+  nota_debito: '05', retencion: '07', liquidacion: '03', guia: '06',
+};
 
 const MESES = ['Enero','Febrero','Marzo','Abril','Mayo','Junio',
   'Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
@@ -46,6 +52,7 @@ export default function ATSPage() {
   const [ventas,      setVentas]      = useState<Venta[]>([]);
   const [compras,     setCompras]     = useState<FacturaProveedor[]>([]);
   const [retenciones, setRetenciones] = useState<RetencionEmitida[]>([]);
+  const [comprobantes,setComprobantes]= useState<Comprobante[]>([]);
   const [loading,     setLoading]     = useState(true);
   const [anio,      setAnio]      = useState(String(new Date().getFullYear()));
   const [mes,       setMes]       = useState(String(new Date().getMonth() + 1));
@@ -55,7 +62,8 @@ export default function ATSPage() {
     const u1 = subscribeToVentas(d => { setVentas(d); setLoading(false); });
     const u2 = subscribeToFacturasProveedor(setCompras);
     const u3 = subscribeToRetencionesEmitidas(setRetenciones);
-    return () => { u1(); u2(); u3(); };
+    const u4 = subscribeToComprobantes(setComprobantes);
+    return () => { u1(); u2(); u3(); u4(); };
   }, []);
 
   // Mapa: facturaProveedorId → retención (fuente / IVA) que emitimos
@@ -79,9 +87,13 @@ export default function ATSPage() {
   };
 
   const ventasMes  = useMemo(() => filtrar(ventas.filter(v => v.estado !== 'anulada')), [ventas, anio, mes]);
-  const comprasMes = useMemo(() => filtrar(compras), [compras, anio, mes]);
+  const comprasMes = useMemo(() => filtrar(compras.filter(f => f.estado !== 'anulada')), [compras, anio, mes]);
   const retencionesMes = useMemo(() => filtrar(retenciones), [retenciones, anio, mes]);
   const totalRetenido  = useMemo(() => retencionesMes.reduce((s, r) => s + r.totalRetenido, 0), [retencionesMes]);
+  const anuladosMes    = useMemo(
+    () => filtrar(comprobantes.filter((c: Comprobante) => c.estado === 'anulado')),
+    [comprobantes, anio, mes]
+  );
 
   const resumen = useMemo(() => ({
     totalVentas:   ventasMes.reduce((s, v) => s + v.total, 0),
@@ -118,7 +130,7 @@ export default function ATSPage() {
       }))
     );
     const wsRet = XLSX.utils.json_to_sheet(
-      retencionesMes.map(r => ({
+      retencionesMes.map((r: RetencionEmitida) => ({
         Fecha:        formatFecha(r.fechaEmision),
         Numero:       r.secuencial,
         RUC:          r.proveedorRuc,
@@ -227,6 +239,21 @@ export default function ATSPage() {
         det.ele('valorRetIva').txt('0.00');
       });
 
+      // Comprobantes anulados del período
+      if (anuladosMes.length > 0) {
+        const anulNode = doc.ele('anulados');
+        anuladosMes.forEach((c: Comprobante) => {
+          const [estab, ptoEmi] = (c.serie ?? '001-001').split('-');
+          const det = anulNode.ele('detalleAnulados');
+          det.ele('tipoComprobante').txt(COD_DOC_ATS[c.tipo] ?? '01');
+          det.ele('establecimiento').txt((estab ?? '001').padStart(3, '0'));
+          det.ele('puntoEmision').txt((ptoEmi ?? '001').padStart(3, '0'));
+          det.ele('secuencialInicio').txt(String(c.secuencial).padStart(9, '0'));
+          det.ele('secuencialFin').txt(String(c.secuencial).padStart(9, '0'));
+          det.ele('autorizacion').txt(c.numeroAutorizacion ?? c.claveAcceso ?? '');
+        });
+      }
+
       const xmlStr = doc.end({ prettyPrint: true });
       const blob   = new Blob([xmlStr], { type: 'text/xml' });
       const url    = URL.createObjectURL(blob);
@@ -283,6 +310,8 @@ export default function ATSPage() {
             color: resumen.ivaVentas - resumen.ivaCompras >= 0 ? 'text-red-600' : 'text-green-600' },
           { label:'Retenciones emitidas', value:currency(totalRetenido),
             sub:`${retencionesMes.length} comprobantes`, color:'text-purple-600' },
+          { label:'Comprobantes anulados', value:String(anuladosMes.length),
+            sub:'incluidos en el ATS', color:'text-slate-600' },
         ].map(({ label, value, sub, color }) => (
           <div key={label} className="bg-white rounded-xl border p-4">
             <p className="text-xs text-slate-400">{label}</p>

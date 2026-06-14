@@ -9,7 +9,7 @@ import { format } from 'date-fns';
 import { es } from 'date-fns/locale';
 import {
   Plus, FileCheck, Upload, ChevronDown, CreditCard,
-  FileSearch, AlertTriangle, CheckCircle2, Clock, Download, Files, Mail,
+  FileSearch, AlertTriangle, CheckCircle2, Clock, Download, Files, Mail, Ban, Banknote,
 } from 'lucide-react';
 
 import PageHeader   from '@/components/shared/PageHeader';
@@ -33,12 +33,13 @@ import {
 import {
   crearAsientoPago, crearAsientoCompraFactura,
   crearAsientoNotaCreditoRecibida, crearAsientoNotaDebitoRecibida,
-  crearAsientoRetencionRecibida,
+  crearAsientoRetencionRecibida, crearAsientoReversion,
 } from '@/lib/contabilidad/motor-asientos';
 import { FacturaProveedor, Proveedor } from '@/types';
 import {
   subscribeToFacturasProveedor,
   createFacturaProveedor,
+  updateFacturaProveedor,
   registrarPago,
 } from '@/lib/firebase/facturas-proveedor';
 import { createDocRecibido } from '@/lib/firebase/docs-recibidos';
@@ -50,6 +51,9 @@ import {
   parsearNotaCreditoXML, parsearNotaDebitoXML, parsearRetencionXML,
 } from '@/lib/sri/xmlParser';
 import { descargarZip } from '@/lib/utils/zip';
+import {
+  BancoPago, PagoBancario, BANCOS_PAGO, descargarTxtPagos,
+} from '@/lib/bancos/pagos-txt';
 import { useAuth } from '@/context/AuthContext';
 
 const facturaSchema = z.object({
@@ -79,6 +83,7 @@ const ESTADO_CONFIG = {
   parcial:   { label: 'Parcial',   color: 'bg-blue-50 text-blue-700',    icon: CreditCard },
   pagada:    { label: 'Pagada',    color: 'bg-green-50 text-green-700',  icon: CheckCircle2 },
   vencida:   { label: 'Vencida',   color: 'bg-red-50 text-red-700',      icon: AlertTriangle },
+  anulada:   { label: 'Anulada',   color: 'bg-slate-100 text-slate-500', icon: Ban },
 };
 
 function currency(v: number) { return `$${v.toFixed(2)}`; }
@@ -104,6 +109,12 @@ export default function FacturasProveedorPage() {
   const [bulkImporting, setBulkImporting] = useState(false);
   const xmlRef  = useRef<HTMLInputElement>(null);
   const bulkRef = useRef<HTMLInputElement>(null);
+
+  // Pago bancario por archivo TXT
+  const [pagoBancoOpen, setPagoBancoOpen] = useState(false);
+  const [bancoSel,      setBancoSel]      = useState<BancoPago>('pichincha');
+  const [seleccionadas, setSeleccionadas] = useState<Set<string>>(new Set());
+  const [procesandoPago,setProcesandoPago]= useState(false);
 
   const facturaForm = useForm<FacturaForm>({ resolver: zodResolver(facturaSchema) as any });
   const pagoForm    = useForm<PagoForm>({
@@ -348,7 +359,7 @@ export default function FacturasProveedorPage() {
         const retId = await createRetencionRecibida({
           ventaId: '', numeroComprobante: '',
           clienteId: '', clienteNombre: d.razonSocial, clienteIdentificacion: d.ruc,
-          numeroRetencion: numeroRet, fechaEmision: parseFecha(d.fechaEmision),
+          numeroRetencion: numeroRet, claveAcceso: d.claveAcceso, fechaEmision: parseFecha(d.fechaEmision),
           ejercicioFiscal: d.periodoFiscal,
           lineas: d.lineas.map(l => ({
             tipo: l.tipo, codigo: l.codigo, descripcion: l.codigo,
@@ -432,6 +443,33 @@ export default function FacturasProveedorPage() {
     }
   };
 
+  // ── Anular factura de proveedor (reversa el asiento de compra) ──
+  const anularFactura = async (f: FacturaProveedor) => {
+    if (!user) return;
+    if (f.estado === 'anulada') { toast.info('La factura ya está anulada'); return; }
+    if ((f.pagos?.length ?? 0) > 0) { toast.error('No se puede anular: la factura tiene pagos registrados'); return; }
+    if (!window.confirm(`¿Anular la factura ${f.numeroFactura} de ${f.proveedorNombre}? Se revertirá su asiento de compra.`)) return;
+    try {
+      // El asiento puede provenir de la importación ('factura_proveedor') o de una entrada ('entrada')
+      let rev = await crearAsientoReversion({
+        referenciaId: f.id, referenciaTipo: 'factura_proveedor',
+        fecha: new Date(), concepto: `Anulación factura ${f.numeroFactura}`,
+        usuarioId: user.uid, usuarioNombre: user.nombre,
+      });
+      if (!rev.ok && f.entradaId) {
+        rev = await crearAsientoReversion({
+          referenciaId: f.entradaId, referenciaTipo: 'entrada',
+          fecha: new Date(), concepto: `Anulación factura ${f.numeroFactura}`,
+          usuarioId: user.uid, usuarioNombre: user.nombre,
+        });
+      }
+      await updateFacturaProveedor(f.id, { estado: 'anulada', saldoPendiente: 0 });
+      toast.success(rev.ok ? 'Factura anulada y asiento revertido' : `Factura anulada (${rev.advertencia ?? 'sin asiento'})`);
+    } catch (e: any) {
+      toast.error(e?.message ?? 'Error al anular la factura');
+    }
+  };
+
   // ── Descargar TODOS los XML recibidos guardados (en un .zip) ──
   const descargarTodosXML = () => {
     const conXml = facturas.filter(f => f.xmlRaw);
@@ -445,6 +483,74 @@ export default function FacturasProveedorPage() {
     }));
     descargarZip(archivos, `comprobantes_recibidos_${new Date().toISOString().slice(0,10)}.zip`);
     toast.success(`${archivos.length} XML exportados en ZIP`);
+  };
+
+  // ── Pago bancario por archivo TXT (individual o masivo) + egreso ──
+  const facturasPagables = facturas.filter(f => f.estado !== 'pagada' && f.estado !== 'anulada' && f.saldoPendiente > 0);
+
+  const toggleSel = (id: string) =>
+    setSeleccionadas(prev => {
+      const n = new Set(prev);
+      n.has(id) ? n.delete(id) : n.add(id);
+      return n;
+    });
+
+  const abrirPagoBanco = () => { setSeleccionadas(new Set()); setPagoBancoOpen(true); };
+
+  const totalSeleccionado = facturasPagables
+    .filter(f => seleccionadas.has(f.id))
+    .reduce((s, f) => s + f.saldoPendiente, 0);
+
+  const procesarPagoBanco = async () => {
+    if (!user) return;
+    const sel = facturasPagables.filter(f => seleccionadas.has(f.id));
+    if (sel.length === 0) { toast.error('Selecciona al menos una factura'); return; }
+
+    setProcesandoPago(true);
+    const pagos: PagoBancario[] = [];
+    let sinDatos = 0;
+    try {
+      for (const f of sel) {
+        const prov = proveedores.find(p => p.id === f.proveedorId);
+        // 1. Registrar el pago (salda la factura)
+        await registrarPago(f.id, {
+          fecha: new Date(), monto: f.saldoPendiente, metodoPago: 'transferencia',
+          referencia: `Pago archivo ${BANCOS_PAGO.find(b => b.value === bancoSel)?.label ?? ''}`,
+          usuarioId: user.uid, usuarioNombre: user.nombre,
+        });
+        // 2. Egreso contable (DB CxP / CR Bancos)
+        crearAsientoPago({
+          facturaId: f.id, fecha: new Date(), proveedorNombre: f.proveedorNombre,
+          monto: f.saldoPendiente, usaBanco: true,
+          usuarioId: user.uid, usuarioNombre: user.nombre,
+        }).catch(() => {});
+        // 3. Línea para el archivo del banco
+        if (!prov?.numeroCuentaBancaria || !prov?.bancoCodigo) sinDatos++;
+        pagos.push({
+          identificacion:     f.proveedorRuc,
+          tipoIdentificacion: f.proveedorRuc.length === 13 ? 'R' : f.proveedorRuc.length === 10 ? 'C' : 'P',
+          nombre:             f.proveedorNombre,
+          bancoCodigo:        prov?.bancoCodigo ?? '',
+          tipoCuenta:         prov?.tipoCuentaBancaria ?? 'corriente',
+          numeroCuenta:       prov?.numeroCuentaBancaria ?? '',
+          valor:              f.saldoPendiente,
+          referencia:         f.numeroFactura,
+          email:              prov?.emailPago ?? prov?.email,
+        });
+      }
+      // 4. Generar y descargar el TXT
+      descargarTxtPagos(bancoSel, pagos);
+      toast.success(
+        `${pagos.length} pago(s) registrados, egreso contable creado y archivo generado.` +
+        (sinDatos ? ` ⚠ ${sinDatos} sin datos bancarios completos.` : '')
+      );
+      setPagoBancoOpen(false);
+      setSeleccionadas(new Set());
+    } catch (e: any) {
+      toast.error(e?.message ?? 'Error al procesar los pagos');
+    } finally {
+      setProcesandoPago(false);
+    }
   };
 
   return (
@@ -467,6 +573,9 @@ export default function FacturasProveedorPage() {
             </Button>
             <Button variant="outline" onClick={descargarTodosXML}>
               <Download className="mr-2 h-4 w-4" /> Descargar todos (ZIP)
+            </Button>
+            <Button variant="outline" onClick={abrirPagoBanco}>
+              <Banknote className="mr-2 h-4 w-4" /> Pago bancario (TXT)
             </Button>
             <Button onClick={openCreate}>
               <Plus className="mr-2 h-4 w-4" /> Nueva Factura
@@ -567,7 +676,7 @@ export default function FacturasProveedorPage() {
                         className="h-8 w-8 text-slate-500 hover:text-blue-600">
                         <ChevronDown className="h-4 w-4" />
                       </Button>
-                      {f.estado !== 'pagada' && (
+                      {f.estado !== 'pagada' && f.estado !== 'anulada' && (
                         <Button variant="ghost" size="icon" title="Registrar pago"
                           onClick={() => {
                             setPagoDialog(f);
@@ -575,6 +684,13 @@ export default function FacturasProveedorPage() {
                           }}
                           className="h-8 w-8 text-slate-500 hover:text-green-600">
                           <CreditCard className="h-4 w-4" />
+                        </Button>
+                      )}
+                      {f.estado !== 'anulada' && (
+                        <Button variant="ghost" size="icon" title="Anular factura"
+                          onClick={() => anularFactura(f)}
+                          className="h-8 w-8 text-slate-500 hover:text-red-600">
+                          <Ban className="h-4 w-4" />
                         </Button>
                       )}
                     </div>
@@ -883,6 +999,84 @@ export default function FacturasProveedorPage() {
             </Button>
             <Button onClick={confirmarImportXML} disabled={saving}>
               {saving ? 'Importando...' : 'Confirmar importación'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* ─── DIALOG PAGO BANCARIO (TXT) ─── */}
+      <Dialog open={pagoBancoOpen} onOpenChange={setPagoBancoOpen}>
+        <DialogContent className="sm:max-w-2xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>Pago a proveedores por archivo bancario</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 py-2">
+            <div className="grid grid-cols-2 gap-4 items-end">
+              <div className="space-y-1.5">
+                <Label>Banco</Label>
+                <Select value={bancoSel} onValueChange={v => setBancoSel(v as BancoPago)}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    {BANCOS_PAGO.map(b => <SelectItem key={b.value} value={b.value}>{b.label}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="text-right">
+                <p className="text-xs text-slate-400">Seleccionado</p>
+                <p className="text-xl font-bold">{currency(totalSeleccionado)}</p>
+              </div>
+            </div>
+
+            <div className="border rounded-lg overflow-hidden max-h-72 overflow-y-auto">
+              <Table>
+                <TableHeader>
+                  <TableRow className="bg-slate-50">
+                    <TableHead className="w-8"></TableHead>
+                    <TableHead>Proveedor</TableHead>
+                    <TableHead>Factura</TableHead>
+                    <TableHead className="text-center">Datos banco</TableHead>
+                    <TableHead className="text-right">Saldo</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {facturasPagables.length === 0 ? (
+                    <TableRow><TableCell colSpan={5} className="text-center py-6 text-slate-400 text-sm">
+                      No hay facturas pendientes de pago.
+                    </TableCell></TableRow>
+                  ) : facturasPagables.map(f => {
+                    const prov = proveedores.find(p => p.id === f.proveedorId);
+                    const tieneBanco = !!prov?.numeroCuentaBancaria && !!prov?.bancoCodigo;
+                    return (
+                      <TableRow key={f.id} className="cursor-pointer" onClick={() => toggleSel(f.id)}>
+                        <TableCell>
+                          <input type="checkbox" checked={seleccionadas.has(f.id)} onChange={() => toggleSel(f.id)} />
+                        </TableCell>
+                        <TableCell className="text-sm">{f.proveedorNombre}</TableCell>
+                        <TableCell className="font-mono text-xs">{f.numeroFactura}</TableCell>
+                        <TableCell className="text-center">
+                          {tieneBanco
+                            ? <span className="text-xs text-green-600">✓ completos</span>
+                            : <span className="text-xs text-amber-600">⚠ faltan</span>}
+                        </TableCell>
+                        <TableCell className="text-right font-semibold">{currency(f.saldoPendiente)}</TableCell>
+                      </TableRow>
+                    );
+                  })}
+                </TableBody>
+              </Table>
+            </div>
+
+            <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 text-xs text-amber-700">
+              Al confirmar: se <strong>registra el pago</strong> de cada factura, se crea el <strong>egreso contable</strong>
+              (CxP / Bancos) y se descarga el <strong>archivo .txt</strong> para cargar en la banca electrónica.
+              Los datos bancarios se toman del proveedor (Proveedores → editar).
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setPagoBancoOpen(false)}>Cancelar</Button>
+            <Button onClick={procesarPagoBanco} disabled={procesandoPago || seleccionadas.size === 0}>
+              <Banknote className="mr-2 h-4 w-4" />
+              {procesandoPago ? 'Procesando...' : `Pagar y generar archivo (${seleccionadas.size})`}
             </Button>
           </DialogFooter>
         </DialogContent>

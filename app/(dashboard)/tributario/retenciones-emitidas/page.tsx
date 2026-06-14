@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useMemo } from 'react';
 import { format } from 'date-fns';
-import { Plus, Send, FileCheck, Trash2, Download } from 'lucide-react';
+import { Plus, Send, FileCheck, Trash2, Download, Ban } from 'lucide-react';
 import { toast } from 'sonner';
 
 import PageHeader  from '@/components/shared/PageHeader';
@@ -20,14 +20,14 @@ import {
 } from '@/components/ui/table';
 
 import { RetencionEmitida, FacturaProveedor, ConfigRetencion } from '@/types';
-import { subscribeToRetencionesEmitidas, createRetencionEmitida } from '@/lib/firebase/retenciones-emitidas';
+import { subscribeToRetencionesEmitidas, createRetencionEmitida, updateRetencionEmitida } from '@/lib/firebase/retenciones-emitidas';
 import { subscribeToFacturasProveedor }  from '@/lib/firebase/facturas-proveedor';
 import { subscribeToRetenciones }        from '@/lib/firebase/retenciones-config';
 import { getConfigSRI, incrementarSecuencial } from '@/lib/firebase/config-sri';
 import { getConfigEmpresa }              from '@/lib/firebase/config-empresa';
 import { generarClaveAcceso }            from '@/lib/sri/clave-acceso';
 import { generarXMLRetencion }           from '@/lib/sri/generador-retencion';
-import { crearAsientoRetencionEmitida }  from '@/lib/contabilidad/motor-asientos';
+import { crearAsientoRetencionEmitida, crearAsientoReversion } from '@/lib/contabilidad/motor-asientos';
 import { descargarRIDE }                 from '@/lib/sri/ride-pdf';
 import { buildRIDERetencion }            from '@/lib/sri/ride-builders';
 import { useAuth }                       from '@/context/AuthContext';
@@ -251,6 +251,21 @@ export default function RetencionesEmitidasPage() {
     }
   };
 
+  const anularRet = async (r: RetencionEmitida) => {
+    if (!user) return;
+    if (r.estado === 'anulado') { toast.info('La retención ya está anulada'); return; }
+    if (!window.confirm(`¿Anular la retención ${r.secuencial}? Se revertirá su asiento contable.`)) return;
+    try {
+      const rev = await crearAsientoReversion({
+        referenciaId: r.id, referenciaTipo: 'retencion_emitida', fecha: new Date(),
+        concepto: `Anulación retención ${r.secuencial}`,
+        usuarioId: user.uid, usuarioNombre: user.nombre ?? user.email ?? 'Usuario',
+      });
+      await updateRetencionEmitida(r.id, { estado: 'anulado' });
+      toast.success(rev.ok ? 'Retención anulada y asiento revertido' : `Retención anulada (${rev.advertencia ?? 'sin asiento'})`);
+    } catch (e: any) { toast.error(e?.message ?? 'Error al anular'); }
+  };
+
   const descargarRide = async (ret: RetencionEmitida) => {
     try {
       const config = await getConfigSRI();
@@ -322,6 +337,12 @@ export default function RetencionesEmitidasPage() {
                     onClick={() => descargarRide(r)}>
                     <Download className="h-4 w-4" />
                   </Button>
+                  {r.estado !== 'anulado' && (
+                    <Button variant="ghost" size="icon" className="h-8 w-8 text-slate-500 hover:text-red-600"
+                      title="Anular" onClick={() => anularRet(r)}>
+                      <Ban className="h-4 w-4" />
+                    </Button>
+                  )}
                 </TableCell>
               </TableRow>
             ))}

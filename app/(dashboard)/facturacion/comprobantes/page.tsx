@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react';
 import { format } from 'date-fns';
 import { es } from 'date-fns/locale';
-import { ClipboardList, RefreshCw, Download, Eye, FileCode, Mail } from 'lucide-react';
+import { ClipboardList, RefreshCw, Download, Eye, FileCode, Mail, Ban } from 'lucide-react';
 
 import PageHeader  from '@/components/shared/PageHeader';
 import { Input }   from '@/components/ui/input';
@@ -20,6 +20,9 @@ import {
 import { subscribeToComprobantes, Comprobante, updateComprobante } from '@/lib/firebase/comprobantes';
 import { autorizarComprobante } from '@/lib/sri/webservice';
 import { getConfigSRI } from '@/lib/firebase/config-sri';
+import { anularVenta } from '@/lib/firebase/ventas';
+import { crearAsientoReversion } from '@/lib/contabilidad/motor-asientos';
+import { useAuth } from '@/context/AuthContext';
 import { toast } from 'sonner';
 import { useRIDE } from '@/hooks/useRIDE';
 
@@ -44,7 +47,38 @@ export default function ComprobantesPage() {
   const [search,       setSearch]       = useState('');
   const [filtroEstado, setFiltroEstado] = useState('todos');
   const [consultando,  setConsultando]  = useState<string | null>(null);
+  const [anulando,     setAnulando]     = useState<string | null>(null);
+  const { user } = useAuth();
   const { descargar: descargarRIDE, abrir: abrirRIDE, descargarXML, enviarPorCorreo, generando } = useRIDE();
+
+  const anularComprobante = async (comp: Comprobante) => {
+    if (!user) return;
+    if (!window.confirm(`¿Anular el comprobante ${comp.serie}-${comp.secuencial}? Se revertirá su asiento contable y el stock.`)) return;
+    setAnulando(comp.id);
+    try {
+      // 1. Anular la venta (repone stock + marca anulada) si está vinculada
+      if (comp.ventaId) {
+        try { await anularVenta(comp.ventaId, user.uid, user.nombre); } catch { /* ya anulada o sin stock */ }
+        // 2. Reversar el asiento contable de la venta
+        const rev = await crearAsientoReversion({
+          referenciaId:   comp.ventaId,
+          referenciaTipo: 'venta',
+          fecha:          new Date(),
+          concepto:       `Anulación comprobante ${comp.serie}-${comp.secuencial}`,
+          usuarioId:      user.uid,
+          usuarioNombre:  user.nombre,
+        });
+        if (rev.advertencia) toast.warning(rev.advertencia);
+      }
+      // 3. Marcar el comprobante como anulado
+      await updateComprobante(comp.id, { estado: 'anulado' });
+      toast.success('Comprobante anulado');
+    } catch (e: any) {
+      toast.error(e?.message ?? 'Error al anular');
+    } finally {
+      setAnulando(null);
+    }
+  };
 
   const enviarCorreo = (comp: Comprobante) => {
     const email = window.prompt(`Correo del destinatario para ${comp.clienteNombre}:`);
@@ -231,6 +265,15 @@ export default function ComprobantesPage() {
                             <Mail className="h-4 w-4" />
                           </Button>
                         </>
+                      )}
+                      {c.estado !== 'anulado' && (
+                        <Button variant="ghost" size="icon"
+                          onClick={() => anularComprobante(c)}
+                          disabled={anulando === c.id}
+                          className="h-8 w-8 text-slate-500 hover:text-red-600"
+                          title="Anular comprobante">
+                          <Ban className={`h-4 w-4 ${anulando === c.id ? 'animate-pulse' : ''}`} />
+                        </Button>
                       )}
                     </div>
                   </TableCell>

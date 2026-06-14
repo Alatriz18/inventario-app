@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useMemo } from 'react';
 import { format } from 'date-fns';
-import { Plus, Send, FileX, ChevronDown, ChevronUp, Download } from 'lucide-react';
+import { Plus, Send, FileX, ChevronDown, ChevronUp, Download, Ban } from 'lucide-react';
 import { toast } from 'sonner';
 
 import PageHeader  from '@/components/shared/PageHeader';
@@ -20,13 +20,13 @@ import {
 } from '@/components/ui/table';
 
 import { NotaCredito, MotivoNotaCredito, ItemNotaCredito, Venta } from '@/types';
-import { subscribeToNotasCredito, createNotaCredito } from '@/lib/firebase/notas-credito';
+import { subscribeToNotasCredito, createNotaCredito, updateNotaCredito } from '@/lib/firebase/notas-credito';
 import { subscribeToComprobantes, Comprobante }         from '@/lib/firebase/comprobantes';
 import { getVentaById }                                 from '@/lib/firebase/ventas';
 import { getConfigSRI, incrementarSecuencial }          from '@/lib/firebase/config-sri';
 import { generarClaveAcceso }                           from '@/lib/sri/clave-acceso';
 import { generarXMLNotaCredito }                        from '@/lib/sri/generador-nota-credito';
-import { crearAsientoNotaCredito }                      from '@/lib/contabilidad/motor-asientos';
+import { crearAsientoNotaCredito, crearAsientoReversion } from '@/lib/contabilidad/motor-asientos';
 import { descargarRIDE }                                from '@/lib/sri/ride-pdf';
 import { buildRIDENotaCredito }                         from '@/lib/sri/ride-builders';
 import { useAuth }                                      from '@/context/AuthContext';
@@ -127,6 +127,21 @@ export default function NotasCreditoPage() {
     const iva      = itemsNC.filter(i => i.tieneIVA).reduce((s, i) => s + i.subtotal * 0.15, 0);
     return { subtotal, iva, total: subtotal + iva };
   }, [itemsNC]);
+
+  const anularNC = async (n: NotaCredito) => {
+    if (!user) return;
+    if (n.estado === 'anulada') { toast.info('La NC ya está anulada'); return; }
+    if (!window.confirm(`¿Anular la NC ${n.secuencial}? Se revertirá su asiento contable.`)) return;
+    try {
+      const rev = await crearAsientoReversion({
+        referenciaId: n.id, referenciaTipo: 'nota_credito', fecha: new Date(),
+        concepto: `Anulación NC ${n.secuencial}`,
+        usuarioId: user.uid, usuarioNombre: user.nombre ?? user.email ?? 'Usuario',
+      });
+      await updateNotaCredito(n.id, { estado: 'anulada' });
+      toast.success(rev.ok ? 'NC anulada y asiento revertido' : `NC anulada (${rev.advertencia ?? 'sin asiento'})`);
+    } catch (e: any) { toast.error(e?.message ?? 'Error al anular'); }
+  };
 
   const descargarRide = async (nc: NotaCredito) => {
     try {
@@ -383,10 +398,18 @@ export default function NotasCreditoPage() {
                             <p className="font-bold text-red-600">{currency(n.total)}</p>
                           </div>
                         </div>
-                        <Button variant="outline" size="sm" className="mt-1"
-                          onClick={(e) => { e.stopPropagation(); descargarRide(n); }}>
-                          <Download className="mr-2 h-3.5 w-3.5" /> Descargar RIDE (PDF)
-                        </Button>
+                        <div className="flex gap-2 mt-1">
+                          <Button variant="outline" size="sm"
+                            onClick={(e) => { e.stopPropagation(); descargarRide(n); }}>
+                            <Download className="mr-2 h-3.5 w-3.5" /> Descargar RIDE (PDF)
+                          </Button>
+                          {n.estado !== 'anulada' && (
+                            <Button variant="outline" size="sm" className="text-red-600 hover:text-red-700"
+                              onClick={(e) => { e.stopPropagation(); anularNC(n); }}>
+                              <Ban className="mr-2 h-3.5 w-3.5" /> Anular
+                            </Button>
+                          )}
+                        </div>
                       </div>
                     </TableCell>
                   </TableRow>

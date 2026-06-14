@@ -1,5 +1,5 @@
 import {
-  collection, doc, onSnapshot, query, orderBy,
+  collection, doc, onSnapshot, query, orderBy, where, getDocs,
   serverTimestamp, addDoc, updateDoc, getDoc,
   QueryDocumentSnapshot, DocumentData,
 } from 'firebase/firestore';
@@ -7,6 +7,12 @@ import { db } from '@/lib/firebase/config';
 import { RetencionRecibida } from '@/types';
 
 const COL = 'retenciones_recibidas';
+
+export async function existeRetencionRecibida(claveAcceso?: string): Promise<boolean> {
+  if (!claveAcceso) return false;
+  const s = await getDocs(query(collection(db, COL), where('claveAcceso', '==', claveAcceso)));
+  return !s.empty;
+}
 
 export function subscribeToRetencionesRecibidas(
   callback: (data: RetencionRecibida[]) => void
@@ -31,6 +37,9 @@ export async function getRetencionRecibidaById(id: string): Promise<RetencionRec
 export async function createRetencionRecibida(
   data: Omit<RetencionRecibida, 'id' | 'createdAt'>
 ): Promise<string> {
+  if (await existeRetencionRecibida(data.claveAcceso)) {
+    throw new Error(`La retención ${data.numeroRetencion} ya está registrada.`);
+  }
   const ref = await addDoc(collection(db, COL), {
     ...data,
     createdAt: serverTimestamp(),

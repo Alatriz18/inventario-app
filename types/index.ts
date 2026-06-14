@@ -75,6 +75,12 @@ export interface Proveedor {
   // Condiciones comerciales
   tipoPago: TipoPago;
   diasCredito?: number;
+  // Datos bancarios (para pagos por transferencia / archivo TXT)
+  bancoNombre?:          string;
+  bancoCodigo?:          string;   // código de la institución financiera (SBS)
+  tipoCuentaBancaria?:   'corriente' | 'ahorros';
+  numeroCuentaBancaria?: string;
+  emailPago?:            string;   // correo para notificación de pago
   // SRI
   codigoSustento?: string;
   // Configuración contable (Sprint 7)
@@ -250,7 +256,7 @@ export interface Entrada {
 }
 
 // ─── CUENTAS POR PAGAR ─────────────────────────────────────────────────────
-export type EstadoFacturaProveedor = 'pendiente' | 'parcial' | 'pagada' | 'vencida';
+export type EstadoFacturaProveedor = 'pendiente' | 'parcial' | 'pagada' | 'vencida' | 'anulada';
 
 export interface PagoFactura {
   id: string;
@@ -562,7 +568,7 @@ export interface CuentaCobrar {
 
 // ─── NOTAS DE CRÉDITO SRI ──────────────────────────────────────────────────
 
-export type EstadoNotaCredito = 'pendiente' | 'autorizada' | 'rechazada';
+export type EstadoNotaCredito = 'pendiente' | 'autorizada' | 'rechazada' | 'anulada';
 export type MotivoNotaCredito = 'devolucion' | 'descuento' | 'error' | 'anulacion';
 
 export interface ItemNotaCredito {
@@ -605,7 +611,7 @@ export interface NotaCredito {
 
 // ─── NOTAS DE DÉBITO SRI ───────────────────────────────────────────────────
 
-export type EstadoNotaDebito = 'pendiente' | 'autorizada' | 'rechazada';
+export type EstadoNotaDebito = 'pendiente' | 'autorizada' | 'rechazada' | 'anulada';
 
 export interface RazonNotaDebito {
   descripcion: string;
@@ -639,7 +645,7 @@ export interface NotaDebito {
 
 // ─── COMPROBANTES DE RETENCIÓN EMITIDOS (a proveedores) ───────────────────
 
-export type EstadoRetencion = 'pendiente' | 'autorizado' | 'rechazado';
+export type EstadoRetencion = 'pendiente' | 'autorizado' | 'rechazado' | 'anulado';
 
 export interface LineaRetencion {
   id:           string;
@@ -796,6 +802,7 @@ export interface RetencionRecibida {
   clienteIdentificacion: string;
   // Datos del comprobante de retención recibido
   numeroRetencion:     string;           // Número que emitió el cliente
+  claveAcceso?:        string;           // para evitar duplicados al reimportar
   fechaEmision:        Date;
   ejercicioFiscal:     string;           // MM/YYYY
   lineas:              LineaRetencionRecibida[];

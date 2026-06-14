@@ -16,6 +16,7 @@ import { getCuentas }                from '@/lib/firebase/plan-cuentas';
 import {
   createAsiento,
   recalcularAsientoDeDocumento,
+  getAsientoByReferencia,
 } from '@/lib/firebase/asientos';
 import { CuentaContable, AsientoLinea, TipoAsiento } from '@/types';
 
@@ -541,6 +542,61 @@ export async function crearAsientoNotaDebito(p: ParamsNotaDebito): Promise<strin
       createdAt:      new Date(),
     });
   } catch { return null; }
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// ASIENTO DE REVERSIÓN (anulación de un documento)
+// ─────────────────────────────────────────────────────────────────────────
+/**
+ * Genera el asiento que reversa (anula) el asiento original de un documento:
+ * invierte debe ↔ haber. No borra el original (deja la traza). Evita doble
+ * reversión y respeta períodos cerrados.
+ */
+export async function crearAsientoReversion(p: {
+  referenciaId:   string;
+  referenciaTipo: string;
+  fecha:          Date;
+  concepto:       string;
+  usuarioId:      string;
+  usuarioNombre:  string;
+}): Promise<{ ok: boolean; advertencia?: string }> {
+  try {
+    const original = await getAsientoByReferencia(p.referenciaId, p.referenciaTipo);
+    if (!original) return { ok: false, advertencia: 'No se encontró asiento que reversar' };
+    if (original.bloqueado) {
+      return { ok: false, advertencia: 'El período contable está cerrado; no se puede anular' };
+    }
+    const tipoRev = `${p.referenciaTipo}_anulacion`;
+    const yaRev = await getAsientoByReferencia(p.referenciaId, tipoRev);
+    if (yaRev) return { ok: false, advertencia: 'El asiento ya había sido reversado' };
+
+    const lineas: AsientoLinea[] = original.lineas.map(l => ({
+      ...l,
+      id:    `${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+      debe:  l.haber,
+      haber: l.debe,
+    }));
+
+    await createAsiento({
+      fecha:          p.fecha,
+      concepto:       p.concepto,
+      tipo:           'manual',
+      referenciaId:   p.referenciaId,
+      referenciaTipo: tipoRev,
+      lineas,
+      totalDebe:      lineas.reduce((s, l) => s + l.debe,  0),
+      totalHaber:     lineas.reduce((s, l) => s + l.haber, 0),
+      estado:         'confirmado',
+      bloqueado:      false,
+      editadoManualmente: false,
+      usuarioId:      p.usuarioId,
+      usuarioNombre:  p.usuarioNombre,
+      createdAt:      new Date(),
+    });
+    return { ok: true };
+  } catch (e: any) {
+    return { ok: false, advertencia: e?.message ?? 'Error al reversar' };
+  }
 }
 
 // ─────────────────────────────────────────────────────────────────────────

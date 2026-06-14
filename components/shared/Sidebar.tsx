@@ -68,6 +68,7 @@ const NAV: NavItem[] = [
     label: 'Cuentas por Pagar', icon: CreditCard,
     children: [
       { label: 'Facturas Proveedores', href: '/cuentas-por-pagar/facturas', icon: FileCheck },
+      { label: 'Documentos Recibidos', href: '/cuentas-por-pagar/documentos-recibidos', icon: FileCheck },
       { label: 'Pagos Pendientes',     href: '/cuentas-por-pagar/pagos',    icon: CreditCard },
     ],
   },

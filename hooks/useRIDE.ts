@@ -14,6 +14,7 @@ import { useState, useCallback } from 'react';
 import { toast } from 'sonner';
 import { getConfigSRI } from '@/lib/firebase/config-sri';
 import { getConfigEmail } from '@/lib/firebase/config-email';
+import { getConfigEmpresa } from '@/lib/firebase/config-empresa';
 import { Comprobante }  from '@/lib/firebase/comprobantes';
 import {
   DatosRIDE, descargarRIDE, abrirRIDEenNuevaPestana, generarRIDE,
@@ -48,6 +49,15 @@ export function useRIDE() {
       toast.error('Configura los datos del SRI antes de generar el RIDE');
       return null;
     }
+    // Leyenda de régimen (RIMPE, artesano, etc.) desde la config de empresa
+    let regimenLeyenda: string | undefined;
+    try {
+      const emp = await getConfigEmpresa();
+      const r = emp?.regimen;
+      if (r === 'rimpe_emprendedor' || r === 'rimpe_negocio_popular') regimenLeyenda = 'CONTRIBUYENTE RÉGIMEN RIMPE';
+      else if (r === 'rimpe_artesano') regimenLeyenda = 'CONTRIBUYENTE RÉGIMEN RIMPE - ARTESANO CALIFICADO';
+      else if (r === 'general') regimenLeyenda = 'CONTRIBUYENTE RÉGIMEN GENERAL';
+    } catch { /* opcional */ }
 
     // Parsear el XML autorizado o firmado para extraer los ítems
     // Si no hay XML disponible usamos los datos del comprobante directamente
@@ -74,6 +84,7 @@ export function useRIDE() {
       puntoEmision:            config.puntoEmision,
       contribuyenteEspecial:   config.contribuyenteEspecial,
       obligadoContabilidad:    config.obligadoContabilidad,
+      regimenLeyenda,
       ambiente:                config.ambiente,
       secuencial:              parseInt(comp.secuencial),
       claveAcceso:             comp.claveAcceso,

@@ -22,13 +22,15 @@ export type TipoDocRIDE =
   | 'retencion' | 'recibo_interno';
 
 export interface ItemRIDE {
-  codigo:        string;
-  descripcion:   string;
-  cantidad:      number;
-  precioUnitario:number;
-  descuento:     number;
-  subtotal:      number;
-  tieneIVA:      boolean;
+  codigo:          string;
+  codigoAuxiliar?: string;
+  descripcion:     string;
+  detalleAdicional?: string;
+  cantidad:        number;
+  precioUnitario:  number;
+  descuento:       number;
+  subtotal:        number;
+  tieneIVA:        boolean;
 }
 
 /** Una línea de la tabla de retenciones (solo tipoDocumento='retencion') */
@@ -62,6 +64,7 @@ export interface DatosRIDE {
   puntoEmision:     string;
   contribuyenteEspecial?: string;
   obligadoContabilidad:   'SI' | 'NO';
+  regimenLeyenda?:  string;     // ej. "CONTRIBUYENTE RÉGIMEN RIMPE"
   ambiente:         '1' | '2';  // 1=pruebas 2=producción
 
   // Numeración
@@ -155,11 +158,20 @@ function formatFecha(d: Date): string {
   return `${dd}/${mm}/${d.getFullYear()}`;
 }
 
+// Formas de pago según tabla 24 del SRI (código - descripción)
 const FORMA_PAGO_LABEL: Record<string, string> = {
-  efectivo: 'SIN UTILIZACIÓN DEL SISTEMA FINANCIERO', tarjeta: 'TARJETA DE CRÉDITO/DÉBITO',
-  transferencia: 'TRANSFERENCIA / DÉBITO', cheque: 'CHEQUE',
-  '01': 'SIN UTILIZACIÓN DEL SISTEMA FINANCIERO', '16': 'TARJETA DE CRÉDITO/DÉBITO',
-  '19': 'TRANSFERENCIA / DÉBITO', '20': 'CHEQUE',
+  efectivo:      '01 - SIN UTILIZACION DEL SISTEMA FINANCIERO',
+  tarjeta:       '19 - TARJETA DE CRÉDITO',
+  transferencia: '20 - OTROS CON UTILIZACION DEL SISTEMA FINANCIERO',
+  cheque:        '20 - OTROS CON UTILIZACION DEL SISTEMA FINANCIERO',
+  '01': '01 - SIN UTILIZACION DEL SISTEMA FINANCIERO',
+  '15': '15 - COMPENSACIÓN DE DEUDAS',
+  '16': '16 - TARJETA DE DÉBITO',
+  '17': '17 - DINERO ELECTRÓNICO',
+  '18': '18 - TARJETA PREPAGO',
+  '19': '19 - TARJETA DE CRÉDITO',
+  '20': '20 - OTROS CON UTILIZACION DEL SISTEMA FINANCIERO',
+  '21': '21 - ENDOSO DE TÍTULOS',
 };
 
 const TITULO: Record<TipoDocRIDE, string> = {
@@ -305,6 +317,10 @@ export function generarRIDE(datos: DatosRIDE): Uint8Array {
     value(doc, datos.contribuyenteEspecial, MARGIN + 52, ly);
     ly += 4;
   }
+  if (datos.regimenLeyenda) {
+    label(doc, datos.regimenLeyenda, MARGIN + 4, ly);
+    ly += 4;
+  }
 
   // Documento (derecha)
   let ry = y + 5;
@@ -357,24 +373,26 @@ export function generarRIDE(datos: DatosRIDE): Uint8Array {
   }
 
   // ── DATOS DEL COMPRADOR / SUJETO ─────────────────────────────────────────
-  const compH = esRetencion ? 18 : 14;
+  const compH = esRetencion ? 17 : 17;
   box(doc, MARGIN, y, COLW, compH);
-  let cy = y + 5;
-  const sujetoLabel = esRetencion ? 'Razón Social / Nombres y Apellidos:' : 'Razón Social / Nombres y Apellidos:';
-  label(doc, sujetoLabel, MARGIN + 3, cy);
+  let cy = y + 4.5;
+  label(doc, 'Razón Social / Nombres y Apellidos:', MARGIN + 3, cy);
   value(doc, datos.razonSocialComprador, MARGIN + 52, cy);
-  label(doc, 'Identificación:', MARGIN + COLW * 0.7, cy);
-  value(doc, datos.identificacionComprador, MARGIN + COLW * 0.7 + 22, cy);
+  label(doc, 'Identificación:', MARGIN + COLW * 0.72, cy);
+  value(doc, datos.identificacionComprador, MARGIN + COLW * 0.72 + 20, cy);
   cy += 5;
   label(doc, 'Fecha Emisión:', MARGIN + 3, cy);
-  value(doc, formatFecha(datos.fechaEmision), MARGIN + 26, cy);
+  value(doc, formatFecha(datos.fechaEmision), MARGIN + 25, cy);
   if (esRetencion && datos.periodoFiscal) {
-    label(doc, 'Ejercicio Fiscal:', MARGIN + COLW * 0.7, cy);
-    value(doc, datos.periodoFiscal, MARGIN + COLW * 0.7 + 24, cy);
-  } else if (datos.direccionComprador) {
-    label(doc, 'Dirección:', MARGIN + COLW * 0.45, cy);
-    value(doc, datos.direccionComprador.slice(0, 45), MARGIN + COLW * 0.45 + 16, cy);
+    label(doc, 'Ejercicio Fiscal:', MARGIN + COLW * 0.72, cy);
+    value(doc, datos.periodoFiscal, MARGIN + COLW * 0.72 + 22, cy);
+  } else {
+    label(doc, 'Placa / Matrícula:', MARGIN + COLW * 0.42, cy);
+    label(doc, 'Guía:', MARGIN + COLW * 0.72, cy);
   }
+  cy += 5;
+  label(doc, 'Dirección:', MARGIN + 3, cy);
+  value(doc, (datos.direccionComprador ?? '').slice(0, 90), MARGIN + 20, cy);
   y += compH + 3;
 
   // ── DOCUMENTO MODIFICADO (NC / ND) ───────────────────────────────────────
@@ -445,33 +463,52 @@ export function generarRIDE(datos: DatosRIDE): Uint8Array {
 // ── Tabla de ítems (factura / nota de venta / NC / ND) ──────────────────────
 
 function renderTablaItems(doc: jsPDF, datos: DatosRIDE, y: number): number {
+  // Columnas oficiales del RIDE SRI
+  let x = MARGIN;
+  const col = (w: number, align: 'left'|'right'|'center', label: string) => {
+    const c = { x, w, align, label }; x += w; return c;
+  };
   const cols = [
-    { label: 'Cód.',        x: MARGIN,       w: 18, align: 'left'  as const },
-    { label: 'Cant.',       x: MARGIN + 18,  w: 14, align: 'right' as const },
-    { label: 'Descripción', x: MARGIN + 32,  w: 78, align: 'left'  as const },
-    { label: 'P. Unit.',    x: MARGIN + 110, w: 22, align: 'right' as const },
-    { label: 'Desc.',       x: MARGIN + 132, w: 20, align: 'right' as const },
-    { label: 'Total',       x: MARGIN + 152, w: COLW - 152, align: 'right' as const },
+    col(15, 'left',  'Cod.\nPrincipal'),
+    col(14, 'left',  'Cod.\nAuxiliar'),
+    col(12, 'right', 'Cant.'),
+    col(45, 'left',  'Descripción'),
+    col(22, 'left',  'Detalle\nAdicional'),
+    col(16, 'right', 'Precio\nUnitario'),
+    col(13, 'right', 'Subsidio'),
+    col(16, 'right', 'Precio sin\nSubsidio'),
+    col(13, 'right', 'Descuento'),
+    col(COLW - x + MARGIN, 'right', 'Precio\nTotal'),
   ];
-  const ROW = 5;
+  const HEAD = 8, ROW = 6;
 
-  doc.setFillColor(...hex(LIGHT)); doc.rect(MARGIN, y, COLW, ROW, 'F'); box(doc, MARGIN, y, COLW, ROW);
+  // Cabecera (2 líneas)
+  doc.setFillColor(...hex(LIGHT)); doc.rect(MARGIN, y, COLW, HEAD, 'F'); box(doc, MARGIN, y, COLW, HEAD);
   cols.forEach(c => {
-    doc.setFont(FONT, 'bold'); doc.setFontSize(6.5); doc.setTextColor(...hex(BLACK));
-    const px = c.align === 'right' ? c.x + c.w - 2 : c.x + 2;
-    doc.text(c.label, px, y + 3.5, { align: c.align });
+    doc.setFont(FONT, 'bold'); doc.setFontSize(5.2); doc.setTextColor(...hex(BLACK));
+    const px = c.align === 'right' ? c.x + c.w - 1.5 : c.align === 'center' ? c.x + c.w / 2 : c.x + 1.5;
+    c.label.split('\n').forEach((ln, i) => doc.text(ln, px, y + 3.2 + i * 2.8, { align: c.align }));
   });
-  y += ROW;
+  y += HEAD;
 
   datos.items.forEach(it => {
     box(doc, MARGIN, y, COLW, ROW);
-    doc.setFont(FONT, 'normal'); doc.setFontSize(7); doc.setTextColor(...hex(BLACK));
-    doc.text((it.codigo || '-').slice(0, 9), cols[0].x + 2, y + 3.5);
-    doc.text(num(it.cantidad, 0), cols[1].x + cols[1].w - 2, y + 3.5, { align: 'right' });
-    doc.text(wrap(doc, it.descripcion, cols[2].w - 3)[0] ?? '', cols[2].x + 2, y + 3.5);
-    doc.text(usd(it.precioUnitario), cols[3].x + cols[3].w - 2, y + 3.5, { align: 'right' });
-    doc.text(usd(it.descuento), cols[4].x + cols[4].w - 2, y + 3.5, { align: 'right' });
-    doc.text(usd(it.subtotal), cols[5].x + cols[5].w - 2, y + 3.5, { align: 'right' });
+    doc.setFont(FONT, 'normal'); doc.setFontSize(6); doc.setTextColor(...hex(BLACK));
+    const cell = (i: number, txt: string) => {
+      const c = cols[i];
+      const px = c.align === 'right' ? c.x + c.w - 1.5 : c.x + 1.5;
+      doc.text(txt, px, y + 4, { align: c.align as any });
+    };
+    cell(0, (it.codigo || '').slice(0, 10));
+    cell(1, (it.codigoAuxiliar ?? '').slice(0, 9));
+    cell(2, num(it.cantidad, 2));
+    cell(3, wrap(doc, it.descripcion, cols[3].w - 3)[0] ?? '');
+    cell(4, (it.detalleAdicional ?? '').slice(0, 14));
+    cell(5, usd(it.precioUnitario));
+    cell(6, '0.00');
+    cell(7, usd(it.precioUnitario));
+    cell(8, usd(it.descuento));
+    cell(9, usd(it.subtotal));
     y += ROW;
   });
   return y;
@@ -480,48 +517,55 @@ function renderTablaItems(doc: jsPDF, datos: DatosRIDE, y: number): number {
 // ── Totales (lado derecho) ──────────────────────────────────────────────────
 
 function renderTotales(doc: jsPDF, datos: DatosRIDE, y: number): number {
-  y += 2;
+  const startY = y + 2;
   const totX = MARGIN + COLW * 0.55;
   const totW = COLW * 0.45;
-  const labW = totW * 0.62;
+  const labW = totW * 0.66;
+  let ty = startY;
 
   function row(lbl: string, val: string, bold = false) {
-    box(doc, totX, y, totW, 5);
-    doc.setFont(FONT, bold ? 'bold' : 'normal'); doc.setFontSize(7.5);
+    box(doc, totX, ty, totW, 4.6);
+    doc.setFont(FONT, bold ? 'bold' : 'normal'); doc.setFontSize(7);
     doc.setTextColor(...hex(BLACK));
-    doc.text(lbl, totX + labW - 2, y + 3.5, { align: 'right' });
-    doc.text(val, totX + totW - 2, y + 3.5, { align: 'right' });
-    y += 5;
+    doc.text(lbl, totX + labW - 2, ty + 3.2, { align: 'right' });
+    doc.text(val, totX + totW - 2, ty + 3.2, { align: 'right' });
+    ty += 4.6;
   }
 
-  const esFactura = datos.tipoDocumento === 'factura' || datos.tipoDocumento === 'nota_credito'
-                  || datos.tipoDocumento === 'nota_debito';
+  const esNotaVenta = datos.tipoDocumento === 'nota_venta';
 
-  if (esFactura) {
-    if (datos.subtotal15 > 0) row('SUBTOTAL 15%', usd(datos.subtotal15));
-    if (datos.subtotal0  > 0) row('SUBTOTAL 0%', usd(datos.subtotal0));
+  if (!esNotaVenta) {
+    row('SUBTOTAL 15%', usd(datos.subtotal15));
+    row('SUBTOTAL 0%', usd(datos.subtotal0));
+    row('SUBTOTAL NO OBJETO DE IVA', '0.00');
+    row('SUBTOTAL EXENTO DE IVA', '0.00');
     row('SUBTOTAL SIN IMPUESTOS', usd(datos.subtotal0 + datos.subtotal15));
-    if (datos.totalDescuento > 0) row('TOTAL DESCUENTO', usd(datos.totalDescuento));
+    row('TOTAL DESCUENTO', usd(datos.totalDescuento));
+    row('ICE', '0.00');
     row('IVA 15%', usd(datos.iva));
+    row('IRBPNR', '0.00');
+    row('PROPINA', '0.00');
+    row('VALOR TOTAL', usd(datos.total), true);
   } else {
-    // Nota de venta: sin desglose de IVA
-    if (datos.totalDescuento > 0) row('TOTAL DESCUENTO', usd(datos.totalDescuento));
-    row('SUBTOTAL', usd(datos.subtotal0 + datos.subtotal15));
+    row('SUBTOTAL SIN IMPUESTOS', usd(datos.subtotal0 + datos.subtotal15));
+    row('TOTAL DESCUENTO', usd(datos.totalDescuento));
+    row('VALOR TOTAL', usd(datos.total), true);
   }
-  row('VALOR TOTAL', usd(datos.total), true);
 
-  // Forma de pago (lado izquierdo)
+  // Forma de pago (lado izquierdo, a la misma altura que los totales)
   if (datos.tipoDocumento === 'factura' || datos.tipoDocumento === 'nota_venta') {
-    const fpY = y - (esFactura ? 25 : 15);
-    const fpW = COLW * 0.5;
-    box(doc, MARGIN, fpY, fpW, 10);
-    label(doc, 'Forma de Pago', MARGIN + 3, fpY + 4, 6.5);
-    label(doc, 'Valor', MARGIN + fpW - 18, fpY + 4, 6.5);
-    value(doc, (FORMA_PAGO_LABEL[datos.formaPago] ?? datos.formaPago).slice(0, 32), MARGIN + 3, fpY + 8, 6.5);
-    doc.text(usd(datos.total), MARGIN + fpW - 3, fpY + 8, { align: 'right' });
+    const fpW = COLW * 0.52;
+    box(doc, MARGIN, startY, fpW, 5);
+    doc.setFillColor(...hex(LIGHT)); doc.rect(MARGIN, startY, fpW, 5, 'F'); box(doc, MARGIN, startY, fpW, 5);
+    label(doc, 'Forma de Pago', MARGIN + 3, startY + 3.4, 6.5);
+    label(doc, 'Valor', MARGIN + fpW - 16, startY + 3.4, 6.5);
+    box(doc, MARGIN, startY + 5, fpW, 5);
+    value(doc, (FORMA_PAGO_LABEL[datos.formaPago] ?? datos.formaPago).slice(0, 42), MARGIN + 3, startY + 8.4, 6);
+    doc.setFont(FONT, 'normal'); doc.setFontSize(6.5); doc.setTextColor(...hex(BLACK));
+    doc.text(usd(datos.total), MARGIN + fpW - 2, startY + 8.4, { align: 'right' });
   }
 
-  return y;
+  return ty;
 }
 
 // ── Tabla de retenciones ────────────────────────────────────────────────────

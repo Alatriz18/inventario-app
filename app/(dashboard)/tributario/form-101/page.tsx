@@ -50,7 +50,7 @@ export default function Form101Page() {
   useEffect(() => {
     const u1 = subscribeToVentas(d => { setVentas(d); setLoading(false); });
     const u2 = subscribeToFacturasProveedor(setFacturas);
-    const u3 = subscribeToAsientos(setAsientos);
+    const u3 = subscribeToAsientos(setAsientos, 100000);
     return () => { u1(); u2(); u3(); };
   }, []);
 

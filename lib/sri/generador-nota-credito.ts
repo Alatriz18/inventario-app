@@ -77,9 +77,8 @@ export function generarXMLNotaCredito(d: DatosNotaCredito): string {
   inf.ele('tipoIdentificacionComprador').txt(d.tipoIdComprador);
   inf.ele('razonSocialComprador').txt(d.razonSocialComprador);
   inf.ele('identificacionComprador').txt(d.identificacion);
-  inf.ele('obligadoContabilidad').txt(d.obligadoContabilidad ?? 'NO');
   if (d.contribuyenteEspecial) inf.ele('contribuyenteEspecial').txt(d.contribuyenteEspecial);
-  inf.ele('rise').txt('');
+  inf.ele('obligadoContabilidad').txt(d.obligadoContabilidad ?? 'NO');
   inf.ele('codDocModificado').txt(d.codDocModificado);
   inf.ele('numDocModificado').txt(d.numDocModificado);
   inf.ele('fechaEmisionDocSustento').txt(fechaDocStr);

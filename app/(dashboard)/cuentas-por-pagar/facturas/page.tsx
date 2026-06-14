@@ -9,7 +9,7 @@ import { format } from 'date-fns';
 import { es } from 'date-fns/locale';
 import {
   Plus, FileCheck, Upload, ChevronDown, CreditCard,
-  FileSearch, AlertTriangle, CheckCircle2, Clock,
+  FileSearch, AlertTriangle, CheckCircle2, Clock, Download, Files, Mail,
 } from 'lucide-react';
 
 import PageHeader   from '@/components/shared/PageHeader';
@@ -30,15 +30,26 @@ import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from '@/components/ui/table';
 
-import { crearAsientoPago } from '@/lib/contabilidad/motor-asientos';
+import {
+  crearAsientoPago, crearAsientoCompraFactura,
+  crearAsientoNotaCreditoRecibida, crearAsientoNotaDebitoRecibida,
+  crearAsientoRetencionRecibida,
+} from '@/lib/contabilidad/motor-asientos';
 import { FacturaProveedor, Proveedor } from '@/types';
 import {
   subscribeToFacturasProveedor,
   createFacturaProveedor,
   registrarPago,
 } from '@/lib/firebase/facturas-proveedor';
-import { subscribeToProveedores } from '@/lib/firebase/proveedores';
-import { parsearFacturaXML, extraerIVAdeXML } from '@/lib/sri/xmlParser';
+import { createDocRecibido } from '@/lib/firebase/docs-recibidos';
+import { createRetencionRecibida } from '@/lib/firebase/retenciones-recibidas';
+import { subscribeToProveedores, getOrCreateProveedorPorRuc } from '@/lib/firebase/proveedores';
+import { getConfigEmail } from '@/lib/firebase/config-email';
+import {
+  parsearFacturaXML, extraerIVAdeXML, detectarTipoComprobante,
+  parsearNotaCreditoXML, parsearNotaDebitoXML, parsearRetencionXML,
+} from '@/lib/sri/xmlParser';
+import { descargarZip } from '@/lib/utils/zip';
 import { useAuth } from '@/context/AuthContext';
 
 const facturaSchema = z.object({
@@ -90,7 +101,9 @@ export default function FacturasProveedorPage() {
   const [saving,       setSaving]       = useState(false);
   const [search,       setSearch]       = useState('');
   const [filtroEstado, setFiltroEstado] = useState('todos');
-  const xmlRef = useRef<HTMLInputElement>(null);
+  const [bulkImporting, setBulkImporting] = useState(false);
+  const xmlRef  = useRef<HTMLInputElement>(null);
+  const bulkRef = useRef<HTMLInputElement>(null);
 
   const facturaForm = useForm<FacturaForm>({ resolver: zodResolver(facturaSchema) as any });
   const pagoForm    = useForm<PagoForm>({
@@ -154,8 +167,8 @@ export default function FacturasProveedorPage() {
       });
       toast.success('Factura registrada');
       setDialogOpen(false);
-    } catch {
-      toast.error('Error al guardar la factura');
+    } catch (e: any) {
+      toast.error(e?.message ?? 'Error al guardar la factura');
     } finally {
       setSaving(false);
     }
@@ -217,37 +230,13 @@ export default function FacturasProveedorPage() {
 
   const confirmarImportXML = async () => {
     if (!xmlPreview || !user) return;
-    const { data, iva } = xmlPreview;
     setSaving(true);
     try {
-      const { infoTributaria: it, infoFactura: inf } = data;
-      const numDoc   = `${it.estab}-${it.ptoEmi}-${it.secuencial}`;
-      const prov     = proveedores.find(p => p.ruc === it.ruc);
-      const subtotal = Number(inf.totalSinImpuestos) ?? 0;
-      const total    = Number(inf.importeTotal)      ?? 0;
-      const [dd, MM, yyyy] = inf.fechaEmision.split('/');
-      const fechaEmision   = new Date(`${yyyy}-${MM}-${dd}`);
-
-      await createFacturaProveedor({
-        proveedorId:    prov?.id    ?? '',
-        proveedorNombre:it.razonSocial,
-        proveedorRuc:   it.ruc,
-        numeroFactura:  numDoc,
-        claveAcceso:    it.claveAcceso,
-        fechaEmision,
-        subtotal12:     subtotal,
-        subtotal0:      0,
-        iva,
-        total,
-        saldoPendiente: total,
-        estado:         'pendiente',
-        pagos:          [],
-        xmlData:        data,
-        usuarioId:      user.uid,
-        usuarioNombre:  user.nombre,
-        createdAt:      new Date(),
-      });
-      toast.success(`Factura ${numDoc} importada desde XML`);
+      const existentes = new Set(facturas.map(f => f.claveAcceso).filter(Boolean) as string[]);
+      const r = await procesarXmlRecibido(xmlPreview.xmlRaw, existentes);
+      if (r === 'ok')       toast.success('Factura importada — proveedor y asiento de compra generados');
+      else if (r === 'dup') toast.warning('Esta factura ya estaba registrada (clave de acceso duplicada)');
+      else                  toast.error('No se pudo importar la factura');
       setXmlDialog(false);
       setXmlPreview(null);
     } catch {
@@ -257,20 +246,233 @@ export default function FacturasProveedorPage() {
     }
   };
 
+  /**
+   * Procesa un XML recibido: parsea, evita duplicados, crea (o reutiliza) el
+   * proveedor por RUC, registra la factura y genera el asiento de compra.
+   * Devuelve 'ok' | 'dup' | 'err'.
+   */
+  const parseFecha = (s: string): Date => {
+    const [dd, MM, yyyy] = (s || '').split('/');
+    return yyyy ? new Date(`${yyyy}-${MM}-${dd}`) : new Date();
+  };
+
+  const procesarXmlRecibido = async (
+    xml: string,
+    existentes: Set<string>
+  ): Promise<'ok' | 'dup' | 'err' | 'omitido'> => {
+    if (!user) return 'err';
+    const tipo = detectarTipoComprobante(xml);
+
+    try {
+      // ── FACTURA → CxP + asiento de compra ──
+      if (tipo === 'factura') {
+        const data = parsearFacturaXML(xml);
+        if (!data) return 'err';
+        const it = data.infoTributaria, inf = data.infoFactura;
+        const clave = it.claveAcceso;
+        if (clave && existentes.has(clave)) return 'dup';
+        const numDoc   = `${it.estab}-${it.ptoEmi}-${it.secuencial}`;
+        const iva      = extraerIVAdeXML(xml);
+        const subtotal = Number(inf.totalSinImpuestos) || 0;
+        const total    = Number(inf.importeTotal) || 0;
+        const fechaEmision = parseFecha(inf.fechaEmision);
+        const prov = await getOrCreateProveedorPorRuc(it.ruc, it.razonSocial);
+
+        const facturaId = await createFacturaProveedor({
+          proveedorId: prov.id, proveedorNombre: it.razonSocial, proveedorRuc: it.ruc,
+          numeroFactura: numDoc, claveAcceso: clave, fechaEmision,
+          subtotal12: subtotal, subtotal0: 0, iva, total, saldoPendiente: total,
+          estado: 'pendiente', pagos: [], xmlData: data, xmlRaw: xml,
+          usuarioId: user.uid, usuarioNombre: user.nombre, createdAt: new Date(),
+        });
+        await crearAsientoCompraFactura({
+          facturaId, fecha: fechaEmision, proveedorNombre: it.razonSocial,
+          subtotal, iva, total, usuarioId: user.uid, usuarioNombre: user.nombre,
+        });
+        if (clave) existentes.add(clave);
+        return 'ok';
+      }
+
+      // ── NOTA DE CRÉDITO recibida → reversa de compra ──
+      if (tipo === 'nota_credito') {
+        const d = parsearNotaCreditoXML(xml);
+        if (!d) return 'err';
+        if (d.claveAcceso && existentes.has(d.claveAcceso)) return 'dup';
+        const prov = await getOrCreateProveedorPorRuc(d.ruc, d.razonSocial);
+        const docId = await createDocRecibido({
+          tipo: 'nota_credito', proveedorId: prov.id, proveedorNombre: d.razonSocial,
+          proveedorRuc: d.ruc, numero: `${d.estab}-${d.ptoEmi}-${d.secuencial}`,
+          claveAcceso: d.claveAcceso, docModificado: d.docModificado,
+          fechaEmision: parseFecha(d.fechaEmision),
+          subtotal: d.subtotal, iva: d.iva, total: d.total,
+          xmlRaw: xml, usuarioId: user.uid, usuarioNombre: user.nombre,
+        });
+        await crearAsientoNotaCreditoRecibida({
+          docId, fecha: parseFecha(d.fechaEmision), proveedorNombre: d.razonSocial,
+          subtotal: d.subtotal, iva: d.iva, total: d.total,
+          usuarioId: user.uid, usuarioNombre: user.nombre,
+        });
+        if (d.claveAcceso) existentes.add(d.claveAcceso);
+        return 'ok';
+      }
+
+      // ── NOTA DE DÉBITO recibida → aumenta CxP ──
+      if (tipo === 'nota_debito') {
+        const d = parsearNotaDebitoXML(xml);
+        if (!d) return 'err';
+        if (d.claveAcceso && existentes.has(d.claveAcceso)) return 'dup';
+        const prov = await getOrCreateProveedorPorRuc(d.ruc, d.razonSocial);
+        const docId = await createDocRecibido({
+          tipo: 'nota_debito', proveedorId: prov.id, proveedorNombre: d.razonSocial,
+          proveedorRuc: d.ruc, numero: `${d.estab}-${d.ptoEmi}-${d.secuencial}`,
+          claveAcceso: d.claveAcceso, docModificado: d.docModificado,
+          fechaEmision: parseFecha(d.fechaEmision),
+          subtotal: d.subtotal, iva: d.iva, total: d.total,
+          xmlRaw: xml, usuarioId: user.uid, usuarioNombre: user.nombre,
+        });
+        await crearAsientoNotaDebitoRecibida({
+          docId, fecha: parseFecha(d.fechaEmision), proveedorNombre: d.razonSocial,
+          subtotal: d.subtotal, iva: d.iva, total: d.total,
+          usuarioId: user.uid, usuarioNombre: user.nombre,
+        });
+        if (d.claveAcceso) existentes.add(d.claveAcceso);
+        return 'ok';
+      }
+
+      // ── RETENCIÓN recibida (un cliente nos retuvo) ──
+      if (tipo === 'retencion') {
+        const d = parsearRetencionXML(xml);
+        if (!d) return 'err';
+        if (d.claveAcceso && existentes.has(d.claveAcceso)) return 'dup';
+        const numeroRet = `${d.estab}-${d.ptoEmi}-${d.secuencial}`;
+        const retId = await createRetencionRecibida({
+          ventaId: '', numeroComprobante: '',
+          clienteId: '', clienteNombre: d.razonSocial, clienteIdentificacion: d.ruc,
+          numeroRetencion: numeroRet, fechaEmision: parseFecha(d.fechaEmision),
+          ejercicioFiscal: d.periodoFiscal,
+          lineas: d.lineas.map(l => ({
+            tipo: l.tipo, codigo: l.codigo, descripcion: l.codigo,
+            porcentaje: l.porcentaje, baseImponible: l.baseImponible, valorRetenido: l.valorRetenido,
+          })),
+          totalRetenido: d.totalRetenido, retFuente: d.retFuente, retIVA: d.retIVA,
+          usuarioId: user.uid, usuarioNombre: user.nombre,
+        });
+        await crearAsientoRetencionRecibida({
+          retencionId: retId, fecha: parseFecha(d.fechaEmision), clienteNombre: d.razonSocial,
+          retFuente: d.retFuente, retIVA: d.retIVA, totalRetenido: d.totalRetenido,
+          usuarioId: user.uid, usuarioNombre: user.nombre,
+        });
+        if (d.claveAcceso) existentes.add(d.claveAcceso);
+        return 'ok';
+      }
+
+      return 'omitido'; // liquidación / desconocido
+    } catch (e: any) {
+      if (/ya está registrad[oa]/.test(String(e?.message ?? ''))) return 'dup';
+      return 'err';
+    }
+  };
+
+  // ── Carga MASIVA de XMLs recibidos (los descargados del portal del SRI) ──
+  const handleBulkUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(e.target.files ?? []);
+    if (!files.length || !user) return;
+    setBulkImporting(true);
+    let ok = 0, dup = 0, err = 0, omit = 0;
+    const existentes = new Set(facturas.map(f => f.claveAcceso).filter(Boolean) as string[]);
+    for (const file of files) {
+      const r = await procesarXmlRecibido(await file.text(), existentes);
+      if (r === 'ok') ok++; else if (r === 'dup') dup++; else if (r === 'omitido') omit++; else err++;
+    }
+    toast.success(
+      `Importadas: ${ok} · Duplicadas: ${dup}` +
+      `${omit ? ` · Omitidas (NC/ND/retención): ${omit}` : ''}${err ? ` · Con error: ${err}` : ''}`
+    );
+    setBulkImporting(false);
+    if (bulkRef.current) bulkRef.current.value = '';
+  };
+
+  // ── Traer facturas directamente del CORREO (IMAP) sin entrar al SRI ──
+  const handleImportarCorreo = async () => {
+    if (!user) return;
+    const cfg = await getConfigEmail();
+    if (!cfg?.email || !cfg?.password) {
+      toast.error('Configura tu correo en Configuración → Correo primero');
+      return;
+    }
+    setBulkImporting(true);
+    try {
+      const resp = await fetch('/api/email/recibidos', {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify({ smtp: cfg, sinceDays: 30 }),
+      });
+      const result = await resp.json();
+      if (!resp.ok) throw new Error(result.error ?? 'Error al leer el correo');
+
+      const xmls: { filename: string; xml: string }[] = result.xmls ?? [];
+      if (xmls.length === 0) {
+        toast.info('No se encontraron XML de facturas en el correo (últimos 30 días)');
+        return;
+      }
+      let ok = 0, dup = 0, err = 0, omit = 0;
+      const existentes = new Set(facturas.map(f => f.claveAcceso).filter(Boolean) as string[]);
+      for (const item of xmls) {
+        const r = await procesarXmlRecibido(item.xml, existentes);
+        if (r === 'ok') ok++; else if (r === 'dup') dup++; else if (r === 'omitido') omit++; else err++;
+      }
+      toast.success(
+        `Desde correo — Importadas: ${ok} · Duplicadas: ${dup}` +
+        `${omit ? ` · Omitidas: ${omit}` : ''}${err ? ` · Con error: ${err}` : ''}`
+      );
+    } catch (e: any) {
+      toast.error(e.message ?? 'Error al importar desde el correo');
+    } finally {
+      setBulkImporting(false);
+    }
+  };
+
+  // ── Descargar TODOS los XML recibidos guardados (en un .zip) ──
+  const descargarTodosXML = () => {
+    const conXml = facturas.filter(f => f.xmlRaw);
+    if (conXml.length === 0) {
+      toast.error('No hay XMLs guardados. Importa comprobantes para poder exportarlos.');
+      return;
+    }
+    const archivos = conXml.map(f => ({
+      name:    `${f.claveAcceso || f.numeroFactura || f.id}.xml`,
+      content: f.xmlRaw as string,
+    }));
+    descargarZip(archivos, `comprobantes_recibidos_${new Date().toISOString().slice(0,10)}.zip`);
+    toast.success(`${archivos.length} XML exportados en ZIP`);
+  };
+
   return (
     <div>
       <PageHeader
         title="Facturas de Proveedores"
         description="Control de cuentas por pagar — registra y gestiona facturas de proveedores"
         action={
-          <div className="flex gap-2">
+          <div className="flex gap-2 flex-wrap">
             <Button variant="outline" onClick={() => xmlRef.current?.click()}>
               <Upload className="mr-2 h-4 w-4" /> Importar XML
+            </Button>
+            <Button variant="outline" disabled={bulkImporting} onClick={() => bulkRef.current?.click()}>
+              <Files className="mr-2 h-4 w-4" />
+              {bulkImporting ? 'Importando…' : 'Importar varios XML'}
+            </Button>
+            <Button variant="outline" disabled={bulkImporting} onClick={handleImportarCorreo}>
+              <Mail className="mr-2 h-4 w-4" />
+              {bulkImporting ? 'Buscando…' : 'Buscar en mi correo'}
+            </Button>
+            <Button variant="outline" onClick={descargarTodosXML}>
+              <Download className="mr-2 h-4 w-4" /> Descargar todos (ZIP)
             </Button>
             <Button onClick={openCreate}>
               <Plus className="mr-2 h-4 w-4" /> Nueva Factura
             </Button>
             <input ref={xmlRef} type="file" accept=".xml" className="hidden" onChange={handleXMLUpload} />
+            <input ref={bulkRef} type="file" accept=".xml" multiple className="hidden" onChange={handleBulkUpload} />
           </div>
         }
       />

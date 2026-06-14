@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useMemo } from 'react';
 import { format } from 'date-fns';
-import { Plus, Send, FileX, ChevronDown, ChevronUp } from 'lucide-react';
+import { Plus, Send, FileX, ChevronDown, ChevronUp, Download } from 'lucide-react';
 import { toast } from 'sonner';
 
 import PageHeader  from '@/components/shared/PageHeader';
@@ -27,6 +27,8 @@ import { getConfigSRI, incrementarSecuencial }          from '@/lib/firebase/con
 import { generarClaveAcceso }                           from '@/lib/sri/clave-acceso';
 import { generarXMLNotaCredito }                        from '@/lib/sri/generador-nota-credito';
 import { crearAsientoNotaCredito }                      from '@/lib/contabilidad/motor-asientos';
+import { descargarRIDE }                                from '@/lib/sri/ride-pdf';
+import { buildRIDENotaCredito }                         from '@/lib/sri/ride-builders';
 import { useAuth }                                      from '@/context/AuthContext';
 
 const currency = (v: number) => `$${v.toFixed(2)}`;
@@ -125,6 +127,16 @@ export default function NotasCreditoPage() {
     const iva      = itemsNC.filter(i => i.tieneIVA).reduce((s, i) => s + i.subtotal * 0.15, 0);
     return { subtotal, iva, total: subtotal + iva };
   }, [itemsNC]);
+
+  const descargarRide = async (nc: NotaCredito) => {
+    try {
+      const config = await getConfigSRI();
+      if (!config) { toast.error('Configura los datos del SRI primero'); return; }
+      descargarRIDE(buildRIDENotaCredito(nc, config));
+    } catch (e: any) {
+      toast.error(`Error al generar RIDE: ${e.message ?? 'desconocido'}`);
+    }
+  };
 
   const resetDialog = () => {
     setCompSel('');
@@ -371,6 +383,10 @@ export default function NotasCreditoPage() {
                             <p className="font-bold text-red-600">{currency(n.total)}</p>
                           </div>
                         </div>
+                        <Button variant="outline" size="sm" className="mt-1"
+                          onClick={(e) => { e.stopPropagation(); descargarRide(n); }}>
+                          <Download className="mr-2 h-3.5 w-3.5" /> Descargar RIDE (PDF)
+                        </Button>
                       </div>
                     </TableCell>
                   </TableRow>

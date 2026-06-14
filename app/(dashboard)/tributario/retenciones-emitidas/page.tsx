@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useMemo } from 'react';
 import { format } from 'date-fns';
-import { Plus, Send, FileCheck, Trash2 } from 'lucide-react';
+import { Plus, Send, FileCheck, Trash2, Download } from 'lucide-react';
 import { toast } from 'sonner';
 
 import PageHeader  from '@/components/shared/PageHeader';
@@ -28,6 +28,8 @@ import { getConfigEmpresa }              from '@/lib/firebase/config-empresa';
 import { generarClaveAcceso }            from '@/lib/sri/clave-acceso';
 import { generarXMLRetencion }           from '@/lib/sri/generador-retencion';
 import { crearAsientoRetencionEmitida }  from '@/lib/contabilidad/motor-asientos';
+import { descargarRIDE }                 from '@/lib/sri/ride-pdf';
+import { buildRIDERetencion }            from '@/lib/sri/ride-builders';
 import { useAuth }                       from '@/context/AuthContext';
 
 const currency = (v: number) => `$${v.toFixed(2)}`;
@@ -132,14 +134,12 @@ export default function RetencionesEmitidasPage() {
           porcentaje:    cfg.porcentaje,
           baseImponible: base,
           valorRetenido: parseFloat((base * cfg.porcentaje / 100).toFixed(2)),
-          codDocSustento:   '01',
-          numDocSustento:   factura.numeroFactura,
-          fechaEmisionDocSustento: fechaFactStr,
-          ejercicioFiscal: periodoFiscal,
         };
       });
 
       const tipoId = factura.proveedorRuc.length === 13 ? '04' : '05';
+      // numDocSustento debe ir a 15 dígitos sin guiones (estab+ptoEmi+secuencial)
+      const numDocSustento = factura.numeroFactura.replace(/\D/g, '').padStart(15, '0').slice(-15);
 
       const xml = generarXMLRetencion({
         claveAcceso,
@@ -158,7 +158,12 @@ export default function RetencionesEmitidasPage() {
         identificacionSujeto: factura.proveedorRuc,
         razonSocialSujeto:    factura.proveedorNombre,
         periodoFiscal,
-        lineas:              lineasXML,
+        codDocSustento:          '01',
+        numDocSustento,
+        fechaEmisionDocSustento: fechaFactStr,
+        totalSinImpuestos:       factura.subtotal12 + factura.subtotal0,
+        importeTotal:            factura.total,
+        lineas:                  lineasXML,
       });
 
       const resp = await fetch('/api/sri/procesar', {
@@ -211,6 +216,7 @@ export default function RetencionesEmitidasPage() {
         ejercicioFiscal:    periodoFiscal,
         lineas:             lineasGuardar,
         totalRetenido,
+        xmlUrl:       result.xmlAutorizado ?? result.xmlFirmadoB64,
         usuarioId:    user.uid,
         usuarioNombre:user.nombre ?? user.email ?? 'Usuario',
       });
@@ -245,6 +251,16 @@ export default function RetencionesEmitidasPage() {
     }
   };
 
+  const descargarRide = async (ret: RetencionEmitida) => {
+    try {
+      const config = await getConfigSRI();
+      if (!config) { toast.error('Configura los datos del SRI primero'); return; }
+      descargarRIDE(buildRIDERetencion(ret, config));
+    } catch (e: any) {
+      toast.error(`Error al generar RIDE: ${e.message ?? 'desconocido'}`);
+    }
+  };
+
   return (
     <div className="space-y-5">
       <PageHeader
@@ -267,6 +283,7 @@ export default function RetencionesEmitidasPage() {
               <TableHead>Fecha emisión</TableHead>
               <TableHead className="text-right">Total retenido</TableHead>
               <TableHead className="text-center">Estado</TableHead>
+              <TableHead />
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -278,7 +295,7 @@ export default function RetencionesEmitidasPage() {
               ))
             ) : retenciones.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={6} className="text-center py-12 text-slate-400">
+                <TableCell colSpan={7} className="text-center py-12 text-slate-400">
                   <FileCheck className="h-10 w-10 mx-auto mb-2 opacity-30" />
                   No hay retenciones emitidas.
                 </TableCell>
@@ -299,6 +316,12 @@ export default function RetencionesEmitidasPage() {
                   <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${BADGE_ESTADO[r.estado] ?? ''}`}>
                     {r.estado}
                   </span>
+                </TableCell>
+                <TableCell className="text-right">
+                  <Button variant="ghost" size="icon" className="h-8 w-8" title="Descargar RIDE"
+                    onClick={() => descargarRide(r)}>
+                    <Download className="h-4 w-4" />
+                  </Button>
                 </TableCell>
               </TableRow>
             ))}

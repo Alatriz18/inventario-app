@@ -7,7 +7,7 @@ import { z } from 'zod';
 import { toast } from 'sonner';
 import {
   Settings, Upload, Eye, EyeOff, Save,
-  ShieldCheck, ShieldAlert, Loader2, CheckCircle2, AlertTriangle,
+  ShieldCheck, ShieldAlert, Loader2, CheckCircle2, AlertTriangle, Hash,
 } from 'lucide-react';
 import { format } from 'date-fns';
 import { es } from 'date-fns/locale';
@@ -60,6 +60,10 @@ export default function ConfiguracionSRIPage() {
   const [p12Nombre,     setP12Nombre]     = useState('');
   const [tieneCert,     setTieneCert]     = useState(false);
   const [infoCert,      setInfoCert]      = useState<InfoCertificado | null>(null);
+  const [secuenciales,  setSecuenciales]  = useState({
+    secuencialFactura: 1, secuencialNotaVenta: 1, secuencialNotaCredito: 1,
+    secuencialNotaDebito: 1, secuencialRetencion: 1, secuencialLiquidacion: 1, secuencialGuia: 1,
+  });
 
   const { register, handleSubmit, reset, setValue, getValues, watch, formState: { errors } } =
     useForm<ConfigForm>({
@@ -92,6 +96,15 @@ export default function ConfiguracionSRIPage() {
         });
         setTieneCert(!!cfg.certificadoP12);
         if (cfg.certificadoP12) setP12Base64(cfg.certificadoP12);
+        setSecuenciales({
+          secuencialFactura:     cfg.secuencialFactura     ?? 1,
+          secuencialNotaVenta:   cfg.secuencialNotaVenta   ?? 1,
+          secuencialNotaCredito: cfg.secuencialNotaCredito ?? 1,
+          secuencialNotaDebito:  cfg.secuencialNotaDebito  ?? 1,
+          secuencialRetencion:   cfg.secuencialRetencion   ?? 1,
+          secuencialLiquidacion: cfg.secuencialLiquidacion ?? 1,
+          secuencialGuia:        cfg.secuencialGuia        ?? 1,
+        });
       }
       setLoading(false);
     });
@@ -143,17 +156,16 @@ export default function ConfiguracionSRIPage() {
     if (!p12Base64) { toast.error('Debes cargar el certificado .p12'); return; }
     setSaving(true);
     try {
-      const cfg = await getConfigSRI();
       await saveConfigSRI({
         ...data,
         certificadoP12:        p12Base64,
-        secuencialFactura:     cfg?.secuencialFactura     ?? 1,
-        secuencialNotaVenta:   cfg?.secuencialNotaVenta   ?? 1,
-        secuencialRetencion:   cfg?.secuencialRetencion   ?? 1,
-        secuencialNotaCredito: cfg?.secuencialNotaCredito ?? 1,
-        secuencialNotaDebito:  cfg?.secuencialNotaDebito  ?? 1,
-        secuencialLiquidacion: cfg?.secuencialLiquidacion ?? 1,
-        secuencialGuia:        cfg?.secuencialGuia        ?? 1,
+        secuencialFactura:     secuenciales.secuencialFactura,
+        secuencialNotaVenta:   secuenciales.secuencialNotaVenta,
+        secuencialRetencion:   secuenciales.secuencialRetencion,
+        secuencialNotaCredito: secuenciales.secuencialNotaCredito,
+        secuencialNotaDebito:  secuenciales.secuencialNotaDebito,
+        secuencialLiquidacion: secuenciales.secuencialLiquidacion,
+        secuencialGuia:        secuenciales.secuencialGuia,
       });
       toast.success('Configuración guardada correctamente');
     } catch (e: any) {
@@ -397,6 +409,42 @@ export default function ConfiguracionSRIPage() {
           <div className="text-xs text-slate-400 space-y-1">
             <p>El certificado es emitido por el Banco Central del Ecuador (BCE) o entidades autorizadas.</p>
             <p>Se almacena en tu base de datos Firestore y se usa para firmar cada comprobante electrónico.</p>
+          </div>
+        </div>
+
+        {/* Secuenciales — sincronización manual */}
+        <div className="bg-white rounded-xl border p-6 space-y-4">
+          <div className="flex items-center gap-2 mb-1">
+            <Hash className="h-4 w-4 text-slate-400" />
+            <h3 className="font-semibold text-slate-700">Secuenciales por tipo de comprobante</h3>
+          </div>
+          <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 text-xs text-blue-700">
+            Indica el <strong>próximo número</strong> que el sistema asignará a cada comprobante.
+            Úsalo para <strong>sincronizar</strong> con lo que ya emitiste en el SRI si hubo un desfase
+            (ej. emitiste facturas desde otro sistema). El número se incrementa solo en cada emisión.
+          </div>
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
+            {([
+              ['secuencialFactura',     'Factura'],
+              ['secuencialNotaVenta',   'Nota de venta'],
+              ['secuencialNotaCredito', 'Nota de crédito'],
+              ['secuencialNotaDebito',  'Nota de débito'],
+              ['secuencialRetencion',   'Retención'],
+              ['secuencialLiquidacion', 'Liquidación compra'],
+              ['secuencialGuia',        'Guía de remisión'],
+            ] as const).map(([key, label]) => (
+              <div key={key} className="space-y-1.5">
+                <Label className="text-xs">{label}</Label>
+                <Input
+                  type="number" min={1}
+                  value={secuenciales[key]}
+                  onChange={e => setSecuenciales(s => ({ ...s, [key]: Math.max(1, parseInt(e.target.value) || 1) }))}
+                />
+                <p className="text-[10px] text-slate-400 font-mono">
+                  Próximo: {String(secuenciales[key]).padStart(9, '0')}
+                </p>
+              </div>
+            ))}
           </div>
         </div>
 

@@ -18,9 +18,10 @@ import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from '@/components/ui/table';
 
-import { Venta, FacturaProveedor } from '@/types';
+import { Venta, FacturaProveedor, RetencionEmitida } from '@/types';
 import { subscribeToVentas }              from '@/lib/firebase/ventas';
 import { subscribeToFacturasProveedor }   from '@/lib/firebase/facturas-proveedor';
+import { subscribeToRetencionesEmitidas } from '@/lib/firebase/retenciones-emitidas';
 import { getConfigSRI }                   from '@/lib/firebase/config-sri';
 
 const MESES = ['Enero','Febrero','Marzo','Abril','Mayo','Junio',
@@ -42,9 +43,10 @@ function formatFecha(fecha: any) {
 }
 
 export default function ATSPage() {
-  const [ventas,    setVentas]    = useState<Venta[]>([]);
-  const [compras,   setCompras]   = useState<FacturaProveedor[]>([]);
-  const [loading,   setLoading]   = useState(true);
+  const [ventas,      setVentas]      = useState<Venta[]>([]);
+  const [compras,     setCompras]     = useState<FacturaProveedor[]>([]);
+  const [retenciones, setRetenciones] = useState<RetencionEmitida[]>([]);
+  const [loading,     setLoading]     = useState(true);
   const [anio,      setAnio]      = useState(String(new Date().getFullYear()));
   const [mes,       setMes]       = useState(String(new Date().getMonth() + 1));
   const [generando, setGenerando] = useState(false);
@@ -52,8 +54,21 @@ export default function ATSPage() {
   useEffect(() => {
     const u1 = subscribeToVentas(d => { setVentas(d); setLoading(false); });
     const u2 = subscribeToFacturasProveedor(setCompras);
-    return () => { u1(); u2(); };
+    const u3 = subscribeToRetencionesEmitidas(setRetenciones);
+    return () => { u1(); u2(); u3(); };
   }, []);
+
+  // Mapa: facturaProveedorId → retención (fuente / IVA) que emitimos
+  const retPorFactura = useMemo(() => {
+    const m = new Map<string, { retFuente: number; retIVA: number }>();
+    retenciones.forEach(r => {
+      const retFuente = r.lineas.filter(l => l.tipo === 'fuente_ir').reduce((s, l) => s + l.valorRetenido, 0);
+      const retIVA    = r.lineas.filter(l => l.tipo === 'iva').reduce((s, l) => s + l.valorRetenido, 0);
+      const prev = m.get(r.facturaProveedorId) ?? { retFuente: 0, retIVA: 0 };
+      m.set(r.facturaProveedorId, { retFuente: prev.retFuente + retFuente, retIVA: prev.retIVA + retIVA });
+    });
+    return m;
+  }, [retenciones]);
 
   const filtrar = (items: any[]) => {
     return items.filter(item => {
@@ -65,6 +80,8 @@ export default function ATSPage() {
 
   const ventasMes  = useMemo(() => filtrar(ventas.filter(v => v.estado !== 'anulada')), [ventas, anio, mes]);
   const comprasMes = useMemo(() => filtrar(compras), [compras, anio, mes]);
+  const retencionesMes = useMemo(() => filtrar(retenciones), [retenciones, anio, mes]);
+  const totalRetenido  = useMemo(() => retencionesMes.reduce((s, r) => s + r.totalRetenido, 0), [retencionesMes]);
 
   const resumen = useMemo(() => ({
     totalVentas:   ventasMes.reduce((s, v) => s + v.total, 0),
@@ -100,9 +117,22 @@ export default function ATSPage() {
         Total:    f.total,
       }))
     );
+    const wsRet = XLSX.utils.json_to_sheet(
+      retencionesMes.map(r => ({
+        Fecha:        formatFecha(r.fechaEmision),
+        Numero:       r.secuencial,
+        RUC:          r.proveedorRuc,
+        Proveedor:    r.proveedorNombre,
+        FacturaOrigen:r.numeroFacturaProveedor,
+        RetFuente:    r.lineas.filter(l => l.tipo === 'fuente_ir').reduce((s, l) => s + l.valorRetenido, 0),
+        RetIVA:       r.lineas.filter(l => l.tipo === 'iva').reduce((s, l) => s + l.valorRetenido, 0),
+        TotalRetenido:r.totalRetenido,
+      }))
+    );
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, wsVentas,  'Ventas');
     XLSX.utils.book_append_sheet(wb, wsCompras, 'Compras');
+    XLSX.utils.book_append_sheet(wb, wsRet,     'Retenciones');
     XLSX.writeFile(wb, `ATS_${anio}_${mes.padStart(2,'0')}.xlsx`);
   };
 
@@ -146,10 +176,12 @@ export default function ATSPage() {
         det.ele('baseImpGrav').txt(f.subtotal12.toFixed(2));
         det.ele('montoIva').txt(f.iva.toFixed(2));
         det.ele('montoIce').txt('0.00');
+        // Retenciones emitidas sobre esta factura (renta en la fuente e IVA)
+        const ret = retPorFactura.get(f.id) ?? { retFuente: 0, retIVA: 0 };
         det.ele('valorRetBien10').txt('0.00');
-        det.ele('valorRetServ20').txt('0.00');
+        det.ele('valorRetServ20').txt(ret.retFuente.toFixed(2));
         det.ele('valorRetServ50').txt('0.00');
-        det.ele('valorRetIva100').txt('0.00');
+        det.ele('valorRetIva100').txt(ret.retIVA.toFixed(2));
         det.ele('valorRetIva70').txt('0.00');
         det.ele('formaPago').txt('01');
       });
@@ -249,6 +281,8 @@ export default function ATSPage() {
           { label:'IVA neto',         value:currency(resumen.ivaVentas - resumen.ivaCompras),
             sub:`V:${currency(resumen.ivaVentas)} C:${currency(resumen.ivaCompras)}`,
             color: resumen.ivaVentas - resumen.ivaCompras >= 0 ? 'text-red-600' : 'text-green-600' },
+          { label:'Retenciones emitidas', value:currency(totalRetenido),
+            sub:`${retencionesMes.length} comprobantes`, color:'text-purple-600' },
         ].map(({ label, value, sub, color }) => (
           <div key={label} className="bg-white rounded-xl border p-4">
             <p className="text-xs text-slate-400">{label}</p>

@@ -1,18 +1,25 @@
 /**
  * Generador de RIDE (Representación Impresa del Documento Electrónico)
- * Cumple con el formato oficial exigido por el SRI Ecuador.
+ * Sigue el formato oficial del SRI Ecuador: cajas bordeadas en blanco y negro,
+ * cabecera dividida (emisor / documento), clave de acceso con código de barras,
+ * datos del comprador, detalle y totales.
  *
  * Soporta:
- *  - Factura autorizada (con número de autorización de 49 dígitos)
- *  - Factura no autorizada / borrador (sin número, marca de agua)
- *  - Nota de venta autorizada
- *  - Nota de venta no autorizada
- *  - Recibo interno (sin validez tributaria — solo control interno)
+ *  - Factura (01)
+ *  - Nota de venta (18)
+ *  - Nota de crédito (04)
+ *  - Nota de débito (05)
+ *  - Comprobante de retención (07)
+ *  - Recibo interno (sin validez tributaria)
  */
 
 import jsPDF from 'jspdf';
 
 // ── Tipos ─────────────────────────────────────────────────────────────────
+
+export type TipoDocRIDE =
+  | 'factura' | 'nota_venta' | 'nota_credito' | 'nota_debito'
+  | 'retencion' | 'recibo_interno';
 
 export interface ItemRIDE {
   codigo:        string;
@@ -24,15 +31,33 @@ export interface ItemRIDE {
   tieneIVA:      boolean;
 }
 
+/** Una línea de la tabla de retenciones (solo tipoDocumento='retencion') */
+export interface LineaRetencionRIDE {
+  comprobante:    string; // ej. "01 001-001-000000123"
+  fechaEmision:   string; // dd/MM/yyyy
+  ejercicioFiscal:string; // MM/AAAA
+  impuesto:       string; // "RENTA" | "IVA"
+  codigo:         string;
+  baseImponible:  number;
+  porcentaje:     number;
+  valorRetenido:  number;
+}
+
+/** Motivo de una nota de débito */
+export interface MotivoRIDE {
+  razon: string;
+  valor: number;
+}
+
 export interface DatosRIDE {
-  // Tipo de documento
-  tipoDocumento: 'factura' | 'nota_venta' | 'recibo_interno';
+  tipoDocumento: TipoDocRIDE;
 
   // Emisor
   razonSocial:      string;
   nombreComercial?: string;
   ruc:              string;
   direccionMatriz:  string;
+  direccionSucursal?: string;
   establecimiento:  string;
   puntoEmision:     string;
   contribuyenteEspecial?: string;
@@ -43,21 +68,30 @@ export interface DatosRIDE {
   secuencial:       number;
   claveAcceso?:     string;
 
-  // Autorización SRI (opcional — si no viene, se genera borrador)
+  // Autorización SRI (opcional)
   numeroAutorizacion?: string;
   fechaAutorizacion?:  string;
 
-  // Fecha
+  // Fecha de emisión
   fechaEmision: Date;
 
-  // Comprador
-  tipoIdComprador:      string; // 04=RUC 05=cédula 07=consumidor final
+  // Comprador / sujeto retenido
+  tipoIdComprador:      string;
   identificacionComprador: string;
   razonSocialComprador: string;
   direccionComprador?:  string;
   emailComprador?:      string;
 
-  // Items
+  // Documento modificado (notas de crédito / débito)
+  docModificado?: { tipo: string; numero: string; fecha: string };
+  motivoModificacion?: string;      // nota de crédito
+  motivos?:            MotivoRIDE[]; // nota de débito
+
+  // Retención
+  periodoFiscal?:     string;
+  retenciones?:       LineaRetencionRIDE[];
+
+  // Ítems (factura / nota de venta / NC / ND con detalle)
   items: ItemRIDE[];
 
   // Totales
@@ -68,77 +102,154 @@ export interface DatosRIDE {
   total:          number;
 
   // Pago
-  formaPago: string;  // 'efectivo' | 'tarjeta' | 'transferencia'
+  formaPago: string;
 
-  // Mensaje adicional de pie de página (opcional)
+  // Mensaje adicional
   mensajeAdicional?: string;
 }
 
 // ── Constantes de diseño ──────────────────────────────────────────────────
 
-const MARGIN   = 14;
-const PW       = 210; // A4 width mm
-const COLW     = PW - MARGIN * 2;
-const FONT     = 'helvetica';
+const MARGIN = 12;
+const PW     = 210;
+const COLW   = PW - MARGIN * 2;
+const FONT   = 'helvetica';
 
-// Colores
-const C_DARK   = '#1a1a2e';
-const C_HEADER = '#0f3460';
-const C_ACCENT = '#16213e';
-const C_GRAY   = '#6b7280';
-const C_LIGHT  = '#f3f4f6';
-const C_BORDER = '#d1d5db';
-const C_ORANGE = '#ea580c'; // para marca de agua / sin autorización
-const C_GREEN  = '#166534'; // para autorizado
+const BLACK  = '#000000';
+const GRAY   = '#555555';
+const LIGHT  = '#f0f0f0';
+const ORANGE = '#c2410c';
 
-// ── Helper: hex a RGB ─────────────────────────────────────────────────────
+// ── Helpers ─────────────────────────────────────────────────────────────────
+
 function hex(h: string): [number, number, number] {
-  const r = parseInt(h.slice(1, 3), 16);
-  const g = parseInt(h.slice(3, 5), 16);
-  const b = parseInt(h.slice(5, 7), 16);
-  return [r, g, b];
+  return [parseInt(h.slice(1, 3), 16), parseInt(h.slice(3, 5), 16), parseInt(h.slice(5, 7), 16)];
 }
 
-// ── Helper: wrap text ─────────────────────────────────────────────────────
-function wrapText(doc: jsPDF, text: string, maxWidth: number): string[] {
-  return doc.splitTextToSize(text, maxWidth);
+function box(doc: jsPDF, x: number, y: number, w: number, h: number) {
+  doc.setDrawColor(...hex(BLACK));
+  doc.setLineWidth(0.2);
+  doc.rect(x, y, w, h, 'S');
 }
 
-// ── Helper: línea horizontal ──────────────────────────────────────────────
-function hline(doc: jsPDF, y: number, color = C_BORDER, lw = 0.2) {
-  doc.setDrawColor(...hex(color));
-  doc.setLineWidth(lw);
-  doc.line(MARGIN, y, PW - MARGIN, y);
+function label(doc: jsPDF, text: string, x: number, y: number, size = 7) {
+  doc.setFont(FONT, 'bold'); doc.setFontSize(size); doc.setTextColor(...hex(BLACK));
+  doc.text(text, x, y);
 }
 
-// ── Helper: celda de tabla ────────────────────────────────────────────────
-function cell(
-  doc:   jsPDF,
-  text:  string,
-  x:     number,
-  y:     number,
-  w:     number,
-  h:     number,
-  opts?: { align?: 'left'|'right'|'center'; bold?: boolean; size?: number; bg?: string; color?: string }
-) {
-  const align = opts?.align ?? 'left';
-  const size  = opts?.size  ?? 8;
-  const color = opts?.color ?? C_DARK;
+function value(doc: jsPDF, text: string, x: number, y: number, size = 7) {
+  doc.setFont(FONT, 'normal'); doc.setFontSize(size); doc.setTextColor(...hex(BLACK));
+  doc.text(text, x, y);
+}
 
-  if (opts?.bg) {
-    doc.setFillColor(...hex(opts.bg));
-    doc.rect(x, y, w, h, 'F');
+function wrap(doc: jsPDF, text: string, maxWidth: number): string[] {
+  return doc.splitTextToSize(text ?? '', maxWidth);
+}
+
+function usd(v: number): string { return `${(v ?? 0).toFixed(2)}`; }
+function num(v: number, d = 2): string { return (v ?? 0).toFixed(d); }
+
+function formatFecha(d: Date): string {
+  const dd = String(d.getDate()).padStart(2, '0');
+  const mm = String(d.getMonth() + 1).padStart(2, '0');
+  return `${dd}/${mm}/${d.getFullYear()}`;
+}
+
+const FORMA_PAGO_LABEL: Record<string, string> = {
+  efectivo: 'SIN UTILIZACIÓN DEL SISTEMA FINANCIERO', tarjeta: 'TARJETA DE CRÉDITO/DÉBITO',
+  transferencia: 'TRANSFERENCIA / DÉBITO', cheque: 'CHEQUE',
+  '01': 'SIN UTILIZACIÓN DEL SISTEMA FINANCIERO', '16': 'TARJETA DE CRÉDITO/DÉBITO',
+  '19': 'TRANSFERENCIA / DÉBITO', '20': 'CHEQUE',
+};
+
+const TITULO: Record<TipoDocRIDE, string> = {
+  factura: 'FACTURA', nota_venta: 'NOTA DE VENTA', nota_credito: 'NOTA DE CRÉDITO',
+  nota_debito: 'NOTA DE DÉBITO', retencion: 'COMPROBANTE DE RETENCIÓN', recibo_interno: 'RECIBO INTERNO',
+};
+
+const COD_DOC: Record<TipoDocRIDE, string> = {
+  factura: '01', nota_venta: '18', nota_credito: '04',
+  nota_debito: '05', retencion: '07', recibo_interno: '00',
+};
+
+/**
+ * Tabla de patrones Code128 (valores 0-106). Cada patrón son los anchos de
+ * 6 módulos alternando barra-espacio-barra-espacio-barra-espacio (la parada
+ * tiene 7). 103=Start A, 104=Start B, 105=Start C, 106=Stop.
+ */
+const CODE128_PATTERNS = [
+  '212222','222122','222221','121223','121322','131222','122213','122312','132212','221213',
+  '221312','231212','112232','122132','122231','113222','123122','123221','223211','221132',
+  '221231','213212','223112','312131','311222','321122','321221','312212','322112','322211',
+  '212123','212321','232121','111323','131123','131321','112313','132113','132311','211313',
+  '231113','231311','112133','112331','132131','113123','113321','133121','313121','211331',
+  '231131','213113','213311','213131','311123','311321','331121','312113','312311','332111',
+  '314111','221411','431111','111224','111422','121124','121421','141122','141221','112214',
+  '112412','122114','122411','142112','142211','241211','221114','413111','241112','134111',
+  '111242','121142','121241','114212','124112','124211','411212','421112','421211','212141',
+  '214121','412121','111143','111341','131141','114113','114311','411113','411311','113141',
+  '114131','311141','411131','211412','211214','211232','2331112',
+];
+
+/**
+ * Calcula los codewords Code128-C para una cadena numérica. Si la longitud es
+ * impar, el último dígito se codifica conmutando a Code B (codeword 100).
+ */
+function code128cCodewords(data: string): number[] {
+  const codes: number[] = [105]; // Start C
+  let i = 0;
+  while (i + 1 < data.length) {
+    codes.push(parseInt(data.substr(i, 2), 10));
+    i += 2;
   }
+  if (i < data.length) {
+    codes.push(100);                        // Code B
+    codes.push(data.charCodeAt(i) - 32);    // dígito como ASCII en Code B
+  }
+  let sum = codes[0];
+  for (let k = 1; k < codes.length; k++) sum += codes[k] * k;
+  codes.push(sum % 103);                     // checksum
+  codes.push(106);                           // Stop
+  return codes;
+}
 
-  doc.setFont(FONT, opts?.bold ? 'bold' : 'normal');
-  doc.setFontSize(size);
-  doc.setTextColor(...hex(color));
+/**
+ * Dibuja un código de barras Code128 escaneable de la clave de acceso (49
+ * dígitos numéricos). El ancho de módulo se ajusta para llenar el espacio.
+ */
+function drawCode128(doc: jsPDF, clave: string, x: number, y: number, w: number, h: number) {
+  const data     = (clave || '').replace(/\D/g, '');
+  const codes    = code128cCodewords(data);
+  const patterns = codes.map(c => CODE128_PATTERNS[c]);
 
-  const px = align === 'right'  ? x + w - 2
-           : align === 'center' ? x + w / 2
-           : x + 2;
+  let totalModules = 0;
+  patterns.forEach(p => { for (const ch of p) totalModules += parseInt(ch, 10); });
+  const mw = w / totalModules;
 
-  doc.text(text, px, y + h / 2 + size * 0.35, { align });
+  doc.setFillColor(...hex(BLACK));
+  let cx = x;
+  patterns.forEach(p => {
+    for (let j = 0; j < p.length; j++) {
+      const bw = parseInt(p[j], 10) * mw;
+      if (j % 2 === 0) doc.rect(cx, y, bw, h, 'F'); // índice par = barra
+      cx += bw;
+    }
+  });
+}
+
+/**
+ * Barras decorativas (no escaneables) para comprobantes aún no autorizados.
+ */
+function drawBarcodePlaceholder(doc: jsPDF, clave: string, x: number, y: number, w: number, h: number) {
+  doc.setFillColor(...hex(GRAY));
+  let cx = x;
+  const digits = (clave || '').replace(/\D/g, '');
+  for (let i = 0; i < digits.length && cx < x + w; i++) {
+    const d = parseInt(digits[i], 10);
+    const bw = 0.25 + (d % 3) * 0.12;
+    doc.rect(cx, y, bw, h, 'F');
+    cx += bw + 0.35;
+  }
 }
 
 // ── Función principal ─────────────────────────────────────────────────────
@@ -147,380 +258,323 @@ export function generarRIDE(datos: DatosRIDE): Uint8Array {
   const doc = new jsPDF({ unit: 'mm', format: 'a4' });
   let y = MARGIN;
 
-  const estab  = datos.establecimiento.padStart(3, '0');
-  const pto    = datos.puntoEmision.padStart(3, '0');
-  const sec    = String(datos.secuencial).padStart(9, '0');
-  const serie  = `${estab}-${pto}-${sec}`;
+  const estab = datos.establecimiento.padStart(3, '0');
+  const pto   = datos.puntoEmision.padStart(3, '0');
+  const sec   = String(datos.secuencial).padStart(9, '0');
+  const serie = `${estab}-${pto}-${sec}`;
   const esRecibo = datos.tipoDocumento === 'recibo_interno';
-  const tieneAutorizacion = !!datos.numeroAutorizacion && !esRecibo;
+  const esRetencion = datos.tipoDocumento === 'retencion';
+  const autorizado = !!datos.numeroAutorizacion && !esRecibo;
 
-  const TITULO_DOC =
-    datos.tipoDocumento === 'factura'       ? 'FACTURA'
-    : datos.tipoDocumento === 'nota_venta'  ? 'NOTA DE VENTA'
-    : 'RECIBO INTERNO';
-
-  const COD_DOC =
-    datos.tipoDocumento === 'factura'      ? '01'
-    : datos.tipoDocumento === 'nota_venta' ? '18'
-    : '00';
-
-  // ── ENCABEZADO ───────────────────────────────────────────────────────────
-
-  // Bloque izquierdo: datos del emisor
-  const leftW = COLW * 0.55;
-  doc.setFillColor(...hex(C_HEADER));
-  doc.rect(MARGIN, y, leftW, 28, 'F');
-
-  doc.setFont(FONT, 'bold');
-  doc.setFontSize(11);
-  doc.setTextColor(255, 255, 255);
-  const nombrePrincipal = datos.nombreComercial || datos.razonSocial;
-  doc.text(nombrePrincipal, MARGIN + 3, y + 7);
-
-  doc.setFont(FONT, 'normal');
-  doc.setFontSize(7.5);
-  doc.setTextColor(200, 220, 255);
-  const emisorLines = wrapText(doc, datos.razonSocial, leftW - 6);
-  emisorLines.slice(0, 2).forEach((l, i) => doc.text(l, MARGIN + 3, y + 13 + i * 4));
-  doc.text(`RUC: ${datos.ruc}`, MARGIN + 3, y + 22);
-
-  const dirLines = wrapText(doc, datos.direccionMatriz, leftW - 6);
-  doc.text(dirLines[0] ?? '', MARGIN + 3, y + 26);
-
-  // Bloque derecho: tipo de documento + numeración
+  // ── CABECERA: emisor (izq) + documento (der) ─────────────────────────────
+  const headH = 46;
+  const leftW = COLW * 0.52;
   const rightX = MARGIN + leftW + 2;
   const rightW = COLW - leftW - 2;
 
-  doc.setFillColor(...hex(C_ACCENT));
-  doc.rect(rightX, y, rightW, 28, 'F');
+  box(doc, MARGIN, y, leftW, headH);
+  box(doc, rightX, y, rightW, headH);
 
-  doc.setFont(FONT, 'bold');
-  doc.setFontSize(10);
-  doc.setTextColor(255, 255, 255);
-  doc.text(TITULO_DOC, rightX + rightW / 2, y + 7, { align: 'center' });
+  // Emisor
+  let ly = y + 6;
+  doc.setFont(FONT, 'bold'); doc.setFontSize(11); doc.setTextColor(...hex(BLACK));
+  const nombre = datos.nombreComercial || datos.razonSocial;
+  wrap(doc, nombre, leftW - 8).slice(0, 2).forEach(l => { doc.text(l, MARGIN + 4, ly); ly += 5; });
 
-  if (!esRecibo) {
-    doc.setFont(FONT, 'normal');
-    doc.setFontSize(7);
-    doc.setTextColor(180, 200, 255);
-    doc.text(`Cod. Doc: ${COD_DOC}`, rightX + 3, y + 13);
-    doc.text(`No. ${serie}`, rightX + 3, y + 18);
-    doc.text(`Fecha emisión: ${formatFecha(datos.fechaEmision)}`, rightX + 3, y + 23);
-    const ambLabel = datos.ambiente === '2' ? 'PRODUCCIÓN' : 'PRUEBAS';
-    doc.text(`Ambiente: ${ambLabel}`, rightX + 3, y + 27);
-  } else {
-    doc.setFont(FONT, 'normal');
-    doc.setFontSize(7);
-    doc.setTextColor(180, 200, 255);
-    doc.text(`No. ${serie}`, rightX + 3, y + 16);
-    doc.text(`Fecha: ${formatFecha(datos.fechaEmision)}`, rightX + 3, y + 22);
+  doc.setFont(FONT, 'normal'); doc.setFontSize(7.5);
+  if (datos.nombreComercial && datos.nombreComercial !== datos.razonSocial) {
+    wrap(doc, datos.razonSocial, leftW - 8).slice(0, 1).forEach(l => { doc.text(l, MARGIN + 4, ly); ly += 4; });
   }
-
-  y += 31;
-
-  // ── CLAVE DE ACCESO / AUTORIZACIÓN ──────────────────────────────────────
-  if (!esRecibo) {
-    if (tieneAutorizacion) {
-      // Banda verde de autorización
-      doc.setFillColor(...hex('#dcfce7'));
-      doc.rect(MARGIN, y, COLW, 14, 'F');
-      doc.setDrawColor(...hex('#16a34a'));
-      doc.setLineWidth(0.4);
-      doc.rect(MARGIN, y, COLW, 14, 'S');
-
-      doc.setFont(FONT, 'bold');
-      doc.setFontSize(7);
-      doc.setTextColor(...hex(C_GREEN));
-      doc.text('AUTORIZADO POR EL SRI', MARGIN + 3, y + 4);
-      doc.setFont(FONT, 'normal');
-      doc.setFontSize(6.5);
-      doc.text(`No. Autorización: ${datos.numeroAutorizacion}`, MARGIN + 3, y + 8);
-      doc.text(`Fecha autorización: ${datos.fechaAutorizacion ?? ''}`, MARGIN + 3, y + 12);
-    } else {
-      // Banda naranja — no autorizado / borrador
-      doc.setFillColor(...hex('#fff7ed'));
-      doc.rect(MARGIN, y, COLW, 10, 'F');
-      doc.setDrawColor(...hex('#ea580c'));
-      doc.setLineWidth(0.4);
-      doc.rect(MARGIN, y, COLW, 10, 'S');
-
-      doc.setFont(FONT, 'bold');
-      doc.setFontSize(7);
-      doc.setTextColor(...hex(C_ORANGE));
-      doc.text('PENDIENTE DE AUTORIZACIÓN SRI — NO VÁLIDO COMO DOCUMENTO TRIBUTARIO', MARGIN + 3, y + 6);
-    }
-
-    if (datos.claveAcceso) {
-      y += tieneAutorizacion ? 17 : 13;
-      doc.setFillColor(...hex(C_LIGHT));
-      doc.rect(MARGIN, y, COLW, 8, 'F');
-      doc.setFont(FONT, 'bold');
-      doc.setFontSize(6.5);
-      doc.setTextColor(...hex(C_GRAY));
-      doc.text('CLAVE DE ACCESO:', MARGIN + 3, y + 5);
-      doc.setFont(FONT, 'normal');
-      doc.setFontSize(6);
-      doc.setTextColor(...hex(C_DARK));
-      // Dividir clave en grupos de 8 para legibilidad
-      const claveGrupos = datos.claveAcceso.match(/.{1,8}/g)?.join(' ') ?? datos.claveAcceso;
-      doc.text(claveGrupos, MARGIN + 40, y + 5);
-      y += 11;
-    } else {
-      y += tieneAutorizacion ? 17 : 13;
-    }
-  }
-
-  // ── DATOS DEL COMPRADOR ──────────────────────────────────────────────────
-  hline(doc, y, C_BORDER);
-  y += 3;
-
-  doc.setFillColor(...hex(C_LIGHT));
-  doc.rect(MARGIN, y, COLW, 5, 'F');
-  doc.setFont(FONT, 'bold');
+  ly += 1;
   doc.setFontSize(7);
-  doc.setTextColor(...hex(C_ACCENT));
-  doc.text('DATOS DEL COMPRADOR', MARGIN + 3, y + 3.5);
-  y += 7;
+  label(doc, 'Dir. Matriz:', MARGIN + 4, ly);
+  wrap(doc, datos.direccionMatriz, leftW - 26).slice(0, 2).forEach((l, i) => {
+    value(doc, l, MARGIN + 24, ly + i * 3.5); });
+  ly += 4 + (wrap(doc, datos.direccionMatriz, leftW - 26).slice(0, 2).length - 1) * 3.5;
 
-  const tipoIdLabel =
-    datos.tipoIdComprador === '04' ? 'RUC'
-    : datos.tipoIdComprador === '05' ? 'Cédula'
-    : datos.tipoIdComprador === '06' ? 'Pasaporte'
-    : datos.tipoIdComprador === '07' ? 'Cons. Final'
-    : datos.tipoIdComprador;
-
-  const col2 = COLW / 2;
-
-  // Fila 1
-  doc.setFont(FONT, 'bold'); doc.setFontSize(7); doc.setTextColor(...hex(C_GRAY));
-  doc.text('Razón Social / Nombre:', MARGIN, y);
-  doc.setFont(FONT, 'normal'); doc.setTextColor(...hex(C_DARK));
-  doc.text(datos.razonSocialComprador, MARGIN + 38, y);
-
-  doc.setFont(FONT, 'bold'); doc.setTextColor(...hex(C_GRAY));
-  doc.text(`${tipoIdLabel}:`, MARGIN + col2 + 2, y);
-  doc.setFont(FONT, 'normal'); doc.setTextColor(...hex(C_DARK));
-  doc.text(datos.identificacionComprador, MARGIN + col2 + 20, y);
-  y += 5;
-
-  // Fila 2
-  if (datos.direccionComprador) {
-    doc.setFont(FONT, 'bold'); doc.setFontSize(7); doc.setTextColor(...hex(C_GRAY));
-    doc.text('Dirección:', MARGIN, y);
-    doc.setFont(FONT, 'normal'); doc.setTextColor(...hex(C_DARK));
-    doc.text(datos.direccionComprador.slice(0, 60), MARGIN + 20, y);
-    y += 5;
+  if (datos.direccionSucursal) {
+    label(doc, 'Dir. Sucursal:', MARGIN + 4, ly);
+    value(doc, datos.direccionSucursal.slice(0, 50), MARGIN + 26, ly);
+    ly += 4;
+  }
+  label(doc, 'OBLIGADO A LLEVAR CONTABILIDAD:', MARGIN + 4, ly);
+  value(doc, datos.obligadoContabilidad ?? 'NO', MARGIN + 60, ly);
+  ly += 4;
+  if (datos.contribuyenteEspecial) {
+    label(doc, 'Contribuyente Especial Nro:', MARGIN + 4, ly);
+    value(doc, datos.contribuyenteEspecial, MARGIN + 52, ly);
+    ly += 4;
   }
 
-  // Fila 3
-  doc.setFont(FONT, 'bold'); doc.setFontSize(7); doc.setTextColor(...hex(C_GRAY));
-  doc.text('Forma de pago:', MARGIN, y);
-  doc.setFont(FONT, 'normal'); doc.setTextColor(...hex(C_DARK));
-  doc.text(FORMA_PAGO_LABEL[datos.formaPago] ?? datos.formaPago, MARGIN + 28, y);
+  // Documento (derecha)
+  let ry = y + 5;
+  label(doc, `R.U.C.: ${datos.ruc}`, rightX + 3, ry, 8); ry += 6;
+  doc.setFont(FONT, 'bold'); doc.setFontSize(12);
+  doc.text(TITULO[datos.tipoDocumento], rightX + 3, ry); ry += 6;
+  doc.setFontSize(8);
+  label(doc, 'No.', rightX + 3, ry);
+  value(doc, serie, rightX + 12, ry, 8); ry += 6;
 
-  if (datos.obligadoContabilidad) {
-    doc.setFont(FONT, 'bold'); doc.setTextColor(...hex(C_GRAY));
-    doc.text('Oblig. contabilidad:', MARGIN + col2 + 2, y);
-    doc.setFont(FONT, 'normal'); doc.setTextColor(...hex(C_DARK));
-    doc.text(datos.obligadoContabilidad, MARGIN + col2 + 38, y);
+  doc.setFontSize(6.5);
+  label(doc, 'NÚMERO DE AUTORIZACIÓN', rightX + 3, ry); ry += 3.5;
+  doc.setFont(FONT, 'normal'); doc.setFontSize(6);
+  const auth = autorizado ? (datos.numeroAutorizacion as string)
+             : esRecibo ? 'SIN VALIDEZ TRIBUTARIA' : 'PENDIENTE DE AUTORIZACIÓN';
+  wrap(doc, auth, rightW - 6).forEach(l => { doc.text(l, rightX + 3, ry); ry += 3; });
+  ry += 1;
+
+  doc.setFontSize(6.5);
+  label(doc, 'FECHA Y HORA DE AUTORIZACIÓN', rightX + 3, ry); ry += 3.5;
+  value(doc, datos.fechaAutorizacion ?? '—', rightX + 3, ry, 6); ry += 4.5;
+
+  label(doc, 'AMBIENTE:', rightX + 3, ry);
+  value(doc, datos.ambiente === '2' ? 'PRODUCCIÓN' : 'PRUEBAS', rightX + 22, ry, 6.5);
+  label(doc, 'EMISIÓN:', rightX + rightW / 2 + 2, ry);
+  value(doc, 'NORMAL', rightX + rightW / 2 + 18, ry, 6.5);
+  ry += 5;
+
+  if (datos.claveAcceso) {
+    label(doc, 'CLAVE DE ACCESO', rightX + 3, ry); ry += 2;
+    // Code128 escaneable solo cuando el comprobante ya está autorizado por el SRI
+    if (autorizado) drawCode128(doc, datos.claveAcceso, rightX + 3, ry, rightW - 6, 7);
+    else            drawBarcodePlaceholder(doc, datos.claveAcceso, rightX + 3, ry, rightW - 6, 6);
+    ry += 9;
+    doc.setFont(FONT, 'normal'); doc.setFontSize(6);
+    doc.text(datos.claveAcceso, rightX + rightW / 2, ry, { align: 'center' });
   }
-  y += 7;
 
-  // ── TABLA DE PRODUCTOS ───────────────────────────────────────────────────
-  hline(doc, y, C_BORDER);
-  y += 2;
+  y += headH + 3;
 
-  // Cabecera tabla
-  const colsFactura = [
-    { label: 'Cód.',       x: MARGIN,      w: 18, align: 'left'  as const },
-    { label: 'Descripción',x: MARGIN + 18, w: 64, align: 'left'  as const },
-    { label: 'Cant.',      x: MARGIN + 82, w: 14, align: 'right' as const },
-    { label: 'P. Unit.',   x: MARGIN + 96, w: 22, align: 'right' as const },
-    { label: 'Desc.',      x: MARGIN + 118,w: 18, align: 'right' as const },
-    { label: 'Subtotal',   x: MARGIN + 136,w: 22, align: 'right' as const },
-    { label: 'IVA',        x: MARGIN + 158,w: 10, align: 'center'as const },
-  ];
-  const colsNota = [
-    { label: 'Cód.',       x: MARGIN,      w: 18, align: 'left'  as const },
-    { label: 'Descripción',x: MARGIN + 18, w: 72, align: 'left'  as const },
-    { label: 'Cant.',      x: MARGIN + 90, w: 16, align: 'right' as const },
-    { label: 'P. Unit.',   x: MARGIN + 106,w: 24, align: 'right' as const },
-    { label: 'Desc.',      x: MARGIN + 130,w: 18, align: 'right' as const },
-    { label: 'Total',      x: MARGIN + 148,w: 24, align: 'right' as const },
-  ];
-  const cols = datos.tipoDocumento === 'factura' ? colsFactura : colsNota;
-  const ROW_H = 5;
+  // Banda de estado (no autorizado)
+  if (!autorizado && !esRecibo) {
+    doc.setFillColor(...hex('#fff7ed'));
+    doc.rect(MARGIN, y, COLW, 6, 'F');
+    box(doc, MARGIN, y, COLW, 6);
+    doc.setFont(FONT, 'bold'); doc.setFontSize(7); doc.setTextColor(...hex(ORANGE));
+    doc.text('DOCUMENTO PENDIENTE DE AUTORIZACIÓN — NO VÁLIDO COMO COMPROBANTE TRIBUTARIO',
+      MARGIN + COLW / 2, y + 4, { align: 'center' });
+    y += 9;
+  }
 
-  // Fondo cabecera
-  doc.setFillColor(...hex(C_HEADER));
-  doc.rect(MARGIN, y, COLW, ROW_H + 1, 'F');
-  cols.forEach(c => {
-    doc.setFont(FONT, 'bold');
-    doc.setFontSize(6.5);
-    doc.setTextColor(255, 255, 255);
-    const px = c.align === 'right'  ? c.x + c.w - 2
-             : c.align === 'center' ? c.x + c.w / 2
-             : c.x + 2;
-    doc.text(c.label, px, y + ROW_H - 0.5, { align: c.align });
-  });
-  y += ROW_H + 2;
+  // ── DATOS DEL COMPRADOR / SUJETO ─────────────────────────────────────────
+  const compH = esRetencion ? 18 : 14;
+  box(doc, MARGIN, y, COLW, compH);
+  let cy = y + 5;
+  const sujetoLabel = esRetencion ? 'Razón Social / Nombres y Apellidos:' : 'Razón Social / Nombres y Apellidos:';
+  label(doc, sujetoLabel, MARGIN + 3, cy);
+  value(doc, datos.razonSocialComprador, MARGIN + 52, cy);
+  label(doc, 'Identificación:', MARGIN + COLW * 0.7, cy);
+  value(doc, datos.identificacionComprador, MARGIN + COLW * 0.7 + 22, cy);
+  cy += 5;
+  label(doc, 'Fecha Emisión:', MARGIN + 3, cy);
+  value(doc, formatFecha(datos.fechaEmision), MARGIN + 26, cy);
+  if (esRetencion && datos.periodoFiscal) {
+    label(doc, 'Ejercicio Fiscal:', MARGIN + COLW * 0.7, cy);
+    value(doc, datos.periodoFiscal, MARGIN + COLW * 0.7 + 24, cy);
+  } else if (datos.direccionComprador) {
+    label(doc, 'Dirección:', MARGIN + COLW * 0.45, cy);
+    value(doc, datos.direccionComprador.slice(0, 45), MARGIN + COLW * 0.45 + 16, cy);
+  }
+  y += compH + 3;
 
-  // Filas de productos
-  datos.items.forEach((item, idx) => {
-    const bg = idx % 2 === 0 ? '#ffffff' : C_LIGHT;
-    doc.setFillColor(...hex(bg));
-    doc.rect(MARGIN, y, COLW, ROW_H + 1, 'F');
-
-    doc.setFont(FONT, 'normal');
-    doc.setFontSize(7);
-    doc.setTextColor(...hex(C_DARK));
-
-    if (datos.tipoDocumento === 'factura') {
-      const cf = colsFactura;
-      doc.text(item.codigo.slice(0, 8),                  cf[0].x + 2,         y + ROW_H - 1);
-      const descLines = wrapText(doc, item.descripcion, cf[1].w - 3);
-      doc.text(descLines[0] ?? '',                       cf[1].x + 2,         y + ROW_H - 1);
-      doc.text(fmt(item.cantidad, 0),                    cf[2].x + cf[2].w - 2, y + ROW_H - 1, { align: 'right' });
-      doc.text(usd(item.precioUnitario),                 cf[3].x + cf[3].w - 2, y + ROW_H - 1, { align: 'right' });
-      doc.text(usd(item.descuento),                      cf[4].x + cf[4].w - 2, y + ROW_H - 1, { align: 'right' });
-      doc.text(usd(item.subtotal),                       cf[5].x + cf[5].w - 2, y + ROW_H - 1, { align: 'right' });
-      doc.text(item.tieneIVA ? '15%' : '0%',            cf[6].x + cf[6].w / 2, y + ROW_H - 1, { align: 'center' });
-    } else {
-      const cn = colsNota;
-      doc.text(item.codigo.slice(0, 8),                  cn[0].x + 2,         y + ROW_H - 1);
-      const descLines = wrapText(doc, item.descripcion, cn[1].w - 3);
-      doc.text(descLines[0] ?? '',                       cn[1].x + 2,         y + ROW_H - 1);
-      doc.text(fmt(item.cantidad, 0),                    cn[2].x + cn[2].w - 2, y + ROW_H - 1, { align: 'right' });
-      doc.text(usd(item.precioUnitario),                 cn[3].x + cn[3].w - 2, y + ROW_H - 1, { align: 'right' });
-      doc.text(usd(item.descuento),                      cn[4].x + cn[4].w - 2, y + ROW_H - 1, { align: 'right' });
-      doc.text(usd(item.subtotal),                       cn[5].x + cn[5].w - 2, y + ROW_H - 1, { align: 'right' });
+  // ── DOCUMENTO MODIFICADO (NC / ND) ───────────────────────────────────────
+  if (datos.docModificado) {
+    box(doc, MARGIN, y, COLW, 9);
+    label(doc, 'Comprobante que se modifica:', MARGIN + 3, y + 4);
+    value(doc, `Tipo: ${datos.docModificado.tipo}`, MARGIN + 50, y + 4);
+    value(doc, `No.: ${datos.docModificado.numero}`, MARGIN + 90, y + 4);
+    value(doc, `Fecha: ${datos.docModificado.fecha}`, MARGIN + 140, y + 4);
+    if (datos.motivoModificacion) {
+      label(doc, 'Motivo:', MARGIN + 3, y + 7.5);
+      value(doc, datos.motivoModificacion.slice(0, 110), MARGIN + 18, y + 7.5);
     }
-
-    y += ROW_H + 1;
-  });
-
-  hline(doc, y, C_BORDER);
-  y += 3;
-
-  // ── TOTALES ──────────────────────────────────────────────────────────────
-  const totX  = MARGIN + COLW * 0.55;
-  const totW1 = 40;
-  const totW2 = COLW * 0.45 - totW1;
-
-  function totRow(label: string, valor: string, bold = false, bgColor?: string) {
-    if (bgColor) {
-      doc.setFillColor(...hex(bgColor));
-      doc.rect(totX, y - 3.5, totW1 + totW2, 5, 'F');
-    }
-    doc.setFont(FONT, bold ? 'bold' : 'normal');
-    doc.setFontSize(8);
-    doc.setTextColor(...hex(bold ? C_DARK : C_GRAY));
-    doc.text(label, totX + totW1 - 2, y, { align: 'right' });
-    doc.text(valor, totX + totW1 + totW2 - 2, y, { align: 'right' });
-    y += 5;
+    y += 12;
   }
 
-  if (datos.tipoDocumento === 'factura') {
-    if (datos.subtotal0 > 0)
-      totRow('Subtotal IVA 0%:', usd(datos.subtotal0));
-    if (datos.subtotal15 > 0)
-      totRow('Subtotal IVA 15%:', usd(datos.subtotal15));
-    if (datos.totalDescuento > 0)
-      totRow('Descuento total:', usd(datos.totalDescuento));
-    totRow('IVA 15%:', usd(datos.iva));
+  // ── CUERPO ───────────────────────────────────────────────────────────────
+  if (esRetencion) {
+    y = renderTablaRetenciones(doc, datos, y);
   } else {
-    if (datos.totalDescuento > 0)
-      totRow('Descuento total:', usd(datos.totalDescuento));
-    totRow('Subtotal:', usd(datos.subtotal0 + datos.subtotal15));
+    if (datos.items.length) y = renderTablaItems(doc, datos, y);
+    y = renderTotales(doc, datos, y);
   }
 
-  y += 1;
-  totRow('VALOR TOTAL:', usd(datos.total), true, '#dbeafe');
-  y += 2;
-
-  // ── INFORMACIÓN ADICIONAL / PIE ──────────────────────────────────────────
-  if (datos.mensajeAdicional) {
-    hline(doc, y, C_BORDER);
-    y += 4;
-    doc.setFont(FONT, 'italic');
-    doc.setFontSize(7);
-    doc.setTextColor(...hex(C_GRAY));
-    const msgLines = wrapText(doc, datos.mensajeAdicional, COLW);
-    msgLines.forEach(l => { doc.text(l, MARGIN, y); y += 4; });
+  // ── MOTIVOS (Nota de débito) ─────────────────────────────────────────────
+  if (datos.tipoDocumento === 'nota_debito' && datos.motivos?.length) {
+    y += 2;
+    const c1 = COLW - 30;
+    doc.setFillColor(...hex(LIGHT)); doc.rect(MARGIN, y, COLW, 5, 'F'); box(doc, MARGIN, y, COLW, 5);
+    label(doc, 'Razón', MARGIN + 3, y + 3.5); label(doc, 'Valor', MARGIN + c1 + 3, y + 3.5);
+    y += 5;
+    datos.motivos.forEach(m => {
+      box(doc, MARGIN, y, COLW, 5);
+      value(doc, m.razon.slice(0, 90), MARGIN + 3, y + 3.5);
+      doc.text(usd(m.valor), MARGIN + COLW - 3, y + 3.5, { align: 'right' });
+      y += 5;
+    });
   }
 
-  // Nota legal para recibo interno
+  // ── INFORMACIÓN ADICIONAL ────────────────────────────────────────────────
+  y += 3;
+  if (datos.mensajeAdicional || datos.emailComprador) {
+    box(doc, MARGIN, y, COLW, 12);
+    label(doc, 'Información Adicional', MARGIN + 3, y + 4);
+    doc.setFont(FONT, 'normal'); doc.setFontSize(6.5);
+    if (datos.emailComprador) doc.text(`Email: ${datos.emailComprador}`, MARGIN + 3, y + 8);
+    if (datos.mensajeAdicional)
+      wrap(doc, datos.mensajeAdicional, COLW - 6).slice(0, 1).forEach(l => doc.text(l, MARGIN + 3, y + 11));
+    y += 15;
+  }
+
+  // ── Nota de recibo interno / borrador ────────────────────────────────────
   if (esRecibo) {
-    hline(doc, y, C_BORDER);
-    y += 4;
-    doc.setFillColor(...hex('#fef3c7'));
-    doc.rect(MARGIN, y - 2, COLW, 10, 'F');
-    doc.setFont(FONT, 'bold');
-    doc.setFontSize(7);
-    doc.setTextColor(...hex('#92400e'));
-    doc.text('DOCUMENTO SIN VALIDEZ TRIBUTARIA — SOLO PARA CONTROL INTERNO', MARGIN + 3, y + 2);
-    doc.setFont(FONT, 'normal');
-    doc.setFontSize(6.5);
-    doc.text('Este recibo no sustituye a una factura o nota de venta. No es deducible de impuestos.', MARGIN + 3, y + 6);
-    y += 13;
+    doc.setFont(FONT, 'bold'); doc.setFontSize(7); doc.setTextColor(...hex(ORANGE));
+    doc.text('DOCUMENTO SIN VALIDEZ TRIBUTARIA — SOLO PARA CONTROL INTERNO', MARGIN, y + 3);
+    y += 6;
   }
 
-  // Nota legal SRI para documentos no autorizados
-  if (!esRecibo && !tieneAutorizacion) {
-    hline(doc, y, C_ORANGE, 0.3);
-    y += 4;
-    doc.setFont(FONT, 'italic');
-    doc.setFontSize(6.5);
-    doc.setTextColor(...hex(C_ORANGE));
-    doc.text(
-      'Este documento es un borrador. Para tener validez tributaria debe ser autorizado por el SRI.',
-      MARGIN, y
-    );
+  // Pie
+  doc.setDrawColor(...hex(GRAY)); doc.setLineWidth(0.15);
+  doc.line(MARGIN, y + 3, PW - MARGIN, y + 3);
+  doc.setFont(FONT, 'normal'); doc.setFontSize(5.5); doc.setTextColor(...hex(GRAY));
+  doc.text('Representación Impresa del Documento Electrónico (RIDE)', PW / 2, y + 7, { align: 'center' });
+
+  return new Uint8Array(doc.output('arraybuffer'));
+}
+
+// ── Tabla de ítems (factura / nota de venta / NC / ND) ──────────────────────
+
+function renderTablaItems(doc: jsPDF, datos: DatosRIDE, y: number): number {
+  const cols = [
+    { label: 'Cód.',        x: MARGIN,       w: 18, align: 'left'  as const },
+    { label: 'Cant.',       x: MARGIN + 18,  w: 14, align: 'right' as const },
+    { label: 'Descripción', x: MARGIN + 32,  w: 78, align: 'left'  as const },
+    { label: 'P. Unit.',    x: MARGIN + 110, w: 22, align: 'right' as const },
+    { label: 'Desc.',       x: MARGIN + 132, w: 20, align: 'right' as const },
+    { label: 'Total',       x: MARGIN + 152, w: COLW - 152, align: 'right' as const },
+  ];
+  const ROW = 5;
+
+  doc.setFillColor(...hex(LIGHT)); doc.rect(MARGIN, y, COLW, ROW, 'F'); box(doc, MARGIN, y, COLW, ROW);
+  cols.forEach(c => {
+    doc.setFont(FONT, 'bold'); doc.setFontSize(6.5); doc.setTextColor(...hex(BLACK));
+    const px = c.align === 'right' ? c.x + c.w - 2 : c.x + 2;
+    doc.text(c.label, px, y + 3.5, { align: c.align });
+  });
+  y += ROW;
+
+  datos.items.forEach(it => {
+    box(doc, MARGIN, y, COLW, ROW);
+    doc.setFont(FONT, 'normal'); doc.setFontSize(7); doc.setTextColor(...hex(BLACK));
+    doc.text((it.codigo || '-').slice(0, 9), cols[0].x + 2, y + 3.5);
+    doc.text(num(it.cantidad, 0), cols[1].x + cols[1].w - 2, y + 3.5, { align: 'right' });
+    doc.text(wrap(doc, it.descripcion, cols[2].w - 3)[0] ?? '', cols[2].x + 2, y + 3.5);
+    doc.text(usd(it.precioUnitario), cols[3].x + cols[3].w - 2, y + 3.5, { align: 'right' });
+    doc.text(usd(it.descuento), cols[4].x + cols[4].w - 2, y + 3.5, { align: 'right' });
+    doc.text(usd(it.subtotal), cols[5].x + cols[5].w - 2, y + 3.5, { align: 'right' });
+    y += ROW;
+  });
+  return y;
+}
+
+// ── Totales (lado derecho) ──────────────────────────────────────────────────
+
+function renderTotales(doc: jsPDF, datos: DatosRIDE, y: number): number {
+  y += 2;
+  const totX = MARGIN + COLW * 0.55;
+  const totW = COLW * 0.45;
+  const labW = totW * 0.62;
+
+  function row(lbl: string, val: string, bold = false) {
+    box(doc, totX, y, totW, 5);
+    doc.setFont(FONT, bold ? 'bold' : 'normal'); doc.setFontSize(7.5);
+    doc.setTextColor(...hex(BLACK));
+    doc.text(lbl, totX + labW - 2, y + 3.5, { align: 'right' });
+    doc.text(val, totX + totW - 2, y + 3.5, { align: 'right' });
     y += 5;
   }
 
-  // Pie de página
-  hline(doc, y + 3, C_BORDER, 0.15);
-  doc.setFont(FONT, 'normal');
-  doc.setFontSize(6);
-  doc.setTextColor(...hex(C_GRAY));
-  doc.text(
-    'Documento generado por sistema de gestión · www.sri.gob.ec',
-    PW / 2, y + 7, { align: 'center' }
-  );
+  const esFactura = datos.tipoDocumento === 'factura' || datos.tipoDocumento === 'nota_credito'
+                  || datos.tipoDocumento === 'nota_debito';
 
-  return doc.output('arraybuffer') as unknown as Uint8Array;
+  if (esFactura) {
+    if (datos.subtotal15 > 0) row('SUBTOTAL 15%', usd(datos.subtotal15));
+    if (datos.subtotal0  > 0) row('SUBTOTAL 0%', usd(datos.subtotal0));
+    row('SUBTOTAL SIN IMPUESTOS', usd(datos.subtotal0 + datos.subtotal15));
+    if (datos.totalDescuento > 0) row('TOTAL DESCUENTO', usd(datos.totalDescuento));
+    row('IVA 15%', usd(datos.iva));
+  } else {
+    // Nota de venta: sin desglose de IVA
+    if (datos.totalDescuento > 0) row('TOTAL DESCUENTO', usd(datos.totalDescuento));
+    row('SUBTOTAL', usd(datos.subtotal0 + datos.subtotal15));
+  }
+  row('VALOR TOTAL', usd(datos.total), true);
+
+  // Forma de pago (lado izquierdo)
+  if (datos.tipoDocumento === 'factura' || datos.tipoDocumento === 'nota_venta') {
+    const fpY = y - (esFactura ? 25 : 15);
+    const fpW = COLW * 0.5;
+    box(doc, MARGIN, fpY, fpW, 10);
+    label(doc, 'Forma de Pago', MARGIN + 3, fpY + 4, 6.5);
+    label(doc, 'Valor', MARGIN + fpW - 18, fpY + 4, 6.5);
+    value(doc, (FORMA_PAGO_LABEL[datos.formaPago] ?? datos.formaPago).slice(0, 32), MARGIN + 3, fpY + 8, 6.5);
+    doc.text(usd(datos.total), MARGIN + fpW - 3, fpY + 8, { align: 'right' });
+  }
+
+  return y;
 }
 
-// ── Helpers de formato ────────────────────────────────────────────────────
+// ── Tabla de retenciones ────────────────────────────────────────────────────
 
-function usd(v: number): string {
-  return `$${v.toFixed(2)}`;
+function renderTablaRetenciones(doc: jsPDF, datos: DatosRIDE, y: number): number {
+  const cols = [
+    { label: 'Comprobante',    x: MARGIN,       w: 40, align: 'left'  as const },
+    { label: 'Fecha Emisión',  x: MARGIN + 40,  w: 22, align: 'left'  as const },
+    { label: 'Ejerc. Fiscal',  x: MARGIN + 62,  w: 20, align: 'left'  as const },
+    { label: 'Impuesto',       x: MARGIN + 82,  w: 20, align: 'left'  as const },
+    { label: 'Código',         x: MARGIN + 102, w: 16, align: 'center'as const },
+    { label: 'Base Imp.',      x: MARGIN + 118, w: 22, align: 'right' as const },
+    { label: '% Ret.',         x: MARGIN + 140, w: 16, align: 'right' as const },
+    { label: 'Valor Ret.',     x: MARGIN + 156, w: COLW - 156, align: 'right' as const },
+  ];
+  const ROW = 5;
+
+  doc.setFillColor(...hex(LIGHT)); doc.rect(MARGIN, y, COLW, ROW, 'F'); box(doc, MARGIN, y, COLW, ROW);
+  cols.forEach(c => {
+    doc.setFont(FONT, 'bold'); doc.setFontSize(6); doc.setTextColor(...hex(BLACK));
+    const px = c.align === 'right' ? c.x + c.w - 1.5 : c.align === 'center' ? c.x + c.w / 2 : c.x + 1.5;
+    doc.text(c.label, px, y + 3.5, { align: c.align });
+  });
+  y += ROW;
+
+  let totalRet = 0;
+  (datos.retenciones ?? []).forEach(r => {
+    box(doc, MARGIN, y, COLW, ROW);
+    doc.setFont(FONT, 'normal'); doc.setFontSize(6); doc.setTextColor(...hex(BLACK));
+    doc.text(r.comprobante.slice(0, 22), cols[0].x + 1.5, y + 3.5);
+    doc.text(r.fechaEmision, cols[1].x + 1.5, y + 3.5);
+    doc.text(r.ejercicioFiscal, cols[2].x + 1.5, y + 3.5);
+    doc.text(r.impuesto, cols[3].x + 1.5, y + 3.5);
+    doc.text(r.codigo, cols[4].x + cols[4].w / 2, y + 3.5, { align: 'center' });
+    doc.text(usd(r.baseImponible), cols[5].x + cols[5].w - 1.5, y + 3.5, { align: 'right' });
+    doc.text(num(r.porcentaje), cols[6].x + cols[6].w - 1.5, y + 3.5, { align: 'right' });
+    doc.text(usd(r.valorRetenido), cols[7].x + cols[7].w - 1.5, y + 3.5, { align: 'right' });
+    totalRet += r.valorRetenido;
+    y += ROW;
+  });
+
+  // Total retenido
+  y += 2;
+  const totX = MARGIN + COLW * 0.6, totW = COLW * 0.4;
+  box(doc, totX, y, totW, 5);
+  doc.setFont(FONT, 'bold'); doc.setFontSize(7.5); doc.setTextColor(...hex(BLACK));
+  doc.text('TOTAL RETENIDO', totX + totW * 0.6, y + 3.5, { align: 'right' });
+  doc.text(usd(totalRet), totX + totW - 2, y + 3.5, { align: 'right' });
+  y += 5;
+  return y;
 }
 
-function fmt(v: number, decimals = 2): string {
-  return v.toFixed(decimals);
-}
-
-function formatFecha(d: Date): string {
-  const dd = String(d.getDate()).padStart(2, '0');
-  const mm = String(d.getMonth() + 1).padStart(2, '0');
-  const yy = d.getFullYear();
-  return `${dd}/${mm}/${yy}`;
-}
-
-const FORMA_PAGO_LABEL: Record<string, string> = {
-  efectivo:      'Efectivo',
-  tarjeta:       'Tarjeta de crédito/débito',
-  transferencia: 'Transferencia bancaria',
-  cheque:        'Cheque',
-  '01':          'Efectivo',
-  '16':          'Tarjeta',
-  '19':          'Transferencia',
-  '20':          'Cheque',
-};
-
-// ── Descarga en el browser ────────────────────────────────────────────────
+// ── Descarga / apertura ─────────────────────────────────────────────────────
 
 export function descargarRIDE(datos: DatosRIDE, nombreArchivo?: string): void {
   const bytes  = generarRIDE(datos);
@@ -529,11 +583,9 @@ export function descargarRIDE(datos: DatosRIDE, nombreArchivo?: string): void {
   const estab  = datos.establecimiento.padStart(3, '0');
   const pto    = datos.puntoEmision.padStart(3, '0');
   const sec    = String(datos.secuencial).padStart(9, '0');
-  const nombre = nombreArchivo ?? `RIDE-${estab}-${pto}-${sec}.pdf`;
+  const nombre = nombreArchivo ?? `RIDE-${COD_DOC[datos.tipoDocumento]}-${estab}-${pto}-${sec}.pdf`;
   const a      = document.createElement('a');
-  a.href       = url;
-  a.download   = nombre;
-  a.click();
+  a.href = url; a.download = nombre; a.click();
   URL.revokeObjectURL(url);
 }
 

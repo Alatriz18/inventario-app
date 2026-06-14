@@ -419,7 +419,7 @@ export function firmarXML(
 
     // ── 10. Inyectar firma antes del cierre del elemento raíz ──────────────
     const xmlFirmado = xmlOriginal.replace(
-      /(<\/(?:factura|notaVenta|comprobanteRetencion|liquidacionCompra|guiaRemision)>\s*)$/,
+      /(<\/(?:factura|notaVenta|notaCredito|notaDebito|comprobanteRetencion|liquidacionCompra|guiaRemision)>\s*)$/,
       `${signature}$1`
     );
 

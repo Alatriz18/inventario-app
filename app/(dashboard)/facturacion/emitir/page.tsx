@@ -15,6 +15,8 @@ import {
 import { subscribeToVentas } from '@/lib/firebase/ventas';
 import { createComprobante, updateComprobante } from '@/lib/firebase/comprobantes';
 import { getConfigSRI, incrementarSecuencial } from '@/lib/firebase/config-sri';
+import { subscribeToConfigEmpresa } from '@/lib/firebase/config-empresa';
+import { ComprobantesHabilitados } from '@/types';
 import { generarXMLFactura }   from '@/lib/sri/generador-factura';
 import { generarXMLNotaVenta } from '@/lib/sri/generador-nota-venta';
 import { generarClaveAcceso }  from '@/lib/sri/clave-acceso';
@@ -47,11 +49,19 @@ function EmitirComprobanteInner() {
   const [diagnostico,  setDiagnostico]  = useState<any>(null);
   const [diagLoading,  setDiagLoading]  = useState(false);
   const [xmlPreview,   setXmlPreview]   = useState<string | null>(null);
+  const [habilitados,  setHabilitados]  = useState<ComprobantesHabilitados | null>(null);
 
   // Solo ventas completadas sin comprobante
   const ventasSinComp = ventas.filter(
     v => v.estado === 'completada' && !v.comprobanteId
   );
+
+  // Tipos de comprobante permitidos según el régimen tributario de la empresa.
+  // Si aún no carga la config, se muestran ambos para no bloquear.
+  const tiposPermitidos = {
+    factura:    habilitados ? habilitados.factura   : true,
+    nota_venta: habilitados ? habilitados.notaVenta : true,
+  };
 
   useEffect(() => {
     const ventaIdParam = searchParams.get('ventaId');
@@ -64,10 +74,32 @@ function EmitirComprobanteInner() {
     return subscribeToVentas((data) => { setVentas(data); setLoading(false); });
   }, []);
 
+  // Cargar comprobantes habilitados según el régimen y ajustar el tipo activo
+  useEffect(() => {
+    return subscribeToConfigEmpresa((cfg) => {
+      const hab = cfg?.comprobantesHabilitados ?? null;
+      setHabilitados(hab);
+      if (hab) {
+        // Si el tipo seleccionado no está habilitado, cambiar al primero disponible
+        setTipo(prev => {
+          if (prev === 'factura' && !hab.factura && hab.notaVenta)   return 'nota_venta';
+          if (prev === 'nota_venta' && !hab.notaVenta && hab.factura) return 'factura';
+          return prev;
+        });
+      }
+    });
+  }, []);
+
   const ventaSeleccionada = ventas.find(v => v.id === ventaId);
 
   const emitirComprobante = async () => {
     if (!ventaSeleccionada || !user) return;
+
+    // Validar que el tipo de comprobante esté habilitado para el régimen
+    if (!tiposPermitidos[tipo]) {
+      toast.error(`Tu régimen tributario no permite emitir ${tipo === 'factura' ? 'facturas' : 'notas de venta'}.`);
+      return;
+    }
 
     setProcesando(true);
     setResultado(null);
@@ -412,14 +444,16 @@ function EmitirComprobanteInner() {
             )}
           </div>
 
-          {/* Tipo de comprobante */}
+          {/* Tipo de comprobante (solo los habilitados según el régimen) */}
           <div className="space-y-1.5">
             <Label>Tipo de comprobante *</Label>
             <div className="grid grid-cols-2 gap-3">
               {([
                 { value: 'factura',    label: 'Factura Electrónica',  desc: 'Con desglose de IVA — para empresas y personas con RUC/cédula' },
-                { value: 'nota_venta', label: 'Nota de Venta',        desc: 'Sin IVA separado — para consumidores finales (RISE)' },
-              ] as const).map(({ value, label, desc }) => (
+                { value: 'nota_venta', label: 'Nota de Venta',        desc: 'Sin IVA separado — RIMPE Negocio Popular / Emprendedor' },
+              ] as const)
+                .filter(({ value }) => tiposPermitidos[value])
+                .map(({ value, label, desc }) => (
                 <button key={value}
                   onClick={() => setTipo(value)}
                   className={`text-left p-3 rounded-lg border-2 transition-colors ${
@@ -430,6 +464,17 @@ function EmitirComprobanteInner() {
                 </button>
               ))}
             </div>
+            {habilitados && !tiposPermitidos.factura && !tiposPermitidos.nota_venta && (
+              <p className="text-xs text-amber-600">
+                El régimen tributario configurado no permite emitir facturas ni notas de venta.
+                Revísalo en Configuración → Empresa.
+              </p>
+            )}
+            {habilitados && (tiposPermitidos.factura !== tiposPermitidos.nota_venta) && (
+              <p className="text-xs text-slate-400">
+                Tu régimen tributario solo habilita {tiposPermitidos.factura ? 'facturas' : 'notas de venta'}.
+              </p>
+            )}
           </div>
         </div>
 

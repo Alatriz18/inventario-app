@@ -282,6 +282,7 @@ export interface FacturaProveedor {
   xmlUrl?: string;
   pdfUrl?: string;
   xmlData?: any;
+  xmlRaw?: string;   // XML autorizado original (para reexportar)
   entradaId?: string;
   usuarioId: string;
   usuarioNombre: string;
@@ -403,6 +404,32 @@ export interface ConfigContable {
   cuentaGastoProvision?:       string; // 5.x   — gasto por provisión
   cuentaRetFuenteProveedores?: string; // 2.1.x — retención recibida de proveedores / pagos
   cuentaRetIVAProveedores?:    string; // 2.1.x — retención IVA recibida
+  cuentaRetFuentePorPagar?:    string; // 2.1.03 — retención en la fuente que emitimos (por pagar al SRI)
+  cuentaRetIVAPorPagar?:       string; // 2.1.04 — retención de IVA que emitimos (por pagar al SRI)
+}
+
+// ─── DOCUMENTOS RECIBIDOS (NC / ND de proveedores, importados por XML) ──────
+
+export type TipoDocRecibido = 'nota_credito' | 'nota_debito';
+
+export interface DocumentoRecibido {
+  id:              string;
+  tipo:            TipoDocRecibido;
+  proveedorId?:    string;
+  proveedorNombre: string;
+  proveedorRuc:    string;
+  numero:          string;   // 001-001-000000001
+  claveAcceso?:    string;
+  docModificado?:  string;   // factura que modifica
+  fechaEmision:    Date;
+  subtotal:        number;
+  iva:             number;
+  total:           number;
+  xmlRaw?:         string;
+  asientoId?:      string;
+  usuarioId:       string;
+  usuarioNombre:   string;
+  createdAt:       Date;
 }
 
 export interface PeriodoContable {
@@ -479,6 +506,21 @@ export interface ConfigEmpresa {
   // Pie de RIDE / recibos
   mensajeAdicional?: string;
   updatedAt?:        Date;
+}
+
+// ─── CONFIGURACIÓN DE CORREO (SMTP) ────────────────────────────────────────
+
+export type ProveedorEmail = 'gmail' | 'outlook' | 'otro';
+
+export interface ConfigEmail {
+  proveedor: ProveedorEmail;
+  email:     string;   // usuario SMTP y dirección remitente
+  password:  string;   // contraseña de aplicación (NO la contraseña normal)
+  fromName?: string;   // nombre que aparece como remitente
+  // Solo para proveedor 'otro'
+  host?:     string;
+  port?:     number;
+  updatedAt?: Date;
 }
 
 // ─── CUENTAS POR COBRAR (CxC) ──────────────────────────────────────────────

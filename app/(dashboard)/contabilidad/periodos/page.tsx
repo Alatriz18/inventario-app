@@ -20,10 +20,12 @@ import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from '@/components/ui/table';
 
-import { PeriodoContable } from '@/types';
+import { PeriodoContable, AsientoContable, CuentaContable } from '@/types';
 import {
   subscribeToPeriodos, createPeriodo, cerrarPeriodo, abrirPeriodo,
 } from '@/lib/firebase/periodos-contables';
+import { subscribeToAsientos } from '@/lib/firebase/asientos';
+import { subscribeToCuentas }  from '@/lib/firebase/plan-cuentas';
 import {
   crearAsientoApertura, crearAsientoCierre, LineaApertura,
 } from '@/lib/contabilidad/motor-asientos';
@@ -37,6 +39,8 @@ interface LineaAperturaForm { codigoCuenta: string; debe: string; haber: string;
 export default function PeriodosPage() {
   const { user }  = useAuth();
   const [periodos,   setPeriodos]   = useState<PeriodoContable[]>([]);
+  const [asientos,   setAsientos]   = useState<AsientoContable[]>([]);
+  const [cuentas,    setCuentas]    = useState<CuentaContable[]>([]);
   const [loading,    setLoading]    = useState(true);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [mesNuevo,   setMesNuevo]   = useState('1');
@@ -58,8 +62,38 @@ export default function PeriodosPage() {
   const [savingCierre,  setSavingCierre]  = useState(false);
 
   useEffect(() => {
-    return subscribeToPeriodos(d => { setPeriodos(d); setLoading(false); });
+    const u1 = subscribeToPeriodos(d => { setPeriodos(d); setLoading(false); });
+    const u2 = subscribeToAsientos(setAsientos, 100000);
+    const u3 = subscribeToCuentas(setCuentas);
+    return () => { u1(); u2(); u3(); };
   }, []);
+
+  /** Calcula ingresos y gastos+costos de un período a partir de los asientos. */
+  const calcularResultadoPeriodo = (p: PeriodoContable) => {
+    const inicio = new Date(p.anio, p.mes - 1, 1);
+    const fin    = new Date(p.anio, p.mes, 0, 23, 59, 59);
+    let ingresos = 0, gastos = 0;
+    asientos.forEach(a => {
+      const f = (a.fecha as any)?.toDate?.() ?? new Date(a.fecha);
+      if (f < inicio || f > fin) return;
+      if (a.tipo === 'cierre' || a.tipo === 'apertura') return; // no recursivo
+      a.lineas.forEach(l => {
+        const cuenta = cuentas.find(c => c.codigo === l.cuentaCodigo);
+        if (!cuenta) return;
+        if (cuenta.tipo === 'ingreso')                       ingresos += l.haber - l.debe;
+        else if (cuenta.tipo === 'gasto' || cuenta.tipo === 'costo') gastos += l.debe - l.haber;
+      });
+    });
+    return { ingresos: Math.max(0, ingresos), gastos: Math.max(0, gastos) };
+  };
+
+  const openCierre = (p: PeriodoContable) => {
+    setPeriodoSel(p);
+    const { ingresos, gastos } = calcularResultadoPeriodo(p);
+    setTotalIngresos(ingresos.toFixed(2));
+    setTotalGastos(gastos.toFixed(2));
+    setCierreOpen(true);
+  };
 
   const handleCreate = async () => {
     setSaving(true);
@@ -197,7 +231,7 @@ export default function PeriodosPage() {
                     </Button>
                     <Button variant="ghost" size="sm"
                       className="text-purple-600 hover:text-purple-700 h-7 px-2 text-xs"
-                      onClick={() => { setPeriodoSel(p); setCierreOpen(true); }}>
+                      onClick={() => openCierre(p)}>
                       <BookMarked className="mr-1 h-3 w-3" /> Cierre
                     </Button>
                   </div>
@@ -308,7 +342,8 @@ export default function PeriodosPage() {
             <DialogTitle>Asiento de Cierre — {periodoSel?.nombre}</DialogTitle>
           </DialogHeader>
           <p className="text-xs text-slate-500">
-            Ingresa el total de ingresos y gastos del período para generar el asiento de cierre.
+            Los totales se calcularon automáticamente desde los asientos del período.
+            Puedes ajustarlos si es necesario antes de generar el asiento de cierre.
           </p>
           <div className="space-y-3 py-2">
             <div className="space-y-1.5">

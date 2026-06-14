@@ -2,15 +2,10 @@ import { create } from 'xmlbuilder2';
 
 export interface LineaXMLRetencion {
   tipo:         'fuente_ir' | 'iva';
-  codigo:       string;
+  codigo:       string;        // codigoRetencion (ej. 303, 312, 721…)
   porcentaje:   number;
   baseImponible:number;
   valorRetenido:number;
-  // Referencia al comprobante que origina la retención
-  codDocSustento:  string;  // '01' = factura
-  numDocSustento:  string;  // ej: 001-001-000000123
-  fechaEmisionDocSustento: string; // dd/MM/yyyy
-  ejercicioFiscal: string;  // AAAA/MM
 }
 
 export interface DatosRetencion {
@@ -31,10 +26,20 @@ export interface DatosRetencion {
   identificacionSujeto:string;
   razonSocialSujeto:   string;
   periodoFiscal:       string;  // MM/AAAA
+  // Documento que origina la retención (factura del proveedor)
+  codDocSustento:          string;  // '01' = factura
+  numDocSustento:          string;  // 15 dígitos (estab+ptoEmi+secuencial, sin guiones)
+  fechaEmisionDocSustento: string;  // dd/MM/yyyy
+  totalSinImpuestos:       number;  // subtotal de la factura sustento
+  importeTotal:            number;  // total de la factura sustento
   // Líneas de retención
   lineas:              LineaXMLRetencion[];
 }
 
+/**
+ * Genera el XML del Comprobante de Retención en el esquema v2.0.0 (obligatorio
+ * desde 2021). Estructura: infoCompRetencion + docsSustento/docSustento/retenciones.
+ */
 export function generarXMLRetencion(d: DatosRetencion): string {
   const secStr   = String(d.secuencial).padStart(9, '0');
   const estab    = d.establecimiento.padStart(3, '0');
@@ -42,8 +47,9 @@ export function generarXMLRetencion(d: DatosRetencion): string {
   const fechaStr = fmtFecha(d.fechaEmision);
 
   const doc = create({ version: '1.0', encoding: 'UTF-8' })
-    .ele('comprobanteRetencion', { id: 'comprobante', version: '1.0.0' });
+    .ele('comprobanteRetencion', { id: 'comprobante', version: '2.0.0' });
 
+  // ── infoTributaria ──
   const it = doc.ele('infoTributaria');
   it.ele('ambiente').txt(d.ambiente);
   it.ele('tipoEmision').txt('1');
@@ -58,27 +64,35 @@ export function generarXMLRetencion(d: DatosRetencion): string {
   it.ele('dirMatriz').txt(d.direccionMatriz);
   if (d.contribuyenteEspecial) it.ele('contribuyenteEspecial').txt(d.contribuyenteEspecial);
 
+  // ── infoCompRetencion ──
   const inf = doc.ele('infoCompRetencion');
   inf.ele('fechaEmision').txt(fechaStr);
   inf.ele('dirEstablecimiento').txt(d.direccionMatriz);
-  inf.ele('obligadoContabilidad').txt(d.obligadoContabilidad ?? 'NO');
   if (d.contribuyenteEspecial) inf.ele('contribuyenteEspecial').txt(d.contribuyenteEspecial);
+  inf.ele('obligadoContabilidad').txt(d.obligadoContabilidad ?? 'NO');
   inf.ele('tipoIdentificacionSujetoRetenido').txt(d.tipoIdSujetoRetenido);
   inf.ele('razonSocialSujetoRetenido').txt(d.razonSocialSujeto);
   inf.ele('identificacionSujetoRetenido').txt(d.identificacionSujeto);
   inf.ele('periodoFiscal').txt(d.periodoFiscal);
 
-  const impuestos = doc.ele('impuestos');
+  // ── docsSustento ──
+  const docs = doc.ele('docsSustento');
+  const ds   = docs.ele('docSustento');
+  ds.ele('codDocSustento').txt(d.codDocSustento);
+  ds.ele('numDocSustento').txt(d.numDocSustento);
+  ds.ele('fechaEmisionDocSustento').txt(d.fechaEmisionDocSustento);
+  ds.ele('pagoLocExt').txt('01'); // 01 = pago a residente fiscal local
+  ds.ele('totalSinImpuestos').txt(d.totalSinImpuestos.toFixed(2));
+  ds.ele('importeTotal').txt(d.importeTotal.toFixed(2));
+
+  const rets = ds.ele('retenciones');
   for (const l of d.lineas) {
-    const imp = impuestos.ele('impuesto');
-    imp.ele('codigo').txt(l.tipo === 'fuente_ir' ? '1' : '2');
-    imp.ele('codigoRetencion').txt(l.codigo);
-    imp.ele('baseImponible').txt(l.baseImponible.toFixed(2));
-    imp.ele('porcentajeRetener').txt(l.porcentaje.toFixed(2));
-    imp.ele('valorRetenido').txt(l.valorRetenido.toFixed(2));
-    imp.ele('codDocSustento').txt(l.codDocSustento);
-    imp.ele('numDocSustento').txt(l.numDocSustento);
-    imp.ele('fechaEmisionDocSustento').txt(l.fechaEmisionDocSustento);
+    const ret = rets.ele('retencion');
+    ret.ele('codigo').txt(l.tipo === 'fuente_ir' ? '1' : '2');
+    ret.ele('codigoRetencion').txt(l.codigo);
+    ret.ele('baseImponible').txt(l.baseImponible.toFixed(2));
+    ret.ele('porcentajeRetener').txt(l.porcentaje.toFixed(2));
+    ret.ele('valorRetenido').txt(l.valorRetenido.toFixed(2));
   }
 
   return doc.end({ prettyPrint: false });

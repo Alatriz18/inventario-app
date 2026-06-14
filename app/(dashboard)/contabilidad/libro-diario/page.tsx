@@ -35,7 +35,7 @@ export default function LibroDiarioPage() {
   const [dateTo,   setDateTo]   = useState(format(new Date(), 'yyyy-MM-dd'));
 
   useEffect(() => {
-    return subscribeToAsientos(d => { setAsientos(d); setLoading(false); });
+    return subscribeToAsientos(d => { setAsientos(d); setLoading(false); }, 100000);
   }, []);
 
   const filtrados = useMemo(() => {

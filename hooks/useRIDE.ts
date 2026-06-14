@@ -13,10 +13,31 @@
 import { useState, useCallback } from 'react';
 import { toast } from 'sonner';
 import { getConfigSRI } from '@/lib/firebase/config-sri';
+import { getConfigEmail } from '@/lib/firebase/config-email';
 import { Comprobante }  from '@/lib/firebase/comprobantes';
 import {
-  DatosRIDE, descargarRIDE, abrirRIDEenNuevaPestana,
+  DatosRIDE, descargarRIDE, abrirRIDEenNuevaPestana, generarRIDE,
 } from '@/lib/sri/ride-pdf';
+
+/** Convierte un Uint8Array a base64 sin desbordar la pila (por bloques). */
+function uint8ToBase64(bytes: Uint8Array): string {
+  let binary = '';
+  const chunk = 0x8000;
+  for (let i = 0; i < bytes.length; i += chunk) {
+    binary += String.fromCharCode(...bytes.subarray(i, i + chunk));
+  }
+  return btoa(binary);
+}
+
+/** Obtiene el XML del comprobante: autorizado si existe, si no el firmado. */
+function getXmlComprobante(comp: Comprobante): string {
+  if (comp.xmlAutorizado) return comp.xmlAutorizado;
+  if (comp.xmlFirmadoB64) {
+    try { return decodeURIComponent(escape(atob(comp.xmlFirmadoB64))); }
+    catch { return atob(comp.xmlFirmadoB64); }
+  }
+  return '';
+}
 
 export function useRIDE() {
   const [generando, setGenerando] = useState(false);
@@ -99,7 +120,63 @@ export function useRIDE() {
     }
   }, [buildDatos]);
 
-  return { descargar, abrir, generando };
+  /** Descarga el XML autorizado (o firmado) del comprobante como archivo .xml */
+  const descargarXML = useCallback((comp: Comprobante) => {
+    const xml = getXmlComprobante(comp);
+    if (!xml) { toast.error('Este comprobante aún no tiene XML disponible'); return; }
+    const blob = new Blob([xml], { type: 'application/xml' });
+    const url  = URL.createObjectURL(blob);
+    const a    = document.createElement('a');
+    a.href = url; a.download = `${comp.claveAcceso}.xml`; a.click();
+    URL.revokeObjectURL(url);
+    toast.success('XML descargado');
+  }, []);
+
+  /** Envía el comprobante (XML + RIDE) por correo al destinatario indicado. */
+  const enviarPorCorreo = useCallback(async (comp: Comprobante, email: string) => {
+    setGenerando(true);
+    try {
+      const smtp = await getConfigEmail();
+      if (!smtp?.email || !smtp?.password) {
+        toast.error('Configura tu correo en Configuración → Correo antes de enviar');
+        return;
+      }
+      const datos = await buildDatos(comp);
+      if (!datos) return;
+      const pdfBase64 = uint8ToBase64(generarRIDE(datos));
+      const xml       = getXmlComprobante(comp);
+      const serie     = `${comp.serie}-${comp.secuencial}`;
+      const tipoLabel = comp.tipo === 'factura' ? 'Factura' : 'Comprobante';
+
+      const resp = await fetch('/api/email/comprobante', {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          smtp,
+          to:          email,
+          subject:     `${tipoLabel} electrónica ${serie}`,
+          html: `<p>Estimado/a ${comp.clienteNombre},</p>
+                 <p>Adjuntamos su ${tipoLabel.toLowerCase()} electrónica <b>${serie}</b>${
+                   comp.numeroAutorizacion ? ` autorizada por el SRI (Aut. ${comp.numeroAutorizacion})` : ''
+                 }.</p>
+                 <p>Se incluyen el archivo XML y la representación impresa (RIDE) en PDF.</p>`,
+          xmlContent:  xml,
+          xmlFilename: `${comp.claveAcceso}.xml`,
+          pdfBase64,
+          pdfFilename: `RIDE-${serie}.pdf`,
+        }),
+      });
+      const data = await resp.json();
+      if (!resp.ok) throw new Error(data.error ?? 'No se pudo enviar el correo');
+      toast.success(`Comprobante enviado a ${email}`);
+    } catch (e: any) {
+      toast.error(`Error al enviar correo: ${e.message ?? 'desconocido'}`);
+    } finally {
+      setGenerando(false);
+    }
+  }, [buildDatos]);
+
+  return { descargar, abrir, descargarXML, enviarPorCorreo, generando };
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────

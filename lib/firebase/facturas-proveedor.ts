@@ -1,11 +1,36 @@
 import {
   collection, doc, addDoc, updateDoc, onSnapshot,
-  query, orderBy, serverTimestamp, runTransaction, getDoc,
+  query, orderBy, where, getDocs, serverTimestamp, runTransaction, getDoc,
 } from 'firebase/firestore';
 import { db } from '@/lib/firebase/config';
 import { FacturaProveedor, PagoFactura, EstadoFacturaProveedor } from '@/types';
 
 const COL = 'facturas_proveedor';
+
+/**
+ * Comprueba si una factura de proveedor ya existe. Se considera duplicada si
+ * coincide la clave de acceso (única) o la combinación proveedor + número
+ * (establecimiento-puntoEmisión-secuencial van dentro de numeroFactura).
+ */
+export async function existeFacturaProveedor(
+  proveedorRuc: string,
+  numeroFactura: string,
+  claveAcceso?: string
+): Promise<boolean> {
+  if (claveAcceso) {
+    const s1 = await getDocs(query(collection(db, COL), where('claveAcceso', '==', claveAcceso)));
+    if (!s1.empty) return true;
+  }
+  if (proveedorRuc && numeroFactura) {
+    const s2 = await getDocs(query(
+      collection(db, COL),
+      where('proveedorRuc', '==', proveedorRuc),
+      where('numeroFactura', '==', numeroFactura),
+    ));
+    if (!s2.empty) return true;
+  }
+  return false;
+}
 
 export function subscribeToFacturasProveedor(
   callback: (data: FacturaProveedor[]) => void
@@ -19,6 +44,13 @@ export function subscribeToFacturasProveedor(
 export async function createFacturaProveedor(
   data: Omit<FacturaProveedor, 'id'>
 ): Promise<string> {
+  // Validación anti-duplicados: mismo proveedor + número, o misma clave de acceso
+  const dup = await existeFacturaProveedor(data.proveedorRuc, data.numeroFactura, data.claveAcceso);
+  if (dup) {
+    throw new Error(
+      `La factura ${data.numeroFactura} de ${data.proveedorNombre || data.proveedorRuc} ya está registrada.`
+    );
+  }
   const ref = await addDoc(collection(db, COL), {
     ...data,
     createdAt: serverTimestamp(),

@@ -20,12 +20,14 @@ import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from '@/components/ui/table';
 
-import { CuentaBancaria, MovimientoBancario } from '@/types';
+import { CuentaBancaria, MovimientoBancario, AsientoContable, CuentaContable } from '@/types';
 import {
   subscribeToCuentasBancarias, createCuentaBancaria,
   subscribeToMovimientosBancarios, importarMovimientosBancarios,
   conciliarMovimiento, ignorarMovimiento, revertirConciliacion,
 } from '@/lib/firebase/cuentas-bancarias';
+import { subscribeToAsientos } from '@/lib/firebase/asientos';
+import { subscribeToCuentas }  from '@/lib/firebase/plan-cuentas';
 import { useAuth } from '@/context/AuthContext';
 
 const currency = (v: number) => `$${v.toFixed(2)}`;
@@ -37,20 +39,31 @@ export default function ConciliacionBancariaPage() {
   const [movs,      setMovs]      = useState<MovimientoBancario[]>([]);
   const [loading,   setLoading]   = useState(false);
 
+  // Plan de cuentas + asientos (para conciliar contra el libro contable)
+  const [planCuentas, setPlanCuentas] = useState<CuentaContable[]>([]);
+  const [asientos,    setAsientos]    = useState<AsientoContable[]>([]);
+
   // Dialog nueva cuenta
   const [dlgCuenta,  setDlgCuenta]  = useState(false);
   const [formCuenta, setFormCuenta] = useState({
     banco: '', tipoCuenta: 'corriente' as 'corriente' | 'ahorros',
     numeroCuenta: '', titular: '', saldoInicial: '', moneda: 'USD',
+    cuentaContableCodigo: '',
   });
+
+  // Dialog de conciliación (elegir asiento)
+  const [dlgConciliar, setDlgConciliar] = useState(false);
+  const [movConciliar, setMovConciliar] = useState<MovimientoBancario | null>(null);
 
   // Importar movimientos CSV
   const fileRef  = useRef<HTMLInputElement>(null);
   const [importing, setImporting] = useState(false);
 
   useEffect(() => {
-    const unsub = subscribeToCuentasBancarias(setCuentas);
-    return unsub;
+    const u1 = subscribeToCuentasBancarias(setCuentas);
+    const u2 = subscribeToCuentas(setPlanCuentas);
+    const u3 = subscribeToAsientos(setAsientos, 100000);
+    return () => { u1(); u2(); u3(); };
   }, []);
 
   useEffect(() => {
@@ -86,14 +99,21 @@ export default function ConciliacionBancariaPage() {
       return;
     }
     try {
+      const ctaContable = planCuentas.find(c => c.codigo === formCuenta.cuentaContableCodigo);
       await createCuentaBancaria({
-        ...formCuenta,
+        banco:        formCuenta.banco,
+        tipoCuenta:   formCuenta.tipoCuenta,
+        numeroCuenta: formCuenta.numeroCuenta,
+        titular:      formCuenta.titular,
+        moneda:       formCuenta.moneda,
         saldoInicial: parseFloat(formCuenta.saldoInicial) || 0,
+        cuentaContableCodigo: ctaContable?.codigo,
+        cuentaContableNombre: ctaContable?.nombre,
         activa: true,
       });
       toast.success('Cuenta bancaria creada');
       setDlgCuenta(false);
-      setFormCuenta({ banco: '', tipoCuenta: 'corriente', numeroCuenta: '', titular: '', saldoInicial: '', moneda: 'USD' });
+      setFormCuenta({ banco: '', tipoCuenta: 'corriente', numeroCuenta: '', titular: '', saldoInicial: '', moneda: 'USD', cuentaContableCodigo: '' });
     } catch (e: any) {
       toast.error(e.message ?? 'Error al crear cuenta');
     }
@@ -143,11 +163,45 @@ export default function ConciliacionBancariaPage() {
     }
   };
 
-  const handleConciliar = async (movId: string) => {
+  // Asientos candidatos para un movimiento bancario: los que tocan la cuenta
+  // contable de la cuenta bancaria, en el lado correcto (crédito→debe, débito→haber).
+  const asientosCandidatos = useMemo(() => {
+    if (!movConciliar || !cuentaSelObj?.cuentaContableCodigo) return [];
+    const code = cuentaSelObj.cuentaContableCodigo;
+    const yaConciliados = new Set(movs.filter(m => m.asientoId).map(m => m.asientoId));
+    return asientos
+      .map(a => {
+        const linea = a.lineas.find(l => l.cuentaCodigo === code);
+        if (!linea) return null;
+        const montoLinea = movConciliar.tipo === 'credito' ? linea.debe : linea.haber;
+        if (montoLinea <= 0) return null;
+        const dif = Math.abs(montoLinea - movConciliar.monto);
+        return { asiento: a, montoLinea, dif, yaUsado: yaConciliados.has(a.id) };
+      })
+      .filter((x): x is { asiento: AsientoContable; montoLinea: number; dif: number; yaUsado: boolean } => !!x && !x.yaUsado)
+      .sort((a, b) => a.dif - b.dif)
+      .slice(0, 30);
+  }, [movConciliar, cuentaSelObj, asientos, movs]);
+
+  const numeroAsiento = (id?: string | null) =>
+    id ? (asientos.find(a => a.id === id)?.numero ?? id) : '—';
+
+  const abrirConciliar = (mov: MovimientoBancario) => {
+    if (!cuentaSelObj?.cuentaContableCodigo) {
+      toast.error('Primero vincula esta cuenta bancaria a una cuenta contable (editando la cuenta).');
+      return;
+    }
+    setMovConciliar(mov);
+    setDlgConciliar(true);
+  };
+
+  const handleConciliar = async (asientoId: string) => {
+    if (!movConciliar) return;
     try {
-      // En producción, se abriría un diálogo para seleccionar el asiento
-      await conciliarMovimiento(movId, 'manual');
-      toast.success('Movimiento conciliado');
+      await conciliarMovimiento(movConciliar.id, asientoId);
+      toast.success('Movimiento conciliado con el asiento contable');
+      setDlgConciliar(false);
+      setMovConciliar(null);
     } catch (e: any) {
       toast.error(e.message ?? 'Error');
     }
@@ -313,7 +367,7 @@ export default function ConciliacionBancariaPage() {
                           {tab === 'pendientes' && (
                             <div className="flex justify-center gap-1">
                               <Button size="sm" variant="outline" className="h-7 text-xs"
-                                onClick={() => handleConciliar(m.id)}>
+                                onClick={() => abrirConciliar(m)}>
                                 <Check className="h-3 w-3 mr-1" /> Conciliar
                               </Button>
                               <Button size="sm" variant="ghost" className="h-7 text-xs text-slate-400"
@@ -322,7 +376,18 @@ export default function ConciliacionBancariaPage() {
                               </Button>
                             </div>
                           )}
-                          {(tab === 'conciliados' || tab === 'ignorados') && (
+                          {tab === 'conciliados' && (
+                            <div className="flex items-center justify-center gap-2">
+                              <span className="font-mono text-[10px] text-slate-500" title="Asiento contable">
+                                {numeroAsiento(m.asientoId)}
+                              </span>
+                              <Button size="sm" variant="ghost" className="h-7 text-xs text-slate-400"
+                                onClick={() => handleRevertir(m.id)}>
+                                Revertir
+                              </Button>
+                            </div>
+                          )}
+                          {tab === 'ignorados' && (
                             <Button size="sm" variant="ghost" className="h-7 text-xs text-slate-400"
                               onClick={() => handleRevertir(m.id)}>
                               Revertir
@@ -381,11 +446,83 @@ export default function ConciliacionBancariaPage() {
                 onChange={e => setFormCuenta(f => ({ ...f, saldoInicial: e.target.value }))}
                 className="mt-1" />
             </div>
+            <div className="col-span-2">
+              <Label>Cuenta contable vinculada *</Label>
+              <Select value={formCuenta.cuentaContableCodigo}
+                onValueChange={v => setFormCuenta(f => ({ ...f, cuentaContableCodigo: v }))}>
+                <SelectTrigger className="mt-1">
+                  <SelectValue placeholder="Selecciona la cuenta de bancos del plan…" />
+                </SelectTrigger>
+                <SelectContent>
+                  {planCuentas
+                    .filter(c => c.aceptaMovimientos && c.tipo === 'activo')
+                    .map(c => (
+                      <SelectItem key={c.id} value={c.codigo}>
+                        <span className="font-mono text-xs">{c.codigo}</span> · {c.nombre}
+                      </SelectItem>
+                    ))}
+                </SelectContent>
+              </Select>
+              <p className="text-xs text-slate-400 mt-1">
+                Permite conciliar los movimientos del extracto contra los asientos que afectan esta cuenta.
+              </p>
+            </div>
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setDlgCuenta(false)}>Cancelar</Button>
             <Button onClick={handleCrearCuenta}>Crear cuenta</Button>
           </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Dialog conciliar: elegir el asiento contable que corresponde al movimiento */}
+      <Dialog open={dlgConciliar} onOpenChange={setDlgConciliar}>
+        <DialogContent className="max-w-2xl max-h-[85vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>Conciliar movimiento</DialogTitle>
+          </DialogHeader>
+          {movConciliar && (
+            <div className="space-y-3">
+              <div className="bg-slate-50 border rounded-lg p-3 text-sm flex flex-wrap gap-4">
+                <span><strong>Fecha:</strong> {format((movConciliar.fecha as any)?.toDate?.() ?? new Date(movConciliar.fecha), 'dd/MM/yyyy')}</span>
+                <span><strong>Detalle:</strong> {movConciliar.descripcion}</span>
+                <span className={movConciliar.tipo === 'credito' ? 'text-green-700' : 'text-red-600'}>
+                  <strong>{movConciliar.tipo === 'credito' ? '+ Crédito' : '− Débito'}:</strong> {currency(movConciliar.monto)}
+                </span>
+              </div>
+              <p className="text-xs text-slate-500">
+                Asientos que afectan la cuenta <span className="font-mono">{cuentaSelObj?.cuentaContableCodigo}</span>.
+                Ordenados por coincidencia de monto.
+              </p>
+              {asientosCandidatos.length === 0 ? (
+                <div className="text-center py-8 text-slate-400 text-sm">
+                  No hay asientos sin conciliar que afecten esta cuenta. Registra primero el movimiento
+                  (pago, cobro, comisión bancaria…) en Contabilidad → Asientos.
+                </div>
+              ) : (
+                <div className="border rounded-lg divide-y max-h-80 overflow-y-auto">
+                  {asientosCandidatos.map(({ asiento, montoLinea, dif }) => (
+                    <button key={asiento.id}
+                      onClick={() => handleConciliar(asiento.id)}
+                      className="w-full text-left px-3 py-2.5 hover:bg-emerald-50 flex items-center justify-between gap-3">
+                      <div className="min-w-0">
+                        <p className="text-sm font-medium truncate">{asiento.concepto}</p>
+                        <p className="text-xs text-slate-400">
+                          {asiento.numero} · {format((asiento.fecha as any)?.toDate?.() ?? new Date(asiento.fecha), 'dd/MM/yyyy')}
+                        </p>
+                      </div>
+                      <div className="text-right shrink-0">
+                        <p className="text-sm font-semibold">{currency(montoLinea)}</p>
+                        {dif < 0.01
+                          ? <span className="text-[10px] text-green-600 font-medium">monto exacto</span>
+                          : <span className="text-[10px] text-amber-600">dif {currency(dif)}</span>}
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
         </DialogContent>
       </Dialog>
     </div>

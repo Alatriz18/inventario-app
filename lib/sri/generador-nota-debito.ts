@@ -65,30 +65,33 @@ export function generarXMLNotaDebito(d: DatosNotaDebito): string {
   inf.ele('tipoIdentificacionComprador').txt(d.tipoIdComprador);
   inf.ele('razonSocialComprador').txt(d.razonSocialComprador);
   inf.ele('identificacionComprador').txt(d.identificacion);
-  inf.ele('obligadoContabilidad').txt(d.obligadoContabilidad ?? 'NO');
   if (d.contribuyenteEspecial) inf.ele('contribuyenteEspecial').txt(d.contribuyenteEspecial);
+  inf.ele('obligadoContabilidad').txt(d.obligadoContabilidad ?? 'NO');
   inf.ele('codDocModificado').txt(d.codDocModificado);
   inf.ele('numDocModificado').txt(d.numDocModificado);
   inf.ele('fechaEmisionDocSustento').txt(fechaDocStr);
+  inf.ele('totalSinImpuestos').txt((d.subtotal15 + d.subtotal0).toFixed(2));
 
-  const totImp = inf.ele('totalConImpuestos');
-  const totalSinImp = d.subtotal15 + d.subtotal0;
+  // Impuestos (estructura propia de la Nota de Débito: <impuestos><impuesto>)
+  const impuestos = inf.ele('impuestos');
   if (d.subtotal0 > 0) {
-    const ti = totImp.ele('totalImpuesto');
-    ti.ele('codigo').txt('2');
-    ti.ele('codigoPorcentaje').txt('0');
-    ti.ele('baseImponible').txt(d.subtotal0.toFixed(2));
-    ti.ele('valor').txt('0.00');
+    const imp = impuestos.ele('impuesto');
+    imp.ele('codigo').txt('2');
+    imp.ele('codigoPorcentaje').txt('0');
+    imp.ele('tarifa').txt('0');
+    imp.ele('baseImponible').txt(d.subtotal0.toFixed(2));
+    imp.ele('valor').txt('0.00');
   }
   if (d.subtotal15 > 0) {
-    const ti = totImp.ele('totalImpuesto');
-    ti.ele('codigo').txt('2');
-    ti.ele('codigoPorcentaje').txt('4');
-    ti.ele('baseImponible').txt(d.subtotal15.toFixed(2));
-    ti.ele('valor').txt(d.iva.toFixed(2));
+    const imp = impuestos.ele('impuesto');
+    imp.ele('codigo').txt('2');
+    imp.ele('codigoPorcentaje').txt('4');
+    imp.ele('tarifa').txt('15');
+    imp.ele('baseImponible').txt(d.subtotal15.toFixed(2));
+    imp.ele('valor').txt(d.iva.toFixed(2));
   }
+
   inf.ele('valorTotal').txt(d.total.toFixed(2));
-  inf.ele('moneda').txt('DOLAR');
 
   const razones = doc.ele('motivos');
   for (const r of d.razones) {

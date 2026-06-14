@@ -94,6 +94,8 @@ export const CONFIG_CONTABLE_DEFAULT: Omit<ConfigContable,'id'> & Record<string,
   cuentaCxPProveedores:    '2.1.01',
   cuentaRetFuenteClientes: '1.1.06',
   cuentaRetIVAClientes:    '1.1.07',
+  cuentaRetFuentePorPagar: '2.1.03',
+  cuentaRetIVAPorPagar:    '2.1.04',
 };
 
 export const RETENCIONES_IR_INICIAL = [

@@ -24,7 +24,7 @@ export default function BalanceGeneralPage() {
   const [dateTo,   setDateTo]   = useState(format(new Date(), 'yyyy-MM-dd'));
 
   useEffect(() => {
-    const u1 = subscribeToAsientos(d => { setAsientos(d); setLoading(false); });
+    const u1 = subscribeToAsientos(d => { setAsientos(d); setLoading(false); }, 100000);
     const u2 = subscribeToCuentas(setCuentas);
     return () => { u1(); u2(); };
   }, []);

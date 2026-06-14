@@ -7,7 +7,7 @@ import { z } from 'zod';
 import { toast } from 'sonner';
 import {
   Building2, Receipt, Shield, ChevronRight,
-  CheckCircle, AlertCircle, Info,
+  CheckCircle, AlertCircle, Info, Mail,
 } from 'lucide-react';
 
 import PageHeader   from '@/components/shared/PageHeader';
@@ -24,8 +24,10 @@ import {
   getConfigEmpresa, saveConfigEmpresa,
   getDefaultsRegimen, REGIMEN_LABELS, REGIMEN_DESCRIPCION,
 } from '@/lib/firebase/config-empresa';
+import { getConfigEmail, saveConfigEmail } from '@/lib/firebase/config-email';
 import {
   RegimenEmpresa, ComprobantesHabilitados, ReglasTributarias,
+  ConfigEmail, ProveedorEmail,
 } from '@/types';
 
 // ── Schema ────────────────────────────────────────────────────────────────
@@ -289,7 +291,101 @@ export default function ConfiguracionPage() {
           {saving ? 'Guardando...' : 'Guardar configuración'}
         </Button>
 
+        {/* ── Correo (SMTP) ───────────────────────────────────────────── */}
+        <EmailConfigCard />
+
       </div>
+    </div>
+  );
+}
+
+// ── Configuración de correo (SMTP) ──────────────────────────────────────────
+
+function EmailConfigCard() {
+  const [cfg, setCfg] = useState<ConfigEmail>({
+    proveedor: 'gmail', email: '', password: '', fromName: '', host: '', port: 587,
+  });
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    getConfigEmail().then(c => { if (c) setCfg({ ...c, password: c.password ?? '' }); });
+  }, []);
+
+  const guardar = async () => {
+    if (!cfg.email || !cfg.password) { toast.error('Ingresa correo y contraseña de aplicación'); return; }
+    if (cfg.proveedor === 'otro' && (!cfg.host || !cfg.port)) {
+      toast.error('Para "Otro" indica host y puerto SMTP'); return;
+    }
+    setSaving(true);
+    try { await saveConfigEmail(cfg); toast.success('Configuración de correo guardada'); }
+    catch { toast.error('Error al guardar'); }
+    finally { setSaving(false); }
+  };
+
+  return (
+    <div className="bg-white rounded-xl border p-6 space-y-4">
+      <div className="flex items-center gap-2 mb-1">
+        <Mail className="h-4 w-4 text-slate-400" />
+        <h3 className="font-semibold text-slate-700">Correo para enviar comprobantes (SMTP)</h3>
+      </div>
+
+      <div className="flex gap-2 p-3 rounded-lg bg-amber-50 border border-amber-200 text-xs text-amber-800">
+        <Info className="h-4 w-4 shrink-0 mt-0.5" />
+        <span>
+          Usa una <b>contraseña de aplicación</b>, no la contraseña normal de tu cuenta.
+          En Gmail: activa la verificación en 2 pasos y genera una en{' '}
+          <span className="font-mono">myaccount.google.com → Seguridad → Contraseñas de aplicaciones</span>.
+          En Outlook: <span className="font-mono">cuenta.microsoft.com → Seguridad → Opciones avanzadas</span>.
+        </span>
+      </div>
+
+      <div className="grid grid-cols-2 gap-4">
+        <div className="space-y-1.5">
+          <Label>Proveedor</Label>
+          <Select value={cfg.proveedor} onValueChange={v => setCfg(c => ({ ...c, proveedor: v as ProveedorEmail }))}>
+            <SelectTrigger><SelectValue /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="gmail">Gmail</SelectItem>
+              <SelectItem value="outlook">Outlook / Office 365</SelectItem>
+              <SelectItem value="otro">Otro (SMTP personalizado)</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+        <div className="space-y-1.5">
+          <Label>Nombre del remitente</Label>
+          <Input value={cfg.fromName ?? ''} placeholder="Mi Empresa S.A."
+            onChange={e => setCfg(c => ({ ...c, fromName: e.target.value }))} />
+        </div>
+        <div className="space-y-1.5">
+          <Label>Correo *</Label>
+          <Input type="email" value={cfg.email} placeholder="ventas@gmail.com"
+            onChange={e => setCfg(c => ({ ...c, email: e.target.value }))} />
+        </div>
+        <div className="space-y-1.5">
+          <Label>Contraseña de aplicación *</Label>
+          <Input type="password" value={cfg.password} placeholder="xxxx xxxx xxxx xxxx"
+            onChange={e => setCfg(c => ({ ...c, password: e.target.value }))} />
+        </div>
+
+        {cfg.proveedor === 'otro' && (
+          <>
+            <div className="space-y-1.5">
+              <Label>Host SMTP</Label>
+              <Input value={cfg.host ?? ''} placeholder="smtp.miservidor.com"
+                onChange={e => setCfg(c => ({ ...c, host: e.target.value }))} />
+            </div>
+            <div className="space-y-1.5">
+              <Label>Puerto</Label>
+              <Input type="number" value={cfg.port ?? 587} placeholder="587"
+                onChange={e => setCfg(c => ({ ...c, port: Number(e.target.value) }))} />
+            </div>
+          </>
+        )}
+      </div>
+
+      <Button onClick={guardar} disabled={saving} variant="outline" className="w-full">
+        {saving ? 'Guardando...' : 'Guardar correo'}
+      </Button>
     </div>
   );
 }

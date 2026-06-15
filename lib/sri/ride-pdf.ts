@@ -279,7 +279,7 @@ export function generarRIDE(datos: DatosRIDE): Uint8Array {
   const autorizado = !!datos.numeroAutorizacion && !esRecibo;
 
   // ── CABECERA: emisor (izq) + documento (der) ─────────────────────────────
-  const headH = 46;
+  const headH = 56;
   const leftW = COLW * 0.52;
   const rightX = MARGIN + leftW + 2;
   const rightW = COLW - leftW - 2;
@@ -322,17 +322,17 @@ export function generarRIDE(datos: DatosRIDE): Uint8Array {
     ly += 4;
   }
 
-  // Documento (derecha)
+  // Documento (derecha) — espaciado compacto para que todo quepa en headH
   let ry = y + 5;
-  label(doc, `R.U.C.: ${datos.ruc}`, rightX + 3, ry, 8); ry += 6;
+  label(doc, `R.U.C.: ${datos.ruc}`, rightX + 3, ry, 8); ry += 5.5;
   doc.setFont(FONT, 'bold'); doc.setFontSize(12);
   doc.text(TITULO[datos.tipoDocumento], rightX + 3, ry); ry += 6;
   doc.setFontSize(8);
   label(doc, 'No.', rightX + 3, ry);
-  value(doc, serie, rightX + 12, ry, 8); ry += 6;
+  value(doc, serie, rightX + 12, ry, 8); ry += 5.5;
 
   doc.setFontSize(6.5);
-  label(doc, 'NÚMERO DE AUTORIZACIÓN', rightX + 3, ry); ry += 3.5;
+  label(doc, 'NÚMERO DE AUTORIZACIÓN', rightX + 3, ry); ry += 3;
   doc.setFont(FONT, 'normal'); doc.setFontSize(6);
   const auth = autorizado ? (datos.numeroAutorizacion as string)
              : esRecibo ? 'SIN VALIDEZ TRIBUTARIA' : 'PENDIENTE DE AUTORIZACIÓN';
@@ -340,22 +340,23 @@ export function generarRIDE(datos: DatosRIDE): Uint8Array {
   ry += 1;
 
   doc.setFontSize(6.5);
-  label(doc, 'FECHA Y HORA DE AUTORIZACIÓN', rightX + 3, ry); ry += 3.5;
-  value(doc, datos.fechaAutorizacion ?? '—', rightX + 3, ry, 6); ry += 4.5;
+  label(doc, 'FECHA Y HORA DE AUTORIZACIÓN', rightX + 3, ry); ry += 3;
+  value(doc, datos.fechaAutorizacion ?? '—', rightX + 3, ry, 6); ry += 4;
 
   label(doc, 'AMBIENTE:', rightX + 3, ry);
-  value(doc, datos.ambiente === '2' ? 'PRODUCCIÓN' : 'PRUEBAS', rightX + 22, ry, 6.5);
+  value(doc, datos.ambiente === '2' ? 'PRODUCCIÓN' : 'PRUEBAS', rightX + 20, ry, 6.5);
   label(doc, 'EMISIÓN:', rightX + rightW / 2 + 2, ry);
   value(doc, 'NORMAL', rightX + rightW / 2 + 18, ry, 6.5);
-  ry += 5;
+  ry += 4.5;
 
   if (datos.claveAcceso) {
     label(doc, 'CLAVE DE ACCESO', rightX + 3, ry); ry += 2;
     // Code128 escaneable solo cuando el comprobante ya está autorizado por el SRI
-    if (autorizado) drawCode128(doc, datos.claveAcceso, rightX + 3, ry, rightW - 6, 7);
-    else            drawBarcodePlaceholder(doc, datos.claveAcceso, rightX + 3, ry, rightW - 6, 6);
-    ry += 9;
-    doc.setFont(FONT, 'normal'); doc.setFontSize(6);
+    const bcW = rightW - 8;
+    if (autorizado) drawCode128(doc, datos.claveAcceso, rightX + 4, ry, bcW, 8);
+    else            drawBarcodePlaceholder(doc, datos.claveAcceso, rightX + 4, ry, bcW, 7);
+    ry += 9.5;
+    doc.setFont(FONT, 'normal'); doc.setFontSize(5.5);
     doc.text(datos.claveAcceso, rightX + rightW / 2, ry, { align: 'center' });
   }
 

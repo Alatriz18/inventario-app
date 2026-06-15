@@ -6,7 +6,6 @@ import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
 import { toast } from 'sonner';
 import { Plus, Pencil, Trash2, Package, ImageIcon, X } from 'lucide-react';
-import Image from 'next/image';
 
 import QuickCreateCategoria from '@/components/shared/QuickCreateCategoria';
 import PageHeader from '@/components/shared/PageHeader';
@@ -33,6 +32,7 @@ import {
 import { Producto, Categoria } from '@/types';
 import { subscribeToProductos, createProducto, updateProducto, deleteProducto } from '@/lib/firebase/productos';
 import { subscribeToCategorias } from '@/lib/firebase/categorias';
+import { comprimirImagenBase64 } from '@/lib/utils/imagen';
 
 const schema = z.object({
   sku:          z.string().min(1, 'El SKU es requerido'),
@@ -67,9 +67,8 @@ export default function ProductosPage() {
   const [editing,      setEditing]      = useState<Producto | null>(null);
   const [deletingId,   setDeletingId]   = useState<string | null>(null);
   const [saving,       setSaving]       = useState(false);
-  const [imageFile,    setImageFile]    = useState<File | null>(null);
-  const [imagePreview, setImagePreview] = useState<string | null>(null);
-  const [uploadPct,    setUploadPct]    = useState(0);
+  const [imagePreview, setImagePreview] = useState<string | null>(null); // base64 (data URL)
+  const [procesandoImg,setProcesandoImg]= useState(false);
   const [search,       setSearch]       = useState('');
   const [quickCat,     setQuickCat]     = useState(false); // ← dentro del componente
   const fileRef = useRef<HTMLInputElement>(null);
@@ -88,7 +87,6 @@ export default function ProductosPage() {
 
   const openCreate = () => {
     setEditing(null);
-    setImageFile(null);
     setImagePreview(null);
     reset({ sku: '', nombre: '', descripcion: '', categoriaId: '',
       precioCompra: 0, precioVenta: 0, stockActual: 0, stockMinimo: 5, activo: true });
@@ -97,7 +95,6 @@ export default function ProductosPage() {
 
   const openEdit = (p: Producto) => {
     setEditing(p);
-    setImageFile(null);
     setImagePreview(p.imagen || null);
     reset({
       sku: p.sku, nombre: p.nombre, descripcion: p.descripcion ?? '',
@@ -108,28 +105,36 @@ export default function ProductosPage() {
     setDialogOpen(true);
   };
 
-  const handleImageChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleImageChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
-    if (file.size > 2 * 1024 * 1024) { toast.error('La imagen no puede superar 2MB'); return; }
-    setImageFile(file);
-    setImagePreview(URL.createObjectURL(file));
+    if (file.size > 5 * 1024 * 1024) { toast.error('La imagen no puede superar 5MB'); return; }
+    setProcesandoImg(true);
+    try {
+      // Se comprime a una miniatura base64 (~400px) para guardarla en Firestore
+      const base64 = await comprimirImagenBase64(file, 400, 0.7);
+      setImagePreview(base64);
+    } catch {
+      toast.error('No se pudo procesar la imagen');
+    } finally {
+      setProcesandoImg(false);
+      if (fileRef.current) fileRef.current.value = '';
+    }
   };
 
   const onSubmit = async (data: ProductoForm) => {
     setSaving(true);
-    setUploadPct(0);
     try {
       const categoria = categorias.find((c) => c.id === data.categoriaId);
       const payload: Omit<Producto, 'id'> = {
         ...data, categoriaNombre: categoria?.nombre ?? '',
-        imagen: editing?.imagen ?? '', createdAt: editing?.createdAt ?? new Date(), updatedAt: new Date(),
+        imagen: imagePreview ?? '', createdAt: editing?.createdAt ?? new Date(), updatedAt: new Date(),
       };
       if (editing) {
-        await updateProducto(editing.id, payload, imageFile ?? undefined);
+        await updateProducto(editing.id, payload);
         toast.success('Producto actualizado');
       } else {
-        await createProducto(payload, imageFile ?? undefined);
+        await createProducto(payload);
         toast.success('Producto creado');
       }
       setDialogOpen(false);
@@ -138,14 +143,12 @@ export default function ProductosPage() {
       toast.error('Error al guardar el producto');
     } finally {
       setSaving(false);
-      setUploadPct(0);
     }
   };
 
   const confirmDelete = async () => {
-    const prod = productos.find((p) => p.id === deletingId);
     try {
-      await deleteProducto(deletingId!, prod?.imagen);
+      await deleteProducto(deletingId!);
       toast.success('Producto eliminado');
     } catch { toast.error('Error al eliminar'); }
     finally { setDeletingId(null); }
@@ -202,8 +205,9 @@ export default function ProductosPage() {
               <TableRow key={p.id}>
                 <TableCell>
                   {p.imagen ? (
-                    <div className="relative h-10 w-10 rounded-lg overflow-hidden border">
-                      <Image src={p.imagen} alt={p.nombre} fill className="object-cover" />
+                    <div className="h-10 w-10 rounded-lg overflow-hidden border">
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img src={p.imagen} alt={p.nombre} className="h-full w-full object-cover" />
                     </div>
                   ) : (
                     <div className="h-10 w-10 rounded-lg bg-slate-100 flex items-center justify-center">
@@ -265,25 +269,27 @@ export default function ProductosPage() {
                 <div className="h-24 w-24 rounded-xl border-2 border-dashed border-slate-200 flex items-center justify-center overflow-hidden cursor-pointer hover:border-slate-400 transition-colors relative"
                   onClick={() => fileRef.current?.click()}>
                   {imagePreview ? (
-                    <Image src={imagePreview} alt="preview" fill className="object-cover rounded-xl" />
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img src={imagePreview} alt="preview" className="absolute inset-0 h-full w-full object-cover rounded-xl" />
                   ) : (
                     <div className="flex flex-col items-center gap-1 text-slate-300">
-                      <ImageIcon className="h-8 w-8" /><span className="text-xs">Subir</span>
+                      <ImageIcon className="h-8 w-8" /><span className="text-xs">{procesandoImg ? '...' : 'Subir'}</span>
                     </div>
                   )}
                 </div>
                 <div className="flex flex-col gap-2">
-                  <Button type="button" variant="outline" size="sm" onClick={() => fileRef.current?.click()}>
+                  <Button type="button" variant="outline" size="sm" disabled={procesandoImg}
+                    onClick={() => fileRef.current?.click()}>
                     <ImageIcon className="mr-2 h-4 w-4" />
-                    {imagePreview ? 'Cambiar imagen' : 'Seleccionar imagen'}
+                    {procesandoImg ? 'Procesando…' : imagePreview ? 'Cambiar imagen' : 'Seleccionar imagen'}
                   </Button>
                   {imagePreview && (
                     <Button type="button" variant="ghost" size="sm" className="text-red-500"
-                      onClick={() => { setImageFile(null); setImagePreview(null); }}>
+                      onClick={() => setImagePreview(null)}>
                       <X className="mr-2 h-4 w-4" /> Quitar imagen
                     </Button>
                   )}
-                  <p className="text-xs text-slate-400">JPG, PNG o WEBP. Máx 2MB.</p>
+                  <p className="text-xs text-slate-400">JPG, PNG o WEBP. Se guarda optimizada (~400px).</p>
                 </div>
                 <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={handleImageChange} />
               </div>

@@ -12,7 +12,7 @@ import {
   ChevronRight, PackageCheck, Warehouse, BookOpen, Scale, FileSpreadsheet,
   Calculator, TrendingUp, BookMarked, Landmark, FileMinus, FilePlus,
   FileSearch, Coins, ReceiptText, X, Building2, Layers, ClipboardCheck,
-  DollarSign, ListChecks, Bug,
+  DollarSign, ListChecks, Bug, Wallet,
 } from 'lucide-react';
 
 interface NavItem {
@@ -62,6 +62,7 @@ const NAV: NavItem[] = [
     label: 'Cuentas por Cobrar', icon: DollarSign,
     children: [
       { label: 'Saldos y Cobros', href: '/cuentas-por-cobrar', icon: DollarSign },
+      { label: 'Cartera (Facturas)', href: '/cuentas-por-cobrar/cartera', icon: Wallet },
     ],
   },
   {

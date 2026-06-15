@@ -12,7 +12,7 @@ import {
   ChevronRight, PackageCheck, Warehouse, BookOpen, Scale, FileSpreadsheet,
   Calculator, TrendingUp, BookMarked, Landmark, FileMinus, FilePlus,
   FileSearch, Coins, ReceiptText, X, Building2, Layers, ClipboardCheck,
-  DollarSign, ListChecks, Bug, Wallet,
+  DollarSign, ListChecks, Wallet,
 } from 'lucide-react';
 
 interface NavItem {
@@ -54,7 +54,6 @@ const NAV: NavItem[] = [
       { label: 'Comprobantes',       href: '/facturacion/comprobantes',   icon: ClipboardList },
       { label: 'Notas de Crédito',   href: '/facturacion/notas-credito',  icon: FileMinus },
       { label: 'Notas de Débito',    href: '/facturacion/notas-debito',   icon: FilePlus },
-      { label: 'Diagnóstico Firma',  href: '/facturacion/debug-firma',    icon: Bug },
       { label: 'Configuración SRI',  href: '/facturacion/configuracion',  icon: Settings, roles: ['admin'] },
     ],
   },

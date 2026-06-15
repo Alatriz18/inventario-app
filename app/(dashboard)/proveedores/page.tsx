@@ -446,7 +446,7 @@ export default function ProveedoresPage() {
               <div className="flex items-center gap-2 mb-1">
                 <BookOpen className="h-4 w-4 text-slate-400" />
                 <p className="text-sm font-semibold text-slate-700">Configuración Contable</p>
-                <span className="text-xs text-slate-400">(opcional — Sprint 7)</span>
+                <span className="text-xs text-slate-400">(opcional)</span>
               </div>
               <div className="grid grid-cols-3 gap-3">
                 <div className="space-y-1.5">

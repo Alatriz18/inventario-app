@@ -406,7 +406,7 @@ export default function ClientesPage() {
               <div className="flex items-center gap-2 mb-2">
                 <BookOpen className="h-4 w-4 text-slate-400" />
                 <p className="text-sm font-semibold text-slate-700">Configuración Contable</p>
-                <span className="text-xs text-slate-400">(opcional — Sprint 7)</span>
+                <span className="text-xs text-slate-400">(opcional)</span>
               </div>
               <div className="space-y-1.5 max-w-xs">
                 <Label className="text-xs">Cuenta CxC de este cliente</Label>

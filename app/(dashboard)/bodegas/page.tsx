@@ -240,7 +240,7 @@ export default function BodegasPage() {
             <div>
               <p className="text-sm font-medium text-slate-700 mb-1">
                 Configuración Contable
-                <span className="ml-2 text-xs font-normal text-slate-400">(opcional — se usa en Sprint 7)</span>
+                <span className="ml-2 text-xs font-normal text-slate-400">(opcional)</span>
               </p>
               <div className="grid grid-cols-2 gap-3">
                 <div className="space-y-1.5">

@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation';
 import { toast } from 'sonner';
 import {
   Search, Trash2, Plus, Minus, ShoppingCart, User,
-  Banknote, CreditCard, ArrowRightLeft, CheckCircle, UserPlus, Clock,
+  Banknote, CreditCard, ArrowRightLeft, CheckCircle, UserPlus, Clock, CalendarDays,
 } from 'lucide-react';
 
 import { Button }    from '@/components/ui/button';
@@ -69,6 +69,7 @@ export default function POSPage() {
   const [searchCliente,  setSearchCliente]  = useState('');
   const [showClientes,   setShowClientes]   = useState(false);
   const [quickCliente,   setQuickCliente]   = useState(false); // ← dentro del componente
+  const [fechaVenta,     setFechaVenta]     = useState(new Date().toISOString().split('T')[0]);
 
   useEffect(() => {
     const u1 = subscribeToProductos(setProductos);
@@ -206,9 +207,10 @@ export default function POSPage() {
         ganancia:       i.ganancia,
       }));
 
+      const fechaSeleccionada = new Date(fechaVenta + 'T12:00:00');
       const ventaId = await createVenta(
         {
-          fecha:                 new Date(),
+          fecha:                 fechaSeleccionada,
           clienteId:             cliente.id,
           clienteNombre:         cliente.nombre,
           clienteIdentificacion: cliente.identificacion,
@@ -239,7 +241,7 @@ export default function POSPage() {
 
       crearAsientoVenta({
         ventaId,
-        fecha:         new Date(),
+        fecha:         fechaSeleccionada,
         clienteNombre: cliente.nombre,
         tieneIVA:      true,
         subtotal:      parseFloat(baseTotal.toFixed(2)),
@@ -491,6 +493,26 @@ export default function POSPage() {
                 </div>
               )}
             </div>
+          )}
+        </div>
+
+        {/* Fecha de venta */}
+        <div className="bg-white rounded-xl border p-4 space-y-2">
+          <div className="flex items-center gap-2">
+            <CalendarDays className="h-4 w-4 text-slate-400" />
+            <Label className="text-sm font-semibold">Fecha de venta</Label>
+          </div>
+          <Input
+            type="date"
+            value={fechaVenta}
+            max={new Date().toISOString().split('T')[0]}
+            onChange={e => setFechaVenta(e.target.value)}
+            className="text-center"
+          />
+          {fechaVenta !== new Date().toISOString().split('T')[0] && (
+            <p className="text-xs text-amber-600 font-medium">
+              Registrando con fecha anterior: {new Date(fechaVenta + 'T12:00:00').toLocaleDateString('es-EC')}
+            </p>
           )}
         </div>
 

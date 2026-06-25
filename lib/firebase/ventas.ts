@@ -109,7 +109,7 @@ export async function createVenta(
         referenciaType: 'venta',
         usuarioId,
         usuarioNombre,
-        fecha:          serverTimestamp(),
+        fecha:          venta.fecha,
       });
     }
 

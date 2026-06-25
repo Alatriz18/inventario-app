@@ -71,7 +71,8 @@ export async function createAsiento(
 ): Promise<string> {
   const snap  = await getDocs(collection(db, COL));
   const num   = String(snap.size + 1).padStart(6, '0');
-  const anio  = new Date().getFullYear();
+  const fechaAsiento = data.fecha instanceof Date ? data.fecha : new Date(data.fecha);
+  const anio  = fechaAsiento.getFullYear();
   const numero = `AJ-${anio}-${num}`;
 
   const ref = await addDoc(collection(db, COL), {

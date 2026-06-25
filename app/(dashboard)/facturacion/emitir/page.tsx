@@ -115,9 +115,12 @@ function EmitirComprobanteInner() {
         ? await incrementarSecuencial('secuencialFactura')
         : await incrementarSecuencial('secuencialNotaVenta');
 
-      // 3. Generar clave de acceso
+      // 3. Usar la fecha de la venta (para facturas de fechas anteriores)
+      const fechaComprobante = (ventaSeleccionada.fecha as any)?.toDate?.()
+        ?? new Date(ventaSeleccionada.fecha);
+
       const claveAcceso = generarClaveAcceso({
-        fecha:           new Date(),
+        fecha:           fechaComprobante,
         tipoComprobante: tipo === 'factura' ? '01' : '18',
         ruc:             config.ruc,
         ambiente:        config.ambiente,
@@ -158,7 +161,7 @@ function EmitirComprobanteInner() {
         xml = generarXMLFactura({
           claveAcceso,
           secuencial,
-          fechaEmision:        new Date(),
+          fechaEmision:        fechaComprobante,
           ambiente:            config.ambiente,
           ruc:                 config.ruc,
           razonSocial:         config.razonSocial,
@@ -183,7 +186,7 @@ function EmitirComprobanteInner() {
         xml = generarXMLNotaVenta({
           claveAcceso,
           secuencial,
-          fechaEmision:          new Date(),
+          fechaEmision:          fechaComprobante,
           ambiente:              config.ambiente,
           ruc:                   config.ruc,
           razonSocial:           config.razonSocial,
@@ -212,7 +215,7 @@ function EmitirComprobanteInner() {
         claveAcceso,
         secuencial:           String(secuencial).padStart(9, '0'),
         serie,
-        fechaEmision:         new Date(),
+        fechaEmision:         fechaComprobante,
         clienteNombre:        ventaSeleccionada.clienteNombre,
         clienteIdentificacion:ventaSeleccionada.clienteIdentificacion,
         subtotal:             base,

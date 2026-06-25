@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react';
 import { format } from 'date-fns';
 import { es } from 'date-fns/locale';
-import { Receipt, XCircle, ChevronDown, TrendingUp } from 'lucide-react';
+import { Receipt, XCircle, ChevronDown, TrendingUp, Printer } from 'lucide-react';
 
 import PageHeader  from '@/components/shared/PageHeader';
 import { Input }   from '@/components/ui/input';
@@ -27,6 +27,8 @@ import {
 
 import { Venta } from '@/types';
 import { subscribeToVentas, anularVenta } from '@/lib/firebase/ventas';
+import { getConfigSRI } from '@/lib/firebase/config-sri';
+import { descargarTicket } from '@/lib/pdf/ticket-venta';
 import { useAuth } from '@/context/AuthContext';
 import { toast } from 'sonner';
 
@@ -192,14 +194,36 @@ export default function HistorialVentasPage() {
                   <TableCell>
                     <div className="flex justify-center gap-1">
                       <Button variant="ghost" size="icon" onClick={() => setDetailId(v.id)}
-                        className="h-8 w-8 text-slate-500 hover:text-blue-600">
+                        className="h-8 w-8 text-slate-500 hover:text-blue-600"
+                        title="Ver detalle">
                         <ChevronDown className="h-4 w-4" />
                       </Button>
                       {v.estado === 'completada' && (
-                        <Button variant="ghost" size="icon" onClick={() => setAnulando(v.id)}
-                          className="h-8 w-8 text-slate-500 hover:text-red-600">
-                          <XCircle className="h-4 w-4" />
-                        </Button>
+                        <>
+                          <Button variant="ghost" size="icon"
+                            className="h-8 w-8 text-slate-500 hover:text-slate-800"
+                            title="Imprimir ticket"
+                            onClick={async () => {
+                              try {
+                                const config = await getConfigSRI();
+                                descargarTicket({
+                                  nombreNegocio: config?.nombreComercial || config?.razonSocial || 'Mi Negocio',
+                                  ruc:           config?.ruc || '',
+                                  direccion:     config?.direccionMatriz || '',
+                                  venta:         v,
+                                });
+                                toast.success('Ticket descargado');
+                              } catch { toast.error('Error al generar ticket'); }
+                            }}
+                          >
+                            <Printer className="h-4 w-4" />
+                          </Button>
+                          <Button variant="ghost" size="icon" onClick={() => setAnulando(v.id)}
+                            className="h-8 w-8 text-slate-500 hover:text-red-600"
+                            title="Anular venta">
+                            <XCircle className="h-4 w-4" />
+                          </Button>
+                        </>
                       )}
                     </div>
                   </TableCell>

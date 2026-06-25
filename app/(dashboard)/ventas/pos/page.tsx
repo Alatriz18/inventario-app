@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation';
 import { toast } from 'sonner';
 import {
   Search, Trash2, Plus, Minus, ShoppingCart, User,
-  Banknote, CreditCard, ArrowRightLeft, CheckCircle, UserPlus, Clock, CalendarDays,
+  Banknote, CreditCard, ArrowRightLeft, CheckCircle, UserPlus, Clock, CalendarDays, Printer,
 } from 'lucide-react';
 
 import { Button }    from '@/components/ui/button';
@@ -24,7 +24,9 @@ import { crearAsientoVenta } from '@/lib/contabilidad/motor-asientos';
 import { Producto, Cliente, MetodoPago, ItemVenta } from '@/types';
 import { subscribeToProductos } from '@/lib/firebase/productos';
 import { subscribeToClientes }  from '@/lib/firebase/clientes';
-import { createVenta }          from '@/lib/firebase/ventas';
+import { createVenta, getVentaById } from '@/lib/firebase/ventas';
+import { getConfigSRI }         from '@/lib/firebase/config-sri';
+import { descargarTicket }      from '@/lib/pdf/ticket-venta';
 import { useAuth }              from '@/context/AuthContext';
 import Link from 'next/link';
 
@@ -638,7 +640,33 @@ export default function POSPage() {
             </div>
 
             <div className="w-full space-y-2">
-              <p className="text-xs text-slate-400 text-center font-medium">¿Emitir comprobante?</p>
+              {/* Ticket para impresora Zebra */}
+              <Button
+                variant="outline"
+                className="w-full h-10 text-sm font-semibold gap-2"
+                onClick={async () => {
+                  if (!successId) return;
+                  try {
+                    const [ventaData, config] = await Promise.all([
+                      getVentaById(successId),
+                      getConfigSRI(),
+                    ]);
+                    if (!ventaData) { toast.error('Venta no encontrada'); return; }
+                    descargarTicket({
+                      nombreNegocio: config?.nombreComercial || config?.razonSocial || 'Mi Negocio',
+                      ruc:           config?.ruc || '',
+                      direccion:     config?.direccionMatriz || '',
+                      venta:         ventaData,
+                    });
+                    toast.success('Ticket descargado');
+                  } catch { toast.error('Error al generar ticket'); }
+                }}
+              >
+                <Printer className="h-4 w-4" />
+                Imprimir Ticket (Zebra)
+              </Button>
+
+              <p className="text-xs text-slate-400 text-center font-medium">¿Emitir comprobante SRI?</p>
               <div className="grid grid-cols-2 gap-2">
                 <Button
                   variant="outline"

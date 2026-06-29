@@ -30,6 +30,7 @@ import {
 
 import { AppUser, UserRole } from '@/types';
 import { subscribeToUsers } from '@/lib/firebase/users';
+import { DESCRIPCION_ROLES } from '@/lib/permisos';
 import { useAuth } from '@/context/AuthContext';
 
 const ROLES: { value: UserRole; label: string; color: string }[] = [
@@ -307,12 +308,17 @@ export default function UsuariosPage() {
                 </Select>
               </div>
               <Separator />
-              <div className="bg-slate-50 rounded-lg p-3 text-xs text-slate-500 space-y-1">
+              <div className="bg-slate-50 rounded-lg p-3 text-xs text-slate-500 space-y-1.5">
                 <p className="font-medium text-slate-700">Permisos por rol:</p>
-                <p>🟣 <strong>Admin</strong> — acceso total al sistema</p>
-                <p>🔵 <strong>Vendedor</strong> — POS, ventas, clientes, comprobantes</p>
-                <p>🟢 <strong>Bodeguero</strong> — inventario, entradas, despachos</p>
-                <p>🟠 <strong>Contador</strong> — contabilidad, reportes, cuentas por pagar</p>
+                {ROLES.map(r => (
+                  <p key={r.value}>
+                    <span className={`inline-block w-2 h-2 rounded-full mr-1.5 ${r.color.split(' ')[0]}`} />
+                    <strong>{r.label}</strong> — {DESCRIPCION_ROLES[r.value]}
+                  </p>
+                ))}
+                <p className="text-slate-400 mt-1 pt-1 border-t">
+                  Los vendedores no pueden ver contabilidad, tributario ni modificar precios.
+                </p>
               </div>
             </div>
             <DialogFooter>

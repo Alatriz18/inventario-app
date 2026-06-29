@@ -33,6 +33,8 @@ import { Producto, Categoria } from '@/types';
 import { subscribeToProductos, createProducto, updateProducto, deleteProducto } from '@/lib/firebase/productos';
 import { subscribeToCategorias } from '@/lib/firebase/categorias';
 import { comprimirImagenBase64 } from '@/lib/utils/imagen';
+import { tieneAccesoAccion } from '@/lib/permisos';
+import { useAuth } from '@/context/AuthContext';
 
 const schema = z.object({
   sku:          z.string().min(1, 'El SKU es requerido'),
@@ -60,6 +62,12 @@ function MargenBadge({ compra, venta }: { compra: number; venta: number }) {
 }
 
 export default function ProductosPage() {
+  const { user } = useAuth();
+  const puedeEditar  = user ? tieneAccesoAccion(user.rol, 'editar_productos') : false;
+  const puedePrecios = user ? tieneAccesoAccion(user.rol, 'editar_precios')   : false;
+  const verCostos    = user ? tieneAccesoAccion(user.rol, 'ver_costos')       : false;
+  const verGanancias = user ? tieneAccesoAccion(user.rol, 'ver_ganancias')    : false;
+
   const [productos,    setProductos]    = useState<Producto[]>([]);
   const [categorias,   setCategorias]   = useState<Categoria[]>([]);
   const [loading,      setLoading]      = useState(true);
@@ -164,7 +172,7 @@ export default function ProductosPage() {
       <PageHeader
         title="Productos"
         description="Catálogo de productos con control de stock"
-        action={<Button onClick={openCreate}><Plus className="mr-2 h-4 w-4" />Nuevo Producto</Button>}
+        action={puedeEditar ? <Button onClick={openCreate}><Plus className="mr-2 h-4 w-4" />Nuevo Producto</Button> : undefined}
       />
 
       <div className="mb-4">
@@ -180,9 +188,9 @@ export default function ProductosPage() {
               <TableHead>SKU</TableHead>
               <TableHead>Nombre</TableHead>
               <TableHead>Categoría</TableHead>
-              <TableHead className="text-right">P. Compra</TableHead>
+              {verCostos && <TableHead className="text-right">P. Compra</TableHead>}
               <TableHead className="text-right">P. Venta</TableHead>
-              <TableHead className="text-center">Margen</TableHead>
+              {verGanancias && <TableHead className="text-center">Margen</TableHead>}
               <TableHead className="text-center">Stock</TableHead>
               <TableHead className="text-center">Estado</TableHead>
               <TableHead className="text-center w-24">Acciones</TableHead>
@@ -196,7 +204,7 @@ export default function ProductosPage() {
               ))
             ) : filtered.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={10} className="text-center py-12 text-slate-400">
+                <TableCell colSpan={10 - (verCostos ? 0 : 1) - (verGanancias ? 0 : 1)} className="text-center py-12 text-slate-400">
                   <Package className="h-8 w-8 mx-auto mb-2 opacity-30" />
                   <p className="text-sm">{search ? 'Sin resultados.' : 'No hay productos aún.'}</p>
                 </TableCell>
@@ -222,11 +230,13 @@ export default function ProductosPage() {
                     {p.categoriaNombre || '—'}
                   </span>
                 </TableCell>
-                <TableCell className="text-right text-sm">{formatCurrency(p.precioCompra)}</TableCell>
+                {verCostos && <TableCell className="text-right text-sm">{formatCurrency(p.precioCompra)}</TableCell>}
                 <TableCell className="text-right text-sm font-medium">{formatCurrency(p.precioVenta)}</TableCell>
-                <TableCell className="text-center">
-                  <MargenBadge compra={p.precioCompra} venta={p.precioVenta} />
-                </TableCell>
+                {verGanancias && (
+                  <TableCell className="text-center">
+                    <MargenBadge compra={p.precioCompra} venta={p.precioVenta} />
+                  </TableCell>
+                )}
                 <TableCell className="text-center">
                   <span className={`font-semibold text-sm ${p.stockActual <= p.stockMinimo ? 'text-red-600' : 'text-slate-700'}`}>
                     {p.stockActual}
@@ -237,6 +247,7 @@ export default function ProductosPage() {
                   <Badge variant={p.activo ? 'default' : 'secondary'}>{p.activo ? 'Activo' : 'Inactivo'}</Badge>
                 </TableCell>
                 <TableCell>
+                  {puedeEditar ? (
                   <div className="flex justify-center gap-1">
                     <Button variant="ghost" size="icon" onClick={() => openEdit(p)}
                       className="h-8 w-8 text-slate-500 hover:text-blue-600">
@@ -247,6 +258,9 @@ export default function ProductosPage() {
                       <Trash2 className="h-4 w-4" />
                     </Button>
                   </div>
+                  ) : (
+                    <span className="text-xs text-slate-300">—</span>
+                  )}
                 </TableCell>
               </TableRow>
             ))}
@@ -331,8 +345,10 @@ export default function ProductosPage() {
               <Label>Precio de compra *</Label>
               <div className="relative">
                 <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-sm">$</span>
-                <Input type="number" step="0.01" min="0" placeholder="0.00" className="pl-7" {...register('precioCompra')} />
+                <Input type="number" step="0.01" min="0" placeholder="0.00" className="pl-7"
+                  disabled={!puedePrecios} {...register('precioCompra')} />
               </div>
+              {!puedePrecios && <p className="text-xs text-amber-500">No tienes permiso para modificar precios</p>}
               {errors.precioCompra && <p className="text-xs text-red-500">{errors.precioCompra.message}</p>}
             </div>
 
@@ -340,12 +356,13 @@ export default function ProductosPage() {
               <Label>Precio de venta *</Label>
               <div className="relative">
                 <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-sm">$</span>
-                <Input type="number" step="0.01" min="0" placeholder="0.00" className="pl-7" {...register('precioVenta')} />
+                <Input type="number" step="0.01" min="0" placeholder="0.00" className="pl-7"
+                  disabled={!puedePrecios} {...register('precioVenta')} />
               </div>
               {errors.precioVenta && <p className="text-xs text-red-500">{errors.precioVenta.message}</p>}
             </div>
 
-            {precioVenta > 0 && (
+            {precioVenta > 0 && verGanancias && (
               <div className="col-span-2 bg-slate-50 rounded-lg p-3 flex gap-6">
                 <div>
                   <p className="text-xs text-slate-400">Ganancia unitaria</p>

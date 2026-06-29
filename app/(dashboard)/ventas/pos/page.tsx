@@ -27,6 +27,7 @@ import { subscribeToClientes }  from '@/lib/firebase/clientes';
 import { createVenta, getVentaById } from '@/lib/firebase/ventas';
 import { getConfigSRI }         from '@/lib/firebase/config-sri';
 import { descargarTicket }      from '@/lib/pdf/ticket-venta';
+import { tieneAccesoAccion }    from '@/lib/permisos';
 import { useAuth }              from '@/context/AuthContext';
 import Link from 'next/link';
 
@@ -54,7 +55,9 @@ function currency(v: number) {
 
 export default function POSPage() {
   const { user } = useAuth();
-  const router   = useRouter(); // ← dentro del componente
+  const router   = useRouter();
+  const verCostos = user ? tieneAccesoAccion(user.rol, 'ver_costos') : false;
+  const verGanancias = user ? tieneAccesoAccion(user.rol, 'ver_ganancias') : false;
 
   const [productos,      setProductos]      = useState<Producto[]>([]);
   const [clientes,       setClientes]       = useState<Cliente[]>([]);
@@ -299,7 +302,7 @@ export default function POSPage() {
                   </div>
                   <div className="text-right">
                     <p className="font-bold text-slate-800">{currency(p.precioVenta)}</p>
-                    <p className="text-xs text-slate-400">compra: {currency(p.precioCompra)}</p>
+                    {verCostos && <p className="text-xs text-slate-400">compra: {currency(p.precioCompra)}</p>}
                   </div>
                 </button>
               ))}
@@ -383,12 +386,14 @@ export default function POSPage() {
 
           {cart.length > 0 && (
             <div className="px-4 py-2 border-t bg-slate-50 flex justify-between items-center">
-              <span className="text-xs text-slate-400">
-                Ganancia estimada:
-                <span className={`ml-1 font-semibold ${margenColor}`}>
-                  {currency(gananciaTotal - gananciaTotal * descuento / 100)}
+              {verGanancias ? (
+                <span className="text-xs text-slate-400">
+                  Ganancia estimada:
+                  <span className={`ml-1 font-semibold ${margenColor}`}>
+                    {currency(gananciaTotal - gananciaTotal * descuento / 100)}
+                  </span>
                 </span>
-              </span>
+              ) : <span />}
               <button onClick={() => setCart([])}
                 className="text-xs text-red-400 hover:text-red-600 underline">
                 Vaciar carrito

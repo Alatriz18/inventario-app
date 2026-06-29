@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useState } from 'react';
 import { useAuth } from '@/context/AuthContext';
+import { tieneAccesoModulo, Modulo } from '@/lib/permisos';
 import { cn } from '@/lib/utils';
 import {
   LayoutDashboard, Package, Tags, Truck, PackagePlus, PackageMinus,
@@ -19,94 +20,94 @@ interface NavItem {
   label:     string;
   href?:     string;
   icon:      React.ElementType;
-  roles?:    string[];
+  modulo?:   Modulo;
   children?: NavItem[];
 }
 
 const NAV: NavItem[] = [
-  { label: 'Dashboard', href: '/', icon: LayoutDashboard },
+  { label: 'Dashboard', href: '/', icon: LayoutDashboard, modulo: 'dashboard' },
   {
     label: 'Inventario', icon: Package,
     children: [
-      { label: 'Productos',   href: '/productos',           icon: Package },
-      { label: 'Categorías',  href: '/categorias',          icon: Tags },
-      { label: 'Bodegas',     href: '/bodegas',             icon: Warehouse },
-      { label: 'Proveedores', href: '/proveedores',         icon: Truck },
-      { label: 'Entradas',    href: '/entradas',            icon: PackagePlus },
-      { label: 'Despachos',   href: '/despachos',           icon: PackageMinus },
-      { label: 'Movimientos', href: '/movimientos',         icon: ArrowLeftRight },
-      { label: 'Kardex',      href: '/inventario/kardex',  icon: ListChecks },
+      { label: 'Productos',   href: '/productos',          icon: Package,        modulo: 'productos' },
+      { label: 'Categorías',  href: '/categorias',         icon: Tags,           modulo: 'categorias' },
+      { label: 'Bodegas',     href: '/bodegas',            icon: Warehouse,      modulo: 'bodegas' },
+      { label: 'Proveedores', href: '/proveedores',        icon: Truck,          modulo: 'proveedores' },
+      { label: 'Entradas',    href: '/entradas',           icon: PackagePlus,    modulo: 'entradas' },
+      { label: 'Despachos',   href: '/despachos',          icon: PackageMinus,   modulo: 'despachos' },
+      { label: 'Movimientos', href: '/movimientos',        icon: ArrowLeftRight, modulo: 'movimientos' },
+      { label: 'Kardex',      href: '/inventario/kardex',  icon: ListChecks,     modulo: 'kardex' },
     ],
   },
   {
     label: 'Ventas', icon: ShoppingCart,
     children: [
-      { label: 'Punto de Venta', href: '/ventas/pos',       icon: ShoppingCart },
-      { label: 'Historial',      href: '/ventas/historial', icon: Receipt },
-      { label: 'Recibos Internos', href: '/ventas/recibo',  icon: FileText },
-      { label: 'Clientes',       href: '/clientes',         icon: Users },
+      { label: 'Punto de Venta',  href: '/ventas/pos',       icon: ShoppingCart, modulo: 'pos' },
+      { label: 'Historial',       href: '/ventas/historial', icon: Receipt,      modulo: 'historial_ventas' },
+      { label: 'Recibos Internos',href: '/ventas/recibo',    icon: FileText,     modulo: 'recibos' },
+      { label: 'Clientes',        href: '/clientes',         icon: Users,        modulo: 'clientes' },
     ],
   },
   {
     label: 'Facturación SRI', icon: FileText,
     children: [
-      { label: 'Emitir Comprobante', href: '/facturacion/emitir',         icon: FileText },
-      { label: 'Comprobantes',       href: '/facturacion/comprobantes',   icon: ClipboardList },
-      { label: 'Notas de Crédito',   href: '/facturacion/notas-credito',  icon: FileMinus },
-      { label: 'Notas de Débito',    href: '/facturacion/notas-debito',   icon: FilePlus },
-      { label: 'Configuración SRI',  href: '/facturacion/configuracion',  icon: Settings, roles: ['admin'] },
+      { label: 'Emitir Comprobante', href: '/facturacion/emitir',        icon: FileText,      modulo: 'facturacion_emitir' },
+      { label: 'Comprobantes',       href: '/facturacion/comprobantes',  icon: ClipboardList,  modulo: 'facturacion_comprobantes' },
+      { label: 'Notas de Crédito',   href: '/facturacion/notas-credito', icon: FileMinus,      modulo: 'notas_credito' },
+      { label: 'Notas de Débito',    href: '/facturacion/notas-debito',  icon: FilePlus,       modulo: 'notas_debito' },
+      { label: 'Configuración SRI',  href: '/facturacion/configuracion', icon: Settings,       modulo: 'config_sri' },
     ],
   },
   {
     label: 'Cuentas por Cobrar', icon: DollarSign,
     children: [
-      { label: 'Saldos y Cobros', href: '/cuentas-por-cobrar', icon: DollarSign },
-      { label: 'Cartera (Facturas)', href: '/cuentas-por-cobrar/cartera', icon: Wallet },
+      { label: 'Saldos y Cobros',    href: '/cuentas-por-cobrar',         icon: DollarSign, modulo: 'cxc' },
+      { label: 'Cartera (Facturas)', href: '/cuentas-por-cobrar/cartera', icon: Wallet,     modulo: 'cxc_cartera' },
     ],
   },
   {
     label: 'Cuentas por Pagar', icon: CreditCard,
     children: [
-      { label: 'Facturas Proveedores', href: '/cuentas-por-pagar/facturas', icon: FileCheck },
-      { label: 'Documentos Recibidos', href: '/cuentas-por-pagar/documentos-recibidos', icon: FileCheck },
-      { label: 'Pagos Pendientes',     href: '/cuentas-por-pagar/pagos',    icon: CreditCard },
+      { label: 'Facturas Proveedores', href: '/cuentas-por-pagar/facturas',             icon: FileCheck,  modulo: 'cxp_facturas' },
+      { label: 'Documentos Recibidos', href: '/cuentas-por-pagar/documentos-recibidos', icon: FileCheck,  modulo: 'cxp_documentos' },
+      { label: 'Pagos Pendientes',     href: '/cuentas-por-pagar/pagos',                icon: CreditCard, modulo: 'cxp_pagos' },
     ],
   },
   {
     label: 'Contabilidad', icon: BookOpen,
     children: [
-      { label: 'Plan de Cuentas',      href: '/contabilidad/plan-cuentas',     icon: BookMarked },
-      { label: 'Centros de Costo',     href: '/contabilidad/centros-costo',    icon: Landmark },
-      { label: 'Config. Contable',     href: '/contabilidad/configuracion',    icon: Settings, roles: ['admin','contador'] },
-      { label: 'Asientos Contables',   href: '/contabilidad/asientos',         icon: BookOpen },
-      { label: 'Libro Diario',         href: '/contabilidad/libro-diario',     icon: FileSpreadsheet },
-      { label: 'Libro Mayor',          href: '/contabilidad/libro-mayor',      icon: Scale },
-      { label: 'Balance Comprobación', href: '/contabilidad/balance-comp',     icon: Calculator },
-      { label: 'Balance General',      href: '/contabilidad/balance-general',  icon: TrendingUp },
-      { label: 'Estado Resultados',    href: '/contabilidad/estado-resultados',icon: BarChart3 },
-      { label: 'Períodos Contables',   href: '/contabilidad/periodos',         icon: Receipt, roles: ['admin','contador'] },
+      { label: 'Plan de Cuentas',      href: '/contabilidad/plan-cuentas',      icon: BookMarked,     modulo: 'plan_cuentas' },
+      { label: 'Centros de Costo',     href: '/contabilidad/centros-costo',     icon: Landmark,       modulo: 'centros_costo' },
+      { label: 'Config. Contable',     href: '/contabilidad/configuracion',     icon: Settings,       modulo: 'config_contable' },
+      { label: 'Asientos Contables',   href: '/contabilidad/asientos',          icon: BookOpen,       modulo: 'asientos' },
+      { label: 'Libro Diario',         href: '/contabilidad/libro-diario',      icon: FileSpreadsheet,modulo: 'libro_diario' },
+      { label: 'Libro Mayor',          href: '/contabilidad/libro-mayor',       icon: Scale,          modulo: 'libro_mayor' },
+      { label: 'Balance Comprobación', href: '/contabilidad/balance-comp',      icon: Calculator,     modulo: 'balance_comp' },
+      { label: 'Balance General',      href: '/contabilidad/balance-general',   icon: TrendingUp,     modulo: 'balance_general' },
+      { label: 'Estado Resultados',    href: '/contabilidad/estado-resultados', icon: BarChart3,      modulo: 'estado_resultados' },
+      { label: 'Períodos Contables',   href: '/contabilidad/periodos',          icon: Receipt,        modulo: 'periodos' },
     ],
   },
   {
     label: 'Tributario', icon: ReceiptText,
     children: [
-      { label: 'Retenciones (config)', href: '/tributario/retenciones',           icon: FileMinus },
-      { label: 'Ret. Emitidas',        href: '/tributario/retenciones-emitidas', icon: ClipboardCheck },
-      { label: 'Ret. Recibidas',       href: '/tributario/retenciones-recibidas',icon: FileCheck },
-      { label: 'ICE',                  href: '/tributario/ice',                  icon: Coins },
-      { label: 'ATS (DIMM)',           href: '/tributario/ats',                  icon: FileSearch },
-      { label: 'Form. 104 – IVA',      href: '/tributario/form-104',             icon: FileSpreadsheet },
-      { label: 'Form. 103 – Ret.',     href: '/tributario/form-103',             icon: FileSpreadsheet },
-      { label: 'Form. 105 – ICE',      href: '/tributario/form-105',             icon: FileSpreadsheet },
-      { label: 'Form. RIMPE',          href: '/tributario/form-rimpe',           icon: FileSpreadsheet },
-      { label: 'Form. 101 – IR Anual', href: '/tributario/form-101',             icon: FileSpreadsheet, roles: ['admin','contador'] },
+      { label: 'Retenciones (config)', href: '/tributario/retenciones',            icon: FileMinus,      modulo: 'retenciones_config' },
+      { label: 'Ret. Emitidas',        href: '/tributario/retenciones-emitidas',  icon: ClipboardCheck, modulo: 'ret_emitidas' },
+      { label: 'Ret. Recibidas',       href: '/tributario/retenciones-recibidas', icon: FileCheck,      modulo: 'ret_recibidas' },
+      { label: 'ICE',                  href: '/tributario/ice',                   icon: Coins,          modulo: 'ice' },
+      { label: 'ATS (DIMM)',           href: '/tributario/ats',                   icon: FileSearch,     modulo: 'ats' },
+      { label: 'Form. 104 – IVA',      href: '/tributario/form-104',              icon: FileSpreadsheet,modulo: 'form_104' },
+      { label: 'Form. 103 – Ret.',     href: '/tributario/form-103',              icon: FileSpreadsheet,modulo: 'form_103' },
+      { label: 'Form. 105 – ICE',      href: '/tributario/form-105',              icon: FileSpreadsheet,modulo: 'form_105' },
+      { label: 'Form. RIMPE',          href: '/tributario/form-rimpe',            icon: FileSpreadsheet,modulo: 'form_rimpe' },
+      { label: 'Form. 101 – IR Anual', href: '/tributario/form-101',              icon: FileSpreadsheet,modulo: 'form_101' },
     ],
   },
-  { label: 'Activos Fijos',         href: '/activos-fijos',          icon: Layers },
-  { label: 'Conciliación Bancaria', href: '/conciliacion-bancaria',  icon: Building2 },
-  { label: 'Reportes',              href: '/reportes',               icon: BarChart3 },
-  { label: 'Usuarios',     href: '/usuarios',     icon: UserCog,  roles: ['admin'] },
-  { label: 'Configuración',href: '/configuracion',icon: Settings, roles: ['admin'] },
+  { label: 'Activos Fijos',         href: '/activos-fijos',         icon: Layers,   modulo: 'activos_fijos' },
+  { label: 'Conciliación Bancaria', href: '/conciliacion-bancaria', icon: Building2,modulo: 'conciliacion_bancaria' },
+  { label: 'Reportes',              href: '/reportes',              icon: BarChart3,modulo: 'reportes' },
+  { label: 'Usuarios',     href: '/usuarios',     icon: UserCog, modulo: 'usuarios' },
+  { label: 'Configuración',href: '/configuracion',icon: Settings,modulo: 'configuracion' },
 ];
 
 function NavItemComponent({
@@ -114,18 +115,24 @@ function NavItemComponent({
 }: {
   item: NavItem; depth?: number; onNavigate: () => void;
 }) {
-  const pathname    = usePathname();
-  const { hasRole } = useAuth();
+  const pathname   = usePathname();
+  const { user }   = useAuth();
   const [open, setOpen] = useState(() => {
     if (!item.children) return false;
     return item.children.some(c => c.href && pathname.startsWith(c.href));
   });
 
-  if (item.roles && !hasRole(item.roles as any)) return null;
+  if (!user) return null;
+  if (item.modulo && !tieneAccesoModulo(user.rol, item.modulo)) return null;
 
   const Icon = item.icon;
 
   if (item.children) {
+    const visibleChildren = item.children.filter(
+      c => !c.modulo || tieneAccesoModulo(user.rol, c.modulo)
+    );
+    if (visibleChildren.length === 0) return null;
+
     const anyActive = item.children.some(
       c => c.href && (c.href === '/' ? pathname === '/' : pathname.startsWith(c.href))
     );

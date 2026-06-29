@@ -245,7 +245,7 @@ export function generarTicketVenta(datos: DatosTicket): Uint8Array {
 
 export function descargarTicket(datos: DatosTicket) {
   const bytes = generarTicketVenta(datos);
-  const blob  = new Blob([bytes], { type: 'application/pdf' });
+  const blob  = new Blob([bytes.buffer as ArrayBuffer], { type: 'application/pdf' });
   const url   = URL.createObjectURL(blob);
   const a     = document.createElement('a');
   a.href      = url;
@@ -259,7 +259,7 @@ export function descargarTicket(datos: DatosTicket) {
 
 export function abrirTicketEnNuevaPestana(datos: DatosTicket) {
   const bytes = generarTicketVenta(datos);
-  const blob  = new Blob([bytes], { type: 'application/pdf' });
+  const blob  = new Blob([bytes.buffer as ArrayBuffer], { type: 'application/pdf' });
   const url   = URL.createObjectURL(blob);
   window.open(url, '_blank');
 }

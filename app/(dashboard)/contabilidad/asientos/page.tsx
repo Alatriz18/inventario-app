@@ -234,16 +234,17 @@ export default function AsientosPage() {
       </div>
 
       <div className="bg-white rounded-xl border overflow-hidden">
+        <div className="overflow-x-auto">
         <Table>
           <TableHeader>
             <TableRow className="bg-slate-50">
-              <TableHead>Número</TableHead>
-              <TableHead>Fecha</TableHead>
+              <TableHead className="hidden sm:table-cell">Número</TableHead>
+              <TableHead className="hidden sm:table-cell">Fecha</TableHead>
               <TableHead>Concepto</TableHead>
-              <TableHead className="text-center">Tipo</TableHead>
+              <TableHead className="text-center hidden md:table-cell">Tipo</TableHead>
               <TableHead className="text-right">Debe</TableHead>
               <TableHead className="text-right">Haber</TableHead>
-              <TableHead className="text-center">Estado</TableHead>
+              <TableHead className="text-center hidden sm:table-cell">Estado</TableHead>
               <TableHead className="text-center w-16">Ver</TableHead>
             </TableRow>
           </TableHeader>
@@ -264,8 +265,8 @@ export default function AsientosPage() {
               const fecha = (a.fecha as any)?.toDate?.() ?? new Date(a.fecha);
               return (
                 <TableRow key={a.id} className={a.bloqueado ? 'opacity-60' : ''}>
-                  <TableCell className="font-mono text-xs font-semibold">{a.numero}</TableCell>
-                  <TableCell className="text-sm text-slate-500">
+                  <TableCell className="font-mono text-xs font-semibold hidden sm:table-cell">{a.numero}</TableCell>
+                  <TableCell className="text-sm text-slate-500 hidden sm:table-cell">
                     {format(fecha, 'dd/MM/yyyy', { locale: es })}
                   </TableCell>
                   <TableCell className="font-medium text-sm">
@@ -290,14 +291,14 @@ export default function AsientosPage() {
                       </div>
                     </div>
                   </TableCell>
-                  <TableCell className="text-center">
+                  <TableCell className="text-center hidden md:table-cell">
                     <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${TIPO_COLORS[a.tipo] ?? 'bg-slate-100 text-slate-600'}`}>
                       {TIPO_LABELS[a.tipo] ?? a.tipo}
                     </span>
                   </TableCell>
                   <TableCell className="text-right text-sm font-semibold text-blue-600">{currency(a.totalDebe)}</TableCell>
                   <TableCell className="text-right text-sm font-semibold text-red-600">{currency(a.totalHaber)}</TableCell>
-                  <TableCell className="text-center">
+                  <TableCell className="text-center hidden sm:table-cell">
                     <Badge variant={a.estado === 'confirmado' ? 'default' : 'secondary'} className="text-xs">
                       {a.estado}
                     </Badge>
@@ -321,6 +322,7 @@ export default function AsientosPage() {
             })}
           </TableBody>
         </Table>
+        </div>
       </div>
 
       {/* ─── DIALOG CREAR / EDITAR ASIENTO ─── */}
@@ -361,8 +363,8 @@ export default function AsientosPage() {
                   <Plus className="h-3 w-3" /> Agregar línea
                 </button>
               </div>
-              <div className="border rounded-lg overflow-hidden">
-                <Table>
+              <div className="border rounded-lg overflow-x-auto">
+                <Table className="min-w-[480px]">
                   <TableHeader>
                     <TableRow className="bg-slate-50">
                       <TableHead>Código cuenta</TableHead>

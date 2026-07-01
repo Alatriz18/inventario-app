@@ -109,8 +109,8 @@ export default function HistorialVentasPage() {
 
       {/* Filtros */}
       <div className="flex flex-wrap gap-3 mb-4">
-        <Input placeholder="Buscar por cliente o identificación..."
-          value={search} onChange={e => setSearch(e.target.value)} className="max-w-xs" />
+        <Input placeholder="Buscar por cliente..."
+          value={search} onChange={e => setSearch(e.target.value)} className="flex-1 min-w-[160px] max-w-xs" />
         <Select onValueChange={setFiltroMetodo} defaultValue="todos">
           <SelectTrigger className="w-44">
             <SelectValue />
@@ -134,15 +134,16 @@ export default function HistorialVentasPage() {
 
       {/* Tabla */}
       <div className="bg-white rounded-xl border overflow-hidden">
+        <div className="overflow-x-auto">
         <Table>
           <TableHeader>
             <TableRow className="bg-slate-50">
               <TableHead>Fecha</TableHead>
               <TableHead>Cliente</TableHead>
-              <TableHead className="text-center">Ítems</TableHead>
+              <TableHead className="text-center hidden sm:table-cell">Ítems</TableHead>
               <TableHead className="text-right">Total</TableHead>
-              <TableHead className="text-right">Ganancia</TableHead>
-              <TableHead className="text-center">Método</TableHead>
+              <TableHead className="text-right hidden md:table-cell">Ganancia</TableHead>
+              <TableHead className="text-center hidden sm:table-cell">Método</TableHead>
               <TableHead className="text-center">Estado</TableHead>
               <TableHead className="text-center w-24">Acc.</TableHead>
             </TableRow>
@@ -172,16 +173,16 @@ export default function HistorialVentasPage() {
                     <p className="font-medium text-sm">{v.clienteNombre}</p>
                     <p className="text-xs text-slate-400">{v.clienteIdentificacion}</p>
                   </TableCell>
-                  <TableCell className="text-center">
+                  <TableCell className="text-center hidden sm:table-cell">
                     <Badge variant="outline">{v.items.length}</Badge>
                   </TableCell>
                   <TableCell className="text-right font-bold">{currency(v.total)}</TableCell>
-                  <TableCell className="text-right">
+                  <TableCell className="text-right hidden md:table-cell">
                     <span className={`text-sm font-semibold ${v.gananciaTotal >= 0 ? 'text-green-600' : 'text-red-600'}`}>
                       {currency(v.gananciaTotal)}
                     </span>
                   </TableCell>
-                  <TableCell className="text-center">
+                  <TableCell className="text-center hidden sm:table-cell">
                     <Badge variant="outline" className="text-xs">
                       {METODO_LABELS[v.metodoPago]}
                     </Badge>
@@ -232,6 +233,7 @@ export default function HistorialVentasPage() {
             })}
           </TableBody>
         </Table>
+        </div>
         {!loading && filtered.length > 0 && (
           <div className="px-4 py-3 border-t bg-slate-50 text-xs text-slate-400">
             {filtered.length} venta(s) — Ingresos: <span className="font-semibold text-slate-700">{currency(totalVentas)}</span>

@@ -181,18 +181,19 @@ export default function ProductosPage() {
       </div>
 
       <div className="bg-white rounded-xl border overflow-hidden">
+        <div className="overflow-x-auto">
         <Table>
           <TableHeader>
             <TableRow className="bg-slate-50">
-              <TableHead className="w-16">Imagen</TableHead>
-              <TableHead>SKU</TableHead>
+              <TableHead className="w-16 hidden sm:table-cell">Imagen</TableHead>
+              <TableHead className="hidden md:table-cell">SKU</TableHead>
               <TableHead>Nombre</TableHead>
-              <TableHead>Categoría</TableHead>
-              {verCostos && <TableHead className="text-right">P. Compra</TableHead>}
+              <TableHead className="hidden sm:table-cell">Categoría</TableHead>
+              {verCostos && <TableHead className="text-right hidden lg:table-cell">P. Compra</TableHead>}
               <TableHead className="text-right">P. Venta</TableHead>
-              {verGanancias && <TableHead className="text-center">Margen</TableHead>}
+              {verGanancias && <TableHead className="text-center hidden lg:table-cell">Margen</TableHead>}
               <TableHead className="text-center">Stock</TableHead>
-              <TableHead className="text-center">Estado</TableHead>
+              <TableHead className="text-center hidden sm:table-cell">Estado</TableHead>
               <TableHead className="text-center w-24">Acciones</TableHead>
             </TableRow>
           </TableHeader>
@@ -211,7 +212,7 @@ export default function ProductosPage() {
               </TableRow>
             ) : filtered.map((p) => (
               <TableRow key={p.id}>
-                <TableCell>
+                <TableCell className="hidden sm:table-cell">
                   {p.imagen ? (
                     <div className="h-10 w-10 rounded-lg overflow-hidden border">
                       {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -223,17 +224,17 @@ export default function ProductosPage() {
                     </div>
                   )}
                 </TableCell>
-                <TableCell className="font-mono text-xs text-slate-500">{p.sku}</TableCell>
+                <TableCell className="font-mono text-xs text-slate-500 hidden md:table-cell">{p.sku}</TableCell>
                 <TableCell className="font-medium">{p.nombre}</TableCell>
-                <TableCell>
+                <TableCell className="hidden sm:table-cell">
                   <span className="text-xs bg-slate-100 text-slate-600 px-2 py-0.5 rounded-full">
                     {p.categoriaNombre || '—'}
                   </span>
                 </TableCell>
-                {verCostos && <TableCell className="text-right text-sm">{formatCurrency(p.precioCompra)}</TableCell>}
+                {verCostos && <TableCell className="text-right text-sm hidden lg:table-cell">{formatCurrency(p.precioCompra)}</TableCell>}
                 <TableCell className="text-right text-sm font-medium">{formatCurrency(p.precioVenta)}</TableCell>
                 {verGanancias && (
-                  <TableCell className="text-center">
+                  <TableCell className="text-center hidden lg:table-cell">
                     <MargenBadge compra={p.precioCompra} venta={p.precioVenta} />
                   </TableCell>
                 )}
@@ -243,7 +244,7 @@ export default function ProductosPage() {
                   </span>
                   {p.stockActual <= p.stockMinimo && <span className="ml-1 text-xs text-red-400">⚠</span>}
                 </TableCell>
-                <TableCell className="text-center">
+                <TableCell className="text-center hidden sm:table-cell">
                   <Badge variant={p.activo ? 'default' : 'secondary'}>{p.activo ? 'Activo' : 'Inactivo'}</Badge>
                 </TableCell>
                 <TableCell>
@@ -266,6 +267,7 @@ export default function ProductosPage() {
             ))}
           </TableBody>
         </Table>
+        </div>
       </div>
 
       {/* Dialog Crear / Editar */}

@@ -75,6 +75,7 @@ export default function POSPage() {
   const [showClientes,   setShowClientes]   = useState(false);
   const [quickCliente,   setQuickCliente]   = useState(false); // ← dentro del componente
   const [fechaVenta,     setFechaVenta]     = useState(new Date().toISOString().split('T')[0]);
+  const [activeTab,      setActiveTab]      = useState<'productos' | 'cobro'>('productos');
 
   useEffect(() => {
     const u1 = subscribeToProductos(setProductos);
@@ -275,10 +276,35 @@ export default function POSPage() {
   const margenColor = gananciaTotal >= 0 ? 'text-green-600' : 'text-red-600';
 
   return (
-    <div className="flex gap-4 h-[calc(100vh-8rem)]">
+    <div className="flex flex-col lg:flex-row gap-4 lg:h-[calc(100vh-8rem)]">
+
+      {/* ─── TAB NAVIGATION — solo en móvil ─── */}
+      <div className="flex lg:hidden border rounded-xl overflow-hidden bg-white shrink-0">
+        <button
+          onClick={() => setActiveTab('productos')}
+          className={`flex-1 py-3 text-sm font-semibold flex items-center justify-center gap-2 transition-colors
+            ${activeTab === 'productos' ? 'bg-slate-900 text-white' : 'text-slate-600 hover:bg-slate-50'}`}
+        >
+          <ShoppingCart className="h-4 w-4" />
+          Productos
+          {cart.length > 0 && (
+            <span className="bg-blue-500 text-white text-[10px] rounded-full h-4 w-4 flex items-center justify-center font-bold">
+              {cart.length}
+            </span>
+          )}
+        </button>
+        <button
+          onClick={() => setActiveTab('cobro')}
+          className={`flex-1 py-3 text-sm font-semibold flex items-center justify-center gap-2 transition-colors
+            ${activeTab === 'cobro' ? 'bg-slate-900 text-white' : 'text-slate-600 hover:bg-slate-50'}`}
+        >
+          <Banknote className="h-4 w-4" />
+          Cobrar {currency(total)}
+        </button>
+      </div>
 
       {/* ─── PANEL IZQUIERDO — Productos y carrito ─── */}
-      <div className="flex-1 flex flex-col gap-4 min-w-0">
+      <div className={`flex-1 flex-col gap-4 min-w-0 ${activeTab !== 'productos' ? 'hidden lg:flex' : 'flex'}`}>
 
         {/* Buscador */}
         <div className="relative">
@@ -325,8 +351,8 @@ export default function POSPage() {
               <p className="text-sm">Busca y selecciona productos</p>
             </div>
           ) : (
-            <div className="flex-1 overflow-y-auto">
-              <table className="w-full text-sm">
+            <div className="flex-1 overflow-y-auto overflow-x-auto">
+              <table className="w-full text-sm min-w-[480px]">
                 <thead className="bg-slate-50 sticky top-0">
                   <tr>
                     <th className="text-left px-4 py-2 font-medium text-slate-500">Producto</th>
@@ -404,7 +430,7 @@ export default function POSPage() {
       </div>
 
       {/* ─── PANEL DERECHO — Cobro ─── */}
-      <div className="w-80 flex flex-col gap-3 shrink-0">
+      <div className={`w-full lg:w-80 flex-col gap-3 lg:shrink-0 ${activeTab !== 'cobro' ? 'hidden lg:flex' : 'flex'}`}>
 
         {/* Cliente */}
         <div className="bg-white rounded-xl border p-4 space-y-2">

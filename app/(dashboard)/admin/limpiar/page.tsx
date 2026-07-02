@@ -1,31 +1,11 @@
 'use client';
 
 import { useState } from 'react';
-import { collection, getDocs, writeBatch, doc } from 'firebase/firestore';
-import { db } from '@/lib/firebase/config';
 import { Button }  from '@/components/ui/button';
 import { useAuth } from '@/context/AuthContext';
 import { toast }   from 'sonner';
 import PageHeader  from '@/components/shared/PageHeader';
 import { Trash2, CheckCircle } from 'lucide-react';
-
-const CONSUMIDOR_FINAL_ID = '9999999999999';
-const PRODUCTO_FILTRO     = 'doge';
-
-function esDoge(str?: string) {
-  return str?.toLowerCase().includes(PRODUCTO_FILTRO) ?? false;
-}
-
-async function borrarEnBatch(docs: { ref: any }[], onLog: (m: string) => void, label: string) {
-  if (docs.length === 0) { onLog(`${label}: sin registros`); return 0; }
-  for (let i = 0; i < docs.length; i += 400) {
-    const batch = writeBatch(db);
-    docs.slice(i, i + 400).forEach(d => batch.delete(d.ref));
-    await batch.commit();
-  }
-  onLog(`✓ ${label}: ${docs.length} eliminados`);
-  return docs.length;
-}
 
 export default function LimpiarDatosPage() {
   const { user } = useAuth();
@@ -33,8 +13,6 @@ export default function LimpiarDatosPage() {
   const [running,    setRunning]    = useState(false);
   const [done,       setDone]       = useState(false);
   const [log,        setLog]        = useState<string[]>([]);
-
-  const addLog = (msg: string) => setLog(prev => [...prev, msg]);
 
   if (!user || user.rol !== 'admin') {
     return (
@@ -48,85 +26,21 @@ export default function LimpiarDatosPage() {
   const ejecutar = async () => {
     if (!confirmado) return;
     setRunning(true);
-    setLog(['Analizando base de datos...']);
-    let total = 0;
-
+    setLog(['Enviando solicitud al servidor...']);
     try {
-      // ── 1. Encontrar ventas de CONSUMIDOR FINAL o con ítems DOGE ──────────
-      const ventasSnap = await getDocs(collection(db, 'ventas'));
-      const ventasEliminar = ventasSnap.docs.filter(d => {
-        const v = d.data();
-        const esConsumidorFinal = v.clienteIdentificacion === CONSUMIDOR_FINAL_ID;
-        const tieneDoge = (v.items ?? []).some((i: any) => esDoge(i.nombre) || esDoge(i.sku));
-        return esConsumidorFinal || tieneDoge;
-      });
-      const ventaIds = new Set(ventasEliminar.map(d => d.id));
-      addLog(`Ventas a eliminar: ${ventasEliminar.length}`);
-
-      // ── 2. Asientos relacionados a esas ventas ────────────────────────────
-      const asientosSnap = await getDocs(collection(db, 'asientos'));
-      const asientosEliminar = asientosSnap.docs.filter(d => {
-        const a = d.data();
-        return ventaIds.has(a.referenciaId) ||
-               esDoge(a.concepto);
-      });
-
-      // ── 3. Comprobantes relacionados a esas ventas ─────────────────────────
-      const compSnap = await getDocs(collection(db, 'comprobantes'));
-      const compEliminar = compSnap.docs.filter(d => ventaIds.has(d.data().ventaId));
-
-      // ── 4. Movimientos de DOGE o de esas ventas ────────────────────────────
-      const movSnap = await getDocs(collection(db, 'movimientos'));
-      const movEliminar = movSnap.docs.filter(d => {
-        const m = d.data();
-        return ventaIds.has(m.referenciaId) ||
-               esDoge(m.productoNombre) ||
-               esDoge(m.sku);
-      });
-
-      // ── 5. Entradas con ítems DOGE ─────────────────────────────────────────
-      const entradasSnap = await getDocs(collection(db, 'entradas'));
-      const entradasEliminar = entradasSnap.docs.filter(d => {
-        const e = d.data();
-        return (e.items ?? []).some((i: any) => esDoge(i.nombre) || esDoge(i.sku));
-      });
-
-      // ── 6. Despachos con ítems DOGE ────────────────────────────────────────
-      const despachosSnap = await getDocs(collection(db, 'despachos'));
-      const despachosEliminar = despachosSnap.docs.filter(d => {
-        const e = d.data();
-        return (e.items ?? []).some((i: any) => esDoge(i.nombre) || esDoge(i.sku));
-      });
-
-      addLog('─────────────────────────────');
-
-      // ── Borrar todo ────────────────────────────────────────────────────────
-      total += await borrarEnBatch(ventasEliminar,    addLog, 'ventas');
-      total += await borrarEnBatch(asientosEliminar,  addLog, 'asientos');
-      total += await borrarEnBatch(compEliminar,      addLog, 'comprobantes');
-      total += await borrarEnBatch(movEliminar,       addLog, 'movimientos');
-      total += await borrarEnBatch(entradasEliminar,  addLog, 'entradas');
-      total += await borrarEnBatch(despachosEliminar, addLog, 'despachos');
-
-      // ── 7. Resetear stock del producto DOGE a 0 ────────────────────────────
-      const prodSnap = await getDocs(collection(db, 'productos'));
-      const dogeProds = prodSnap.docs.filter(d => esDoge(d.data().nombre) || esDoge(d.data().sku));
-      if (dogeProds.length > 0) {
-        const batch = writeBatch(db);
-        dogeProds.forEach(d => batch.update(d.ref, { stockActual: 0 }));
-        await batch.commit();
-        addLog(`✓ producto DOGE: stock reseteado a 0`);
-      } else {
-        addLog('producto DOGE: no encontrado');
+      const res  = await fetch('/api/admin/limpiar', { method: 'POST' });
+      const data = await res.json();
+      if (!res.ok || !data.ok) {
+        setLog(prev => [...prev, `✗ Error: ${data.error ?? 'Error desconocido'}`]);
+        toast.error('Error durante la limpieza');
+        return;
       }
-
-      addLog('─────────────────────────────');
-      addLog(`✅ Limpieza completada. ${total} registros eliminados.`);
+      setLog(data.log ?? []);
       setDone(true);
       toast.success('Datos eliminados correctamente');
     } catch (e: any) {
-      addLog(`✗ Error: ${e.message}`);
-      toast.error('Error durante la limpieza');
+      setLog(prev => [...prev, `✗ ${e.message}`]);
+      toast.error('Error de conexión');
     } finally {
       setRunning(false);
     }

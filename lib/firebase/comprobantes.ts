@@ -1,6 +1,6 @@
 import {
   collection, doc, addDoc, updateDoc, onSnapshot,
-  query, orderBy, serverTimestamp,
+  query, orderBy, serverTimestamp, getDoc,
 } from 'firebase/firestore';
 import { db } from '@/lib/firebase/config';
 
@@ -66,4 +66,10 @@ export async function updateComprobante(
   data: Partial<Omit<Comprobante, 'id'>>
 ): Promise<void> {
   await updateDoc(doc(db, COL, id), sinUndefined(data as Record<string, unknown>));
+}
+
+export async function getComprobanteById(id: string): Promise<Comprobante | null> {
+  const snap = await getDoc(doc(db, COL, id));
+  if (!snap.exists()) return null;
+  return { id: snap.id, ...snap.data() } as Comprobante;
 }

@@ -2,7 +2,7 @@
 
 import { useEffect, useState, Suspense } from 'react';
 import { toast } from 'sonner';
-import { FileText, Loader2, CheckCircle, XCircle, Bug, Download } from 'lucide-react';
+import { FileText, Loader2, CheckCircle, XCircle, Bug, Download, Printer, ExternalLink } from 'lucide-react';
 import { format } from 'date-fns';
 import { useSearchParams } from 'next/navigation';
 import PageHeader  from '@/components/shared/PageHeader';
@@ -13,7 +13,8 @@ import {
 } from '@/components/ui/select';
 
 import { subscribeToVentas } from '@/lib/firebase/ventas';
-import { createComprobante, updateComprobante } from '@/lib/firebase/comprobantes';
+import { createComprobante, updateComprobante, getComprobanteById, Comprobante } from '@/lib/firebase/comprobantes';
+import { useRIDE } from '@/hooks/useRIDE';
 import { getConfigSRI, incrementarSecuencial } from '@/lib/firebase/config-sri';
 import { subscribeToConfigEmpresa } from '@/lib/firebase/config-empresa';
 import { ComprobantesHabilitados } from '@/types';
@@ -50,6 +51,8 @@ function EmitirComprobanteInner() {
   const [diagLoading,  setDiagLoading]  = useState(false);
   const [xmlPreview,   setXmlPreview]   = useState<string | null>(null);
   const [habilitados,  setHabilitados]  = useState<ComprobantesHabilitados | null>(null);
+  const [comprobanteRIDE, setComprobanteRIDE] = useState<Comprobante | null>(null);
+  const { descargar: descargarRIDE, abrir: abrirRIDE, generando: generandoRIDE } = useRIDE();
 
   // Solo ventas completadas sin comprobante
   const ventasSinComp = ventas.filter(
@@ -103,6 +106,7 @@ function EmitirComprobanteInner() {
 
     setProcesando(true);
     setResultado(null);
+    setComprobanteRIDE(null);
 
     try {
       // 1. Obtener configuración SRI
@@ -294,6 +298,17 @@ function EmitirComprobanteInner() {
       }
 
       setResultado({ ...result, compId, claveAcceso });
+
+      // Para nota de venta: cargar el comprobante y abrir RIDE automáticamente
+      if (tipo === 'nota_venta') {
+        try {
+          const comp = await getComprobanteById(compId);
+          if (comp) {
+            setComprobanteRIDE(comp);
+            abrirRIDE(comp);
+          }
+        } catch { /* no bloquea el flujo */ }
+      }
 
     } catch (err: any) {
       toast.error(err.message ?? 'Error al emitir comprobante');
@@ -555,6 +570,29 @@ function EmitirComprobanteInner() {
                 />
               </details>
             )}
+          </div>
+        )}
+
+        {/* Botones RIDE — prominentes para nota de venta */}
+        {comprobanteRIDE && (
+          <div className="flex gap-2">
+            <Button
+              className="flex-1 bg-green-600 hover:bg-green-700"
+              onClick={() => abrirRIDE(comprobanteRIDE)}
+              disabled={generandoRIDE}
+            >
+              {generandoRIDE
+                ? <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                : <Printer className="mr-2 h-4 w-4" />}
+              Imprimir Nota de Venta
+            </Button>
+            <Button
+              variant="outline"
+              onClick={() => descargarRIDE(comprobanteRIDE)}
+              disabled={generandoRIDE}
+            >
+              <Download className="h-4 w-4" />
+            </Button>
           </div>
         )}
 

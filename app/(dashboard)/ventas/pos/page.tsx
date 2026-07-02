@@ -390,12 +390,20 @@ export default function POSPage() {
                       <td className="px-2 py-2.5">
                         <div className="flex items-center justify-center gap-1">
                           <button onClick={() => updateQty(idx, -1)}
-                            className="h-6 w-6 rounded border flex items-center justify-center hover:bg-slate-100">
+                            className="h-6 w-6 rounded border flex items-center justify-center hover:bg-slate-100 shrink-0">
                             <Minus className="h-3 w-3" />
                           </button>
-                          <span className="w-8 text-center font-semibold">{item.cantidad}</span>
+                          <Input
+                            type="number" min="1"
+                            value={item.cantidad}
+                            onChange={e => {
+                              const v = parseInt(e.target.value) || 1;
+                              updateQty(idx, v - item.cantidad);
+                            }}
+                            className="w-12 h-7 text-center text-xs font-semibold px-1"
+                          />
                           <button onClick={() => updateQty(idx, 1)}
-                            className="h-6 w-6 rounded border flex items-center justify-center hover:bg-slate-100">
+                            className="h-6 w-6 rounded border flex items-center justify-center hover:bg-slate-100 shrink-0">
                             <Plus className="h-3 w-3" />
                           </button>
                         </div>

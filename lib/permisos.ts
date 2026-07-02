@@ -95,6 +95,19 @@ const PERMISOS_MODULO: Record<UserRole, Modulo[]> = {
     'activos_fijos', 'conciliacion_bancaria',
     'reportes',
   ],
+
+  finanzas: [
+    'dashboard',
+    // Inventario completo
+    'productos', 'categorias', 'bodegas',
+    'proveedores', 'entradas', 'despachos', 'movimientos', 'kardex',
+    // Cuentas por pagar (facturas proveedores + pagos)
+    'cxp_facturas', 'cxp_documentos', 'cxp_pagos',
+    // Cuentas por cobrar (ver saldos y cobros)
+    'cxc', 'cxc_cartera',
+    // Historial de ventas (solo lectura)
+    'historial_ventas',
+  ],
 };
 
 const PERMISOS_ACCION: Record<UserRole, Accion[]> = {
@@ -110,6 +123,9 @@ const PERMISOS_ACCION: Record<UserRole, Accion[]> = {
   ],
   contador: [
     'ver_costos', 'ver_ganancias', 'editar_asientos', 'cerrar_periodos',
+  ],
+  finanzas: [
+    'ver_costos', 'editar_productos',
   ],
 };
 
@@ -205,4 +221,5 @@ export const DESCRIPCION_ROLES: Record<UserRole, string> = {
   vendedor:  'POS, ventas, clientes, facturación y cobranzas',
   bodeguero: 'Inventario, productos, entradas y despachos',
   contador:  'Contabilidad, tributario, reportes y cuentas por pagar/cobrar',
+  finanzas:  'Inventario completo, pagos a proveedores y cuentas por cobrar',
 };

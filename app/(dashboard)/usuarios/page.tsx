@@ -38,18 +38,19 @@ const ROLES: { value: UserRole; label: string; color: string }[] = [
   { value: 'vendedor',  label: 'Vendedor',      color: 'bg-blue-100 text-blue-700' },
   { value: 'bodeguero', label: 'Bodeguero',     color: 'bg-green-100 text-green-700' },
   { value: 'contador',  label: 'Contador',      color: 'bg-orange-100 text-orange-700' },
+  { value: 'finanzas',  label: 'Finanzas',      color: 'bg-teal-100 text-teal-700' },
 ];
 
 const createSchema = z.object({
   nombre:   z.string().min(2, 'Mínimo 2 caracteres'),
   email:    z.string().email('Email inválido'),
   password: z.string().min(8, 'Mínimo 8 caracteres'),
-  rol:      z.enum(['admin', 'vendedor', 'bodeguero', 'contador']),
+  rol:      z.enum(['admin', 'vendedor', 'bodeguero', 'contador', 'finanzas']),
 });
 
 const editSchema = z.object({
   nombre:   z.string().min(2, 'Mínimo 2 caracteres'),
-  rol:      z.enum(['admin', 'vendedor', 'bodeguero', 'contador']),
+  rol:      z.enum(['admin', 'vendedor', 'bodeguero', 'contador', 'finanzas']),
   password: z.string().min(8, 'Mínimo 8 caracteres').optional().or(z.literal('')),
 });
 

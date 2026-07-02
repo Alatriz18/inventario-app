@@ -1,5 +1,5 @@
 // ─── USUARIOS ──────────────────────────────────────────────────────────────
-export type UserRole = 'admin' | 'vendedor' | 'bodeguero' | 'contador';
+export type UserRole = 'admin' | 'vendedor' | 'bodeguero' | 'contador' | 'finanzas';
 
 export interface AppUser {
   uid: string;

@@ -56,8 +56,9 @@ function currency(v: number) {
 export default function POSPage() {
   const { user } = useAuth();
   const router   = useRouter();
-  const verCostos = user ? tieneAccesoAccion(user.rol, 'ver_costos') : false;
-  const verGanancias = user ? tieneAccesoAccion(user.rol, 'ver_ganancias') : false;
+  const verCostos         = user ? tieneAccesoAccion(user.rol, 'ver_costos')      : false;
+  const verGanancias      = user ? tieneAccesoAccion(user.rol, 'ver_ganancias')   : false;
+  const puedeEditarPrecios = user ? tieneAccesoAccion(user.rol, 'editar_precios') : false;
 
   const [productos,      setProductos]      = useState<Producto[]>([]);
   const [clientes,       setClientes]       = useState<Cliente[]>([]);
@@ -183,6 +184,22 @@ export default function POSPage() {
         descuento: d,
         subtotal:  item.cantidad * precioFinal,
         ganancia:  (precioFinal - item.precioCompraRef) * item.cantidad,
+      };
+      return updated;
+    });
+  };
+
+  const updatePrecio = (idx: number, newPrice: number) => {
+    setCart(prev => {
+      const updated = [...prev];
+      const item    = updated[idx];
+      const precio  = Math.max(0, newPrice);
+      const precioFinal = precio * (1 - item.descuento / 100);
+      updated[idx] = {
+        ...item,
+        precioUnitario: precio,
+        subtotal:       item.cantidad * precioFinal,
+        ganancia:       (precioFinal - item.precioCompraRef) * item.cantidad,
       };
       return updated;
     });
@@ -383,8 +400,17 @@ export default function POSPage() {
                           </button>
                         </div>
                       </td>
-                      <td className="px-2 py-2.5 text-right font-medium">
-                        {currency(item.precioUnitario)}
+                      <td className="px-2 py-2.5 text-right">
+                        {puedeEditarPrecios ? (
+                          <Input
+                            type="number" min="0" step="0.01"
+                            value={item.precioUnitario}
+                            onChange={e => updatePrecio(idx, Number(e.target.value))}
+                            className="h-7 text-right text-xs w-20 ml-auto font-medium"
+                          />
+                        ) : (
+                          <span className="font-medium">{currency(item.precioUnitario)}</span>
+                        )}
                       </td>
                       <td className="px-2 py-2.5">
                         <Input

@@ -116,7 +116,7 @@ const PERMISOS_ACCION: Record<UserRole, Accion[]> = {
     'anular_ventas', 'editar_asientos', 'cerrar_periodos',
   ],
   vendedor: [
-    'anular_ventas',
+    'anular_ventas', 'editar_precios',
   ],
   bodeguero: [
     'editar_productos', 'ver_costos',

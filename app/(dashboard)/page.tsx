@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState, useMemo, ComponentType } from 'react';
+import { useEffect, useState, useMemo } from 'react';
 import Link from 'next/link';
 import { format, subDays, startOfDay, startOfMonth } from 'date-fns';
 import { es } from 'date-fns/locale';
@@ -92,13 +92,13 @@ export default function DashboardPage() {
   const nombre  = user?.nombre?.split(' ')[0] ?? '';
   const fechaHoy = format(new Date(), "EEEE d 'de' MMMM", { locale: es });
 
-  const accesoRapido: { href: string; icon: ComponentType<{ className?: string }>; label: string; modulo: Modulo }[] = [
-    { href: '/ventas/pos',            icon: ShoppingCart, label: 'Punto de Venta',   modulo: 'pos' },
-    { href: '/entradas',              icon: PackagePlus,  label: 'Nueva Entrada',    modulo: 'entradas' },
-    { href: '/facturacion/emitir',    icon: FileText,     label: 'Emitir Factura',   modulo: 'facturacion_emitir' },
-    { href: '/cuentas-por-cobrar',    icon: DollarSign,   label: 'Cuentas por Cobrar', modulo: 'cxc' },
-    { href: '/clientes',              icon: Users,        label: 'Clientes',         modulo: 'clientes' },
-    { href: '/cuentas-por-pagar/pagos', icon: ClipboardList, label: 'Pagos pendientes', modulo: 'cxp_pagos' },
+  const accesoRapido = [
+    { href: '/ventas/pos',              icon: ShoppingCart,  label: 'Punto de Venta',     modulo: 'pos'               as Modulo },
+    { href: '/entradas',                icon: PackagePlus,   label: 'Nueva Entrada',      modulo: 'entradas'          as Modulo },
+    { href: '/facturacion/emitir',      icon: FileText,      label: 'Emitir Factura',     modulo: 'facturacion_emitir' as Modulo },
+    { href: '/cuentas-por-cobrar',      icon: DollarSign,    label: 'Cuentas por Cobrar', modulo: 'cxc'               as Modulo },
+    { href: '/clientes',                icon: Users,         label: 'Clientes',           modulo: 'clientes'          as Modulo },
+    { href: '/cuentas-por-pagar/pagos', icon: ClipboardList, label: 'Pagos pendientes',   modulo: 'cxp_pagos'         as Modulo },
   ].filter(a => user && tieneAccesoModulo(user.rol, a.modulo));
 
   return (

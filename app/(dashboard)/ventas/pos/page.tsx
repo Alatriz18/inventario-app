@@ -6,6 +6,7 @@ import { toast } from 'sonner';
 import {
   Search, Trash2, Plus, Minus, ShoppingCart, User,
   Banknote, CreditCard, ArrowRightLeft, CheckCircle, UserPlus, Clock, CalendarDays, Printer,
+  Building2, FileCheck,
 } from 'lucide-react';
 
 import { Button }    from '@/components/ui/button';
@@ -500,10 +501,12 @@ export default function POSPage() {
           <Label className="text-sm font-semibold">Método de pago</Label>
           <div className="grid grid-cols-2 gap-2">
             {([
-              { value: 'efectivo',      label: 'Efectivo',      icon: Banknote },
-              { value: 'tarjeta',       label: 'Tarjeta',       icon: CreditCard },
-              { value: 'transferencia', label: 'Transfer.',     icon: ArrowRightLeft },
-              { value: 'credito',       label: 'Crédito',       icon: Clock },
+              { value: 'efectivo',      label: 'Efectivo',   icon: Banknote },
+              { value: 'tarjeta',       label: 'Tarjeta',    icon: CreditCard },
+              { value: 'transferencia', label: 'Transfer.',  icon: ArrowRightLeft },
+              { value: 'deposito',      label: 'Depósito',   icon: Building2 },
+              { value: 'cheque',        label: 'Cheque',     icon: FileCheck },
+              { value: 'credito',       label: 'Crédito',    icon: Clock },
             ] as const).map(({ value, label, icon: Icon }) => (
               <button key={value}
                 onClick={() => setMetodoPago(value)}

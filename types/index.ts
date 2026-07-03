@@ -531,7 +531,7 @@ export interface ConfigEmail {
 
 // ─── CUENTAS POR COBRAR (CxC) ──────────────────────────────────────────────
 
-export type EstadoCxC = 'pendiente' | 'parcial' | 'pagada' | 'vencida';
+export type EstadoCxC = 'pendiente' | 'parcial' | 'pagada' | 'vencida' | 'anulada';
 
 export interface CobroCxC {
   id:           string;

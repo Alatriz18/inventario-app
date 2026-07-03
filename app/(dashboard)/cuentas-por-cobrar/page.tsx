@@ -75,6 +75,7 @@ export default function CxCPage() {
   const filtradas = useMemo(() => {
     const q = search.toLowerCase();
     return cxcList.filter(c => {
+      if (c.estado === 'anulada') return false; // nunca mostrar anuladas
       if (q && !c.clienteNombre.toLowerCase().includes(q) && !c.clienteIdentificacion.includes(q)) return false;
       if (tabActivo === 'pendientes') return c.estado === 'pendiente' || c.estado === 'parcial';
       if (tabActivo === 'vencidas')   return c.estado === 'vencida';
@@ -85,7 +86,7 @@ export default function CxCPage() {
 
   // ── KPIs ──
   const kpis = useMemo(() => {
-    const activas = cxcList.filter(c => c.estado !== 'pagada');
+    const activas = cxcList.filter(c => c.estado !== 'pagada' && c.estado !== 'anulada');
     return {
       totalPendiente: activas.reduce((s, c) => s + c.saldoPendiente, 0),
       countPendiente: activas.filter(c => c.estado === 'pendiente').length,
@@ -98,7 +99,7 @@ export default function CxCPage() {
   const aging = useMemo(() => {
     const grupos = { corriente: 0, dias30: 0, dias60: 0, dias90: 0, masde90: 0 };
     const hoy = new Date();
-    cxcList.filter(c => c.estado !== 'pagada').forEach(c => {
+    cxcList.filter(c => c.estado !== 'pagada' && c.estado !== 'anulada').forEach(c => {
       const venc = (c.fechaVencimiento as any)?.toDate?.() ?? new Date(c.fechaVencimiento);
       const dias = differenceInDays(hoy, venc);
       if (dias <= 0)        grupos.corriente += c.saldoPendiente;

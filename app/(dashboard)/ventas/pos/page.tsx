@@ -153,8 +153,8 @@ export default function POSPage() {
       const updated = [...prev];
       const item    = updated[idx];
       const prod    = productos.find(p => p.id === item.productoId);
-      const newQty  = item.cantidad + delta;
-      if (newQty < 1) return prev;
+      const newQty  = Math.round((item.cantidad + delta) * 100) / 100;
+      if (newQty <= 0) return prev;
       if (prod && newQty > prod.stockActual) {
         toast.error(`Stock máximo: ${prod.stockActual}`);
         return prev;
@@ -392,13 +392,13 @@ export default function POSPage() {
                             <Minus className="h-3 w-3" />
                           </button>
                           <Input
-                            type="number" min="1"
+                            type="number" min="0.5" step="0.5"
                             value={item.cantidad}
                             onChange={e => {
-                              const v = parseInt(e.target.value) || 1;
-                              updateQty(idx, v - item.cantidad);
+                              const v = parseFloat(e.target.value) || 0.5;
+                              updateQty(idx, Math.round((v - item.cantidad) * 100) / 100);
                             }}
-                            className="w-12 h-7 text-center text-xs font-semibold px-1"
+                            className="w-14 h-7 text-center text-xs font-semibold px-1"
                           />
                           <button onClick={() => updateQty(idx, 1)}
                             className="h-6 w-6 rounded border flex items-center justify-center hover:bg-slate-100 shrink-0">

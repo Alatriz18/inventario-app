@@ -1,6 +1,6 @@
 import {
   collection, doc, onSnapshot,
-  query, orderBy, serverTimestamp, runTransaction,
+  query, orderBy, serverTimestamp, runTransaction, deleteDoc,
 } from 'firebase/firestore';
 import { db } from './config';
 import { Venta, EstadoCxC } from '@/types';
@@ -168,5 +168,23 @@ export async function anularVenta(
     }
 
     tx.update(ventaRef, { estado: 'anulada', anuladaAt: serverTimestamp() });
+
+    // Si era venta a crédito, cancelar el registro CxC vinculado
+    if (venta.esCxC && (venta as any).cxcId) {
+      const cxcRef  = doc(db, 'cuentas_cobrar', (venta as any).cxcId);
+      const cxcSnap = await tx.get(cxcRef);
+      if (cxcSnap.exists()) {
+        const cxcData = cxcSnap.data();
+        if (cxcData.estado !== 'pagada') {
+          // Sin cobros: eliminar el registro; con cobros parciales: marcar anulada
+          const tieneCobros = Array.isArray(cxcData.cobros) && cxcData.cobros.length > 0;
+          if (tieneCobros) {
+            tx.update(cxcRef, { estado: 'anulada' as EstadoCxC, anuladaAt: serverTimestamp() });
+          } else {
+            tx.delete(cxcRef);
+          }
+        }
+      }
+    }
   });
 }

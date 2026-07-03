@@ -66,7 +66,7 @@ export default function POSPage() {
   const [cart,           setCart]           = useState<CartItem[]>([]);
   const [search,         setSearch]         = useState('');
   const [cliente,        setCliente]        = useState<Cliente>(CONSUMIDOR_FINAL);
-  const [metodoPago,     setMetodoPago]     = useState<MetodoPago>('efectivo');
+  const [metodoPago,     setMetodoPago]     = useState<MetodoPago>('deposito');
   const [descuento,      setDescuento]      = useState(0);
   const [montoPagado,    setMontoPagado]    = useState('');
   const [diasCredito,    setDiasCredito]    = useState(30);
@@ -210,9 +210,6 @@ export default function POSPage() {
   const confirmarVenta = async () => {
     if (!user) return;
     if (cart.length === 0) { toast.error('El carrito está vacío'); return; }
-    if (metodoPago === 'efectivo' && Number(montoPagado) < total) {
-      toast.error('El monto pagado es insuficiente'); return;
-    }
     if (metodoPago === 'credito' && cliente.id === 'consumidor_final') {
       toast.error('Selecciona un cliente identificado para ventas a crédito'); return;
     }
@@ -283,7 +280,7 @@ export default function POSPage() {
       setCliente(CONSUMIDOR_FINAL);
       setDescuento(0);
       setMontoPagado('');
-      setMetodoPago('efectivo');
+      setMetodoPago('deposito');
     } catch (err: any) {
       toast.error(err.message ?? 'Error al registrar la venta');
     } finally {
@@ -501,10 +498,9 @@ export default function POSPage() {
           <Label className="text-sm font-semibold">Método de pago</Label>
           <div className="grid grid-cols-2 gap-2">
             {([
-              { value: 'efectivo',      label: 'Efectivo',   icon: Banknote },
+              { value: 'deposito',      label: 'Depósito',   icon: Building2 },
               { value: 'tarjeta',       label: 'Tarjeta',    icon: CreditCard },
               { value: 'transferencia', label: 'Transfer.',  icon: ArrowRightLeft },
-              { value: 'deposito',      label: 'Depósito',   icon: Building2 },
               { value: 'cheque',        label: 'Cheque',     icon: FileCheck },
               { value: 'credito',       label: 'Crédito',    icon: Clock },
             ] as const).map(({ value, label, icon: Icon }) => (
@@ -543,27 +539,6 @@ export default function POSPage() {
             </div>
           )}
 
-          {metodoPago === 'efectivo' && (
-            <div className="space-y-1.5">
-              <Label className="text-xs">Monto recibido</Label>
-              <div className="relative">
-                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-sm">$</span>
-                <Input
-                  type="number" step="0.01" min="0"
-                  placeholder="0.00"
-                  className="pl-7"
-                  value={montoPagado}
-                  onChange={e => setMontoPagado(e.target.value)}
-                />
-              </div>
-              {Number(montoPagado) > 0 && (
-                <div className={`flex justify-between text-sm font-semibold px-1 ${cambio >= 0 ? 'text-green-600' : 'text-red-600'}`}>
-                  <span>Cambio:</span>
-                  <span>{currency(cambio)}</span>
-                </div>
-              )}
-            </div>
-          )}
         </div>
 
         {/* Fecha de venta */}
@@ -692,7 +667,7 @@ export default function POSPage() {
                 <span className="text-slate-500">{esCxC ? 'Total a cobrar' : 'Total cobrado'}</span>
                 <span className="font-bold">{currency(total)}</span>
               </div>
-              {!esCxC && metodoPago === 'efectivo' && Number(montoPagado) > 0 && (
+              {false && (
                 <div className="flex justify-between text-green-600">
                   <span>Cambio</span>
                   <span className="font-bold">{currency(cambio)}</span>

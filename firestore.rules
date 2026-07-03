@@ -20,7 +20,11 @@ service cloud.firestore {
 
     function isStaff() {
       return isAuth() && getUser().activo == true &&
-        getUser().rol in ['admin', 'vendedor', 'bodeguero', 'contador'];
+        getUser().rol in ['admin', 'vendedor', 'bodeguero', 'contador', 'finanzas'];
+    }
+
+    function isFinanzas() {
+      return isAdmin() || hasRole('finanzas');
     }
 
     function isContador() {
@@ -60,8 +64,10 @@ service cloud.firestore {
     // ── Inventario ────────────────────────────────────────────────────────
 
     match /productos/{id} {
-      allow read: if isStaff();
-      allow write: if isAdmin() || hasRole('bodeguero');
+      allow read:   if isStaff();
+      allow create: if isAdmin() || hasRole('bodeguero') || hasRole('finanzas');
+      allow update: if isAdmin() || hasRole('bodeguero') || hasRole('finanzas') || hasRole('vendedor');
+      allow delete: if isAdmin();
     }
 
     match /categorias/{id} {
@@ -86,14 +92,14 @@ service cloud.firestore {
 
     match /entradas/{id} {
       allow read: if isStaff();
-      allow create: if isAdmin() || hasRole('bodeguero');
+      allow create: if isAdmin() || hasRole('bodeguero') || hasRole('finanzas');
       allow update: if isAdmin();
       allow delete: if isAdmin();
     }
 
     match /despachos/{id} {
       allow read: if isStaff();
-      allow create: if isAdmin() || hasRole('bodeguero');
+      allow create: if isAdmin() || hasRole('bodeguero') || hasRole('finanzas');
       allow update: if isAdmin();
       allow delete: if isAdmin();
     }
@@ -134,8 +140,8 @@ service cloud.firestore {
 
     match /cuentas_cobrar/{id} {
       allow read: if isStaff();
-      allow create: if isAdmin() || hasRole('vendedor') || hasRole('contador');
-      allow update: if isAdmin() || hasRole('vendedor') || hasRole('contador');
+      allow create: if isAdmin() || hasRole('vendedor') || hasRole('contador') || hasRole('finanzas');
+      allow update: if isAdmin() || hasRole('vendedor') || hasRole('contador') || hasRole('finanzas');
       allow delete: if isAdmin();
     }
 
@@ -143,18 +149,18 @@ service cloud.firestore {
 
     match /facturas_proveedor/{id} {
       allow read: if isStaff();
-      allow write: if isAdmin() || hasRole('contador') || hasRole('bodeguero');
+      allow write: if isAdmin() || hasRole('contador') || hasRole('bodeguero') || hasRole('finanzas');
     }
 
     // Notas de crédito / débito recibidas de proveedores (importadas por XML)
     match /documentos_recibidos/{id} {
       allow read: if isStaff();
-      allow write: if isAdmin() || hasRole('contador') || hasRole('bodeguero');
+      allow write: if isAdmin() || hasRole('contador') || hasRole('bodeguero') || hasRole('finanzas');
     }
 
     match /pagos_proveedor/{id} {
       allow read: if isStaff();
-      allow write: if isAdmin() || hasRole('contador');
+      allow write: if isAdmin() || hasRole('contador') || hasRole('finanzas');
     }
 
     // ── Contabilidad ──────────────────────────────────────────────────────
@@ -166,8 +172,8 @@ service cloud.firestore {
 
     match /asientos/{id} {
       allow read: if isStaff();
-      allow create: if isContador();
-      allow update: if isContador();
+      allow create: if isContador() || hasRole('finanzas');
+      allow update: if isContador() || hasRole('finanzas');
       allow delete: if isAdmin();
     }
 

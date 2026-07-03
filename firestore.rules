@@ -171,10 +171,10 @@ service cloud.firestore {
     }
 
     match /asientos/{id} {
-      allow read: if isStaff();
-      allow create: if isContador() || hasRole('finanzas');
+      allow read:   if isStaff();
+      allow create: if isContador() || hasRole('finanzas') || hasRole('vendedor');
       allow update: if isContador() || hasRole('finanzas');
-      allow delete: if isAdmin();
+      allow delete: if isAdmin() || hasRole('vendedor');
     }
 
     match /periodos_contables/{id} {

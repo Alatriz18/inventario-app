@@ -1,6 +1,7 @@
 import {
   collection, doc, onSnapshot,
   query, orderBy, serverTimestamp, runTransaction,
+  where, getDocs, writeBatch,
 } from 'firebase/firestore';
 import { db } from './config';
 import { Venta, EstadoCxC } from '@/types';
@@ -184,4 +185,20 @@ export async function anularVenta(
       }
     }
   });
+
+  // Eliminar asiento contable vinculado (si no está bloqueado por período cerrado)
+  const asientosSnap = await getDocs(
+    query(
+      collection(db, 'asientos'),
+      where('referenciaId',   '==', ventaId),
+      where('referenciaTipo', '==', 'venta'),
+    )
+  );
+  if (!asientosSnap.empty) {
+    const batch = writeBatch(db);
+    asientosSnap.docs.forEach(d => {
+      if (!d.data().bloqueado) batch.delete(d.ref);
+    });
+    await batch.commit();
+  }
 }

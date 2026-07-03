@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState, useMemo } from 'react';
+import { useEffect, useState, useMemo, ComponentType } from 'react';
 import Link from 'next/link';
 import { format, subDays, startOfDay, startOfMonth } from 'date-fns';
 import { es } from 'date-fns/locale';
@@ -8,7 +8,7 @@ import { useAuth } from '@/context/AuthContext';
 import {
   ShoppingCart, Package, AlertTriangle, DollarSign,
   TrendingUp, TrendingDown, ArrowRight,
-  PackagePlus, FileText, Users, ReceiptText,
+  PackagePlus, FileText, Users, ClipboardList,
 } from 'lucide-react';
 
 import { subscribeToProductos } from '@/lib/firebase/productos';
@@ -92,13 +92,13 @@ export default function DashboardPage() {
   const nombre  = user?.nombre?.split(' ')[0] ?? '';
   const fechaHoy = format(new Date(), "EEEE d 'de' MMMM", { locale: es });
 
-  const accesoRapido: { href: string; icon: React.ElementType; label: string; modulo: Modulo }[] = [
+  const accesoRapido: { href: string; icon: ComponentType<{ className?: string }>; label: string; modulo: Modulo }[] = [
     { href: '/ventas/pos',            icon: ShoppingCart, label: 'Punto de Venta',   modulo: 'pos' },
     { href: '/entradas',              icon: PackagePlus,  label: 'Nueva Entrada',    modulo: 'entradas' },
     { href: '/facturacion/emitir',    icon: FileText,     label: 'Emitir Factura',   modulo: 'facturacion_emitir' },
     { href: '/cuentas-por-cobrar',    icon: DollarSign,   label: 'Cuentas por Cobrar', modulo: 'cxc' },
     { href: '/clientes',              icon: Users,        label: 'Clientes',         modulo: 'clientes' },
-    { href: '/cuentas-por-pagar/pagos', icon: ReceiptText, label: 'Pagos pendientes', modulo: 'cxp_pagos' },
+    { href: '/cuentas-por-pagar/pagos', icon: ClipboardList, label: 'Pagos pendientes', modulo: 'cxp_pagos' },
   ].filter(a => user && tieneAccesoModulo(user.rol, a.modulo));
 
   return (

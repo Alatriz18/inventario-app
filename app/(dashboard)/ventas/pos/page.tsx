@@ -393,10 +393,19 @@ export default function POSPage() {
                           </button>
                           <Input
                             type="number" min="0.1" step="0.1"
-                            value={item.cantidad}
-                            onChange={e => {
-                              const v = Math.max(0.1, parseFloat(e.target.value) || 0.1);
-                              updateQty(idx, Math.round((v - item.cantidad) * 100) / 100);
+                            key={`qty-${item.productoId}-${item.cantidad}`}
+                            defaultValue={item.cantidad}
+                            onBlur={e => {
+                              const v = parseFloat(e.target.value);
+                              if (!v || v <= 0) {
+                                e.target.value = String(item.cantidad);
+                                toast.error('La cantidad debe ser mayor a 0');
+                                return;
+                              }
+                              const rounded = Math.round(v * 10) / 10;
+                              if (rounded !== item.cantidad) {
+                                updateQty(idx, Math.round((rounded - item.cantidad) * 100) / 100);
+                              }
                             }}
                             className="w-14 h-7 text-center text-xs font-semibold px-1"
                           />

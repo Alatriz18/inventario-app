@@ -392,10 +392,10 @@ export default function POSPage() {
                             <Minus className="h-3 w-3" />
                           </button>
                           <Input
-                            type="number" min="0.5" step="0.5"
+                            type="number" min="0.1" step="0.1"
                             value={item.cantidad}
                             onChange={e => {
-                              const v = parseFloat(e.target.value) || 0.5;
+                              const v = Math.max(0.1, parseFloat(e.target.value) || 0.1);
                               updateQty(idx, Math.round((v - item.cantidad) * 100) / 100);
                             }}
                             className="w-14 h-7 text-center text-xs font-semibold px-1"

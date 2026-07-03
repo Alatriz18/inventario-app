@@ -77,6 +77,7 @@ const PERMISOS_MODULO: Record<UserRole, Modulo[]> = {
     'dashboard',
     'productos', 'categorias', 'bodegas',
     'proveedores', 'entradas', 'despachos', 'movimientos', 'kardex',
+    'cxp_facturas', 'cxp_documentos',
   ],
 
   contador: [
@@ -84,6 +85,7 @@ const PERMISOS_MODULO: Record<UserRole, Modulo[]> = {
     'productos',
     'historial_ventas',
     'facturacion_comprobantes',
+    'notas_credito', 'notas_debito',
     'cxc', 'cxc_cartera',
     'cxp_facturas', 'cxp_documentos', 'cxp_pagos',
     'plan_cuentas', 'centros_costo', 'config_contable',

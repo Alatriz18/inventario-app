@@ -41,8 +41,10 @@ function dashedLine(doc: jsPDF, y: number) {
 
 const FORMA_PAGO_LABEL: Record<string, string> = {
   efectivo:      'Efectivo',
+  deposito:      'Depósito',
   tarjeta:       'Tarjeta',
   transferencia: 'Transferencia',
+  cheque:        'Cheque',
   credito:       'Crédito',
 };
 

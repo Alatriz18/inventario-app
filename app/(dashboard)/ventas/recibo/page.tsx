@@ -3,7 +3,7 @@
 import { useEffect, useState, Suspense } from 'react';
 import { useSearchParams }      from 'next/navigation';
 import { toast }                from 'sonner';
-import { FileText, Download, Eye, Printer } from 'lucide-react';
+import { FileText, Eye, Printer } from 'lucide-react';
 
 import PageHeader   from '@/components/shared/PageHeader';
 import { Button }   from '@/components/ui/button';
@@ -15,7 +15,8 @@ import {
 import { subscribeToVentas } from '@/lib/firebase/ventas';
 import { getConfigSRI }      from '@/lib/firebase/config-sri';
 import { Venta }             from '@/types';
-import { descargarRIDE, abrirRIDEenNuevaPestana, DatosRIDE } from '@/lib/sri/ride-pdf';
+import { descargarTicket }   from '@/lib/pdf/ticket-venta';
+import { abrirRIDEenNuevaPestana, DatosRIDE } from '@/lib/sri/ride-pdf';
 
 function currency(v: number) { return `$${v.toFixed(2)}`; }
 
@@ -31,7 +32,7 @@ function buildReciboDesdeVenta(venta: Venta, config: any): DatosRIDE {
     puntoEmision:            config.puntoEmision,
     obligadoContabilidad:    config.obligadoContabilidad ?? 'NO',
     ambiente:                config.ambiente ?? '1',
-    secuencial:              0, // recibos internos no tienen secuencial SRI
+    secuencial:              0,
     fechaEmision:            fecha,
     tipoIdComprador:         inferirTipoId(venta.clienteIdentificacion),
     identificacionComprador: venta.clienteIdentificacion,
@@ -45,12 +46,12 @@ function buildReciboDesdeVenta(venta: Venta, config: any): DatosRIDE {
       subtotal:       it.subtotal,
       tieneIVA:       false,
     })),
-    subtotal0:      venta.subtotal,
-    subtotal15:     0,
-    totalDescuento: venta.subtotal * ((venta.descuentoGlobal ?? 0) / 100),
-    iva:            0,
-    total:          venta.total,
-    formaPago:      venta.metodoPago ?? 'efectivo',
+    subtotal0:        venta.subtotal,
+    subtotal15:       0,
+    totalDescuento:   venta.subtotal * ((venta.descuentoGlobal ?? 0) / 100),
+    iva:              0,
+    total:            venta.total,
+    formaPago:        venta.metodoPago ?? 'efectivo',
     mensajeAdicional: 'Documento sin validez tributaria — solo control interno',
   };
 }
@@ -64,9 +65,9 @@ function inferirTipoId(id: string): string {
 
 function ReciboInternoInner() {
   const searchParams = useSearchParams();
-  const [ventas,   setVentas]   = useState<Venta[]>([]);
-  const [loading,  setLoading]  = useState(true);
-  const [config,   setConfig]   = useState<any>(null);
+  const [ventas,    setVentas]    = useState<Venta[]>([]);
+  const [loading,   setLoading]   = useState(true);
+  const [config,    setConfig]    = useState<any>(null);
   const [generando, setGenerando] = useState<string | null>(null);
 
   useEffect(() => {
@@ -75,26 +76,16 @@ function ReciboInternoInner() {
     return u;
   }, []);
 
-  // Si viene ventaId por query param, genera el recibo automáticamente
+  // Si viene ventaId por query param, imprime automáticamente en Zebra
   useEffect(() => {
     const ventaId = searchParams.get('ventaId');
     if (!ventaId || !config) return;
     const venta = ventas.find(v => v.id === ventaId);
-    if (venta) handleDescargar(venta);
+    if (venta) handleZebra(venta);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [searchParams, config, ventas]);
 
-  const handleDescargar = async (venta: Venta) => {
-    if (!config) { toast.error('Configura el SRI primero'); return; }
-    setGenerando(venta.id!);
-    try {
-      const datos = buildReciboDesdeVenta(venta, config);
-      descargarRIDE(datos, `Recibo-${venta.id?.slice(-6)}.pdf`);
-      toast.success('Recibo descargado');
-    } catch { toast.error('Error al generar recibo'); }
-    finally { setGenerando(null); }
-  };
-
+  // Ver el recibo completo (formato A4) en pantalla
   const handleVer = async (venta: Venta) => {
     if (!config) { toast.error('Configura el SRI primero'); return; }
     setGenerando(venta.id!);
@@ -105,7 +96,22 @@ function ReciboInternoInner() {
     finally { setGenerando(null); }
   };
 
-  // Solo ventas completadas sin comprobante electrónico
+  // Descargar ticket de 72mm para impresora Zebra
+  const handleZebra = async (venta: Venta) => {
+    if (!config) { toast.error('Configura el SRI primero'); return; }
+    setGenerando(venta.id!);
+    try {
+      descargarTicket({
+        nombreNegocio: config.nombreComercial || config.razonSocial || 'Mi Negocio',
+        ruc:           config.ruc || '',
+        direccion:     config.direccionMatriz || '',
+        venta,
+      });
+      toast.success('Ticket listo para imprimir');
+    } catch { toast.error('Error al generar ticket'); }
+    finally { setGenerando(null); }
+  };
+
   const ventasSinComp = ventas.filter(
     v => v.estado === 'completada' && !v.comprobanteId
   );
@@ -176,12 +182,12 @@ function ReciboInternoInner() {
                         </Button>
                         <Button
                           variant="outline" size="sm"
-                          onClick={() => handleDescargar(v)}
+                          onClick={() => handleZebra(v)}
                           disabled={generando === v.id}
                           className="h-7 gap-1 text-xs"
                         >
-                          <Download className="h-3 w-3" />
-                          {generando === v.id ? 'Generando...' : 'PDF'}
+                          <Printer className="h-3 w-3" />
+                          {generando === v.id ? 'Generando...' : 'Zebra'}
                         </Button>
                       </div>
                     </TableCell>

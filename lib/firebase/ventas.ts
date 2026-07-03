@@ -146,18 +146,21 @@ export async function anularVenta(
     }
 
     for (const item of venta.items) {
-      const anterior = stockPrevio.get(item.productoId) ?? 0;
-      tx.update(doc(db, 'productos', item.productoId), {
-        stockActual: anterior + item.cantidad,
-        updatedAt:   serverTimestamp(),
-      });
+      const anterior = stockPrevio.get(item.productoId);
+      // Solo revertir stock si el producto aún existe en Firestore
+      if (anterior !== undefined) {
+        tx.update(doc(db, 'productos', item.productoId), {
+          stockActual: anterior + item.cantidad,
+          updatedAt:   serverTimestamp(),
+        });
+      }
       tx.set(doc(collection(db, 'movimientos')), {
         tipo:           'devolucion_cliente',
         productoId:     item.productoId,
         productoNombre: item.nombre,
         cantidad:       item.cantidad,
-        stockAnterior:  anterior,
-        stockNuevo:     anterior + item.cantidad,
+        stockAnterior:  anterior ?? 0,
+        stockNuevo:     (anterior ?? 0) + item.cantidad,
         referencia:     ventaId,
         referenciaType: 'devolucion',
         usuarioId,

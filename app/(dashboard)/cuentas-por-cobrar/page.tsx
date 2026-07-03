@@ -160,7 +160,7 @@ export default function CxCPage() {
   const abrirCobro = (cxc: CuentaCobrar) => {
     setCxcSel(cxc);
     setMontoCobro(cxc.saldoPendiente.toFixed(2));
-    setMetodoPago('efectivo');
+    setMetodoPago('deposito');
     setRefCobro('');
     setRetFuente('');
     setRetIVA('');
@@ -195,7 +195,8 @@ export default function CxCPage() {
         fecha:        new Date(),
         clienteNombre:cxcSel.clienteNombre,
         monto,
-        usaBanco:     metodoPago !== 'efectivo',
+        usaBanco:     true,
+        metodoCobro:  metodoPago,
         retFuente:    rf,
         retIVA:       ri,
         usuarioId:    user.uid,
@@ -466,7 +467,8 @@ export default function CxCPage() {
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="efectivo">Efectivo</SelectItem>
+                      <SelectItem value="deposito">Papeleta de depósito</SelectItem>
+                      <SelectItem value="cheque">Cheque</SelectItem>
                       <SelectItem value="transferencia">Transferencia</SelectItem>
                       <SelectItem value="tarjeta">Tarjeta</SelectItem>
                     </SelectContent>

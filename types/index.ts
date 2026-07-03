@@ -163,7 +163,7 @@ export interface ItemVenta {
 }
 
 export type EstadoVenta = 'completada' | 'anulada';
-export type MetodoPago = 'efectivo' | 'tarjeta' | 'transferencia' | 'credito';
+export type MetodoPago = 'efectivo' | 'tarjeta' | 'transferencia' | 'credito' | 'deposito' | 'cheque';
 
 export interface Venta {
   id: string;

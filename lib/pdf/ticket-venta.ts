@@ -64,26 +64,10 @@ export interface DatosTicket {
 
 // ── Generador ───────────────────────────────────────────────────────────
 
-export function generarTicketVenta(datos: DatosTicket): Uint8Array {
+// Renderiza el ticket sobre `doc` y devuelve el y final (para medir el alto real)
+function renderTicket(doc: jsPDF, datos: DatosTicket): number {
   const { venta } = datos;
   const items = venta.items;
-
-  // Calcular alto dinámico
-  const headerH     = 28;
-  const infoClientH = 14;
-  const tableHeaderH = 5;
-  const itemsH      = items.length * 8;
-  const totalsH     = 30;
-  const footerH     = 20;
-  const extraH      = 10;
-  const totalH      = headerH + infoClientH + tableHeaderH + itemsH + totalsH + footerH + extraH;
-
-  const doc = new jsPDF({
-    unit:       'mm',
-    format:     [TICKET_W, Math.max(totalH, 80)],
-    orientation:'portrait',
-  });
-
   let y = MARGIN + 1;
 
   // ═══ CABECERA ═══
@@ -161,7 +145,6 @@ export function generarTicketVenta(datos: DatosTicket): Uint8Array {
   y += 2;
 
   // ═══ TABLA DE ITEMS ═══
-  // Encabezado
   doc.setFont(FONT, 'bold');
   doc.setFontSize(5.5);
   doc.text('Cant', MARGIN, y);
@@ -172,7 +155,6 @@ export function generarTicketVenta(datos: DatosTicket): Uint8Array {
   dashedLine(doc, y);
   y += 2;
 
-  // Items
   doc.setFont(FONT, 'normal');
   doc.setFontSize(5.5);
   items.forEach(item => {
@@ -239,8 +221,21 @@ export function generarTicketVenta(datos: DatosTicket): Uint8Array {
   y += LINE_S;
   doc.setFontSize(5);
   doc.text(`Impreso: ${formatFecha(new Date())}`, TICKET_W / 2, y, { align: 'center' });
+  y += LINE_S + 2;
 
-  return doc.output('arraybuffer') as unknown as Uint8Array;
+  return y;
+}
+
+export function generarTicketVenta(datos: DatosTicket): Uint8Array {
+  // 1ª pasada: medir el alto real del contenido con un doc grande temporal
+  const temp = new jsPDF({ unit: 'mm', format: [TICKET_W, 400], orientation: 'portrait' });
+  const finalY = renderTicket(temp, datos);
+
+  // 2ª pasada: generar el PDF con el alto exacto (sin espacio en blanco)
+  const doc = new jsPDF({ unit: 'mm', format: [TICKET_W, Math.max(finalY, 60)], orientation: 'portrait' });
+  renderTicket(doc, datos);
+
+  return new Uint8Array(doc.output('arraybuffer'));
 }
 
 // ── Descargar ───────────────────────────────────────────────────────────

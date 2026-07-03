@@ -621,23 +621,47 @@ function renderTablaRetenciones(doc: jsPDF, datos: DatosRIDE, y: number): number
 
 // ── Descarga / apertura ─────────────────────────────────────────────────────
 
+function uint8ToDataURL(bytes: Uint8Array): string {
+  let binary = '';
+  for (let i = 0; i < bytes.byteLength; i++) binary += String.fromCharCode(bytes[i]);
+  return 'data:application/pdf;base64,' + btoa(binary);
+}
+
+function isMobile(): boolean {
+  return typeof navigator !== 'undefined' && /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
+}
+
 export function descargarRIDE(datos: DatosRIDE, nombreArchivo?: string): void {
   const bytes  = generarRIDE(datos);
-  const blob   = new Blob([bytes as unknown as BlobPart], { type: 'application/pdf' });
-  const url    = URL.createObjectURL(blob);
   const estab  = datos.establecimiento.padStart(3, '0');
   const pto    = datos.puntoEmision.padStart(3, '0');
   const sec    = String(datos.secuencial).padStart(9, '0');
   const nombre = nombreArchivo ?? `RIDE-${COD_DOC[datos.tipoDocumento]}-${estab}-${pto}-${sec}.pdf`;
   const a      = document.createElement('a');
-  a.href = url; a.download = nombre; a.click();
-  URL.revokeObjectURL(url);
+  a.href     = uint8ToDataURL(bytes);
+  a.download = nombre;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
 }
 
 export function abrirRIDEenNuevaPestana(datos: DatosRIDE): void {
   const bytes = generarRIDE(datos);
-  const blob  = new Blob([bytes as unknown as BlobPart], { type: 'application/pdf' });
-  const url   = URL.createObjectURL(blob);
+  if (isMobile()) {
+    // Chrome Android no puede mostrar PDFs desde blob URLs — descargamos directamente
+    const estab  = datos.establecimiento.padStart(3, '0');
+    const pto    = datos.puntoEmision.padStart(3, '0');
+    const sec    = String(datos.secuencial).padStart(9, '0');
+    const a      = document.createElement('a');
+    a.href     = uint8ToDataURL(bytes);
+    a.download = `RIDE-${COD_DOC[datos.tipoDocumento]}-${estab}-${pto}-${sec}.pdf`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    return;
+  }
+  const blob = new Blob([bytes as unknown as BlobPart], { type: 'application/pdf' });
+  const url  = URL.createObjectURL(blob);
   window.open(url, '_blank');
   setTimeout(() => URL.revokeObjectURL(url), 30000);
 }

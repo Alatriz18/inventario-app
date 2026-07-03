@@ -105,6 +105,8 @@ const PERMISOS_MODULO: Record<UserRole, Modulo[]> = {
     'cxp_facturas', 'cxp_documentos', 'cxp_pagos',
     // Cuentas por cobrar (ver saldos y cobros)
     'cxc', 'cxc_cartera',
+    // Clientes (necesario para gestión de cobranzas)
+    'clientes',
     // Historial de ventas (solo lectura)
     'historial_ventas',
   ],

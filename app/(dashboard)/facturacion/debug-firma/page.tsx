@@ -14,6 +14,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { Input }    from '@/components/ui/input';
 import { Label }    from '@/components/ui/label';
 import { getConfigSRI } from '@/lib/firebase/config-sri';
+import { useAuth }  from '@/context/AuthContext';
 
 interface Diagnostico {
   longitud:                    number;
@@ -36,6 +37,7 @@ interface Diagnostico {
 }
 
 export default function DebugFirmaPage() {
+  const { user } = useAuth();
   const [xml,         setXml]         = useState('');
   const [password,    setPassword]    = useState('');
   const [loading,     setLoading]     = useState(false);
@@ -184,6 +186,15 @@ export default function DebugFirmaPage() {
       </div>
     </div>
   );
+
+  if (!user || user.rol !== 'admin') {
+    return (
+      <div className="flex flex-col items-center justify-center h-[60vh] text-center px-4">
+        <Bug className="h-12 w-12 text-slate-200 mb-4" />
+        <p className="text-slate-500 text-sm">Solo el administrador puede acceder a esta página.</p>
+      </div>
+    );
+  }
 
   return (
     <div>

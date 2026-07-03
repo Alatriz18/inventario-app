@@ -243,23 +243,45 @@ export function generarTicketVenta(datos: DatosTicket): Uint8Array {
 
 // ── Descargar ───────────────────────────────────────────────────────────
 
+function abToDataURL(ab: ArrayBuffer): string {
+  const bytes = new Uint8Array(ab);
+  let binary = '';
+  for (let i = 0; i < bytes.byteLength; i++) binary += String.fromCharCode(bytes[i]);
+  return 'data:application/pdf;base64,' + btoa(binary);
+}
+
+function isMobile(): boolean {
+  return typeof navigator !== 'undefined' && /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
+}
+
 export function descargarTicket(datos: DatosTicket) {
-  const bytes = generarTicketVenta(datos);
-  const blob  = new Blob([bytes.buffer as ArrayBuffer], { type: 'application/pdf' });
-  const url   = URL.createObjectURL(blob);
-  const a     = document.createElement('a');
-  a.href      = url;
+  const ab    = generarTicketVenta(datos) as unknown as ArrayBuffer;
   const fecha = (datos.venta.fecha as any)?.toDate?.() ?? new Date(datos.venta.fecha);
   const dd    = String(fecha.getDate()).padStart(2, '0');
   const mm    = String(fecha.getMonth() + 1).padStart(2, '0');
+  const a     = document.createElement('a');
+  a.href      = abToDataURL(ab);
   a.download  = `ticket-${dd}${mm}${fecha.getFullYear()}-${datos.venta.id.slice(-6)}.pdf`;
+  document.body.appendChild(a);
   a.click();
-  URL.revokeObjectURL(url);
+  document.body.removeChild(a);
 }
 
 export function abrirTicketEnNuevaPestana(datos: DatosTicket) {
-  const bytes = generarTicketVenta(datos);
-  const blob  = new Blob([bytes.buffer as ArrayBuffer], { type: 'application/pdf' });
-  const url   = URL.createObjectURL(blob);
+  const ab = generarTicketVenta(datos) as unknown as ArrayBuffer;
+  if (isMobile()) {
+    const fecha = (datos.venta.fecha as any)?.toDate?.() ?? new Date(datos.venta.fecha);
+    const dd    = String(fecha.getDate()).padStart(2, '0');
+    const mm    = String(fecha.getMonth() + 1).padStart(2, '0');
+    const a     = document.createElement('a');
+    a.href      = abToDataURL(ab);
+    a.download  = `ticket-${dd}${mm}${fecha.getFullYear()}-${datos.venta.id.slice(-6)}.pdf`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    return;
+  }
+  const blob = new Blob([ab], { type: 'application/pdf' });
+  const url  = URL.createObjectURL(blob);
   window.open(url, '_blank');
 }

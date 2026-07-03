@@ -12,7 +12,7 @@ import {
   FileCheck, CreditCard, BarChart3, Settings, UserCog, ChevronDown,
   ChevronRight, PackageCheck, Warehouse, BookOpen, Scale, FileSpreadsheet,
   Calculator, TrendingUp, BookMarked, Landmark, FileMinus, FilePlus,
-  FileSearch, Coins, ReceiptText, X, Building2, Layers, ClipboardCheck,
+  FileSearch, Coins, X, Building2, Layers, ClipboardCheck,
   DollarSign, ListChecks, Wallet,
 } from 'lucide-react';
 
@@ -89,7 +89,7 @@ const NAV: NavItem[] = [
     ],
   },
   {
-    label: 'Tributario', icon: ReceiptText,
+    label: 'Tributario', icon: Calculator,
     children: [
       { label: 'Retenciones (config)', href: '/tributario/retenciones',            icon: FileMinus,      modulo: 'retenciones_config' },
       { label: 'Ret. Emitidas',        href: '/tributario/retenciones-emitidas',  icon: ClipboardCheck, modulo: 'ret_emitidas' },

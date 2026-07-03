@@ -1,6 +1,6 @@
 import {
   collection, doc, onSnapshot,
-  query, orderBy, serverTimestamp, runTransaction, deleteDoc,
+  query, orderBy, serverTimestamp, runTransaction,
 } from 'firebase/firestore';
 import { db } from './config';
 import { Venta, EstadoCxC } from '@/types';
@@ -179,13 +179,7 @@ export async function anularVenta(
       if (cxcSnap.exists()) {
         const cxcData = cxcSnap.data();
         if (cxcData.estado !== 'pagada') {
-          // Sin cobros: eliminar el registro; con cobros parciales: marcar anulada
-          const tieneCobros = Array.isArray(cxcData.cobros) && cxcData.cobros.length > 0;
-          if (tieneCobros) {
-            tx.update(cxcRef, { estado: 'anulada' as EstadoCxC, anuladaAt: serverTimestamp() });
-          } else {
-            tx.delete(cxcRef);
-          }
+          tx.update(cxcRef, { estado: 'anulada' as EstadoCxC, anuladaAt: serverTimestamp() });
         }
       }
     }

@@ -9,10 +9,12 @@ import { Trash2, CheckCircle } from 'lucide-react';
 
 export default function LimpiarDatosPage() {
   const { user } = useAuth();
-  const [confirmado, setConfirmado] = useState(false);
-  const [running,    setRunning]    = useState(false);
-  const [done,       setDone]       = useState(false);
-  const [log,        setLog]        = useState<string[]>([]);
+  const [confirmado,    setConfirmado]    = useState(false);
+  const [running,       setRunning]       = useState(false);
+  const [done,          setDone]          = useState(false);
+  const [log,           setLog]           = useState<string[]>([]);
+  const [fixingCxC,     setFixingCxC]     = useState(false);
+  const [fixCxCResult,  setFixCxCResult]  = useState<string | null>(null);
 
   if (!user || user.rol !== 'admin') {
     return (
@@ -46,12 +48,49 @@ export default function LimpiarDatosPage() {
     }
   };
 
+  const fixCxC = async () => {
+    setFixingCxC(true);
+    setFixCxCResult(null);
+    try {
+      const res  = await fetch('/api/admin/fix-cxc', { method: 'POST' });
+      const data = await res.json();
+      if (!res.ok || !data.ok) throw new Error(data.error ?? 'Error');
+      setFixCxCResult(`✅ ${data.total} CxC corregidas`);
+      toast.success(`${data.total} cuentas por cobrar corregidas`);
+    } catch (e: any) {
+      setFixCxCResult(`✗ Error: ${e.message}`);
+      toast.error(e.message);
+    } finally {
+      setFixingCxC(false);
+    }
+  };
+
   return (
     <div className="max-w-xl mx-auto space-y-6">
       <PageHeader
         title="Limpieza de datos de prueba"
         description="Elimina registros del producto DOGE y ventas a Consumidor Final"
       />
+
+      {/* Fix CxC huérfanas */}
+      <div className="bg-blue-50 border border-blue-200 rounded-xl p-5 space-y-3">
+        <p className="font-bold text-blue-800 text-sm">🔧 Sincronizar CxC con ventas anuladas</p>
+        <p className="text-xs text-blue-700">
+          Corrige cuentas por cobrar que quedaron pendientes por ventas a crédito que ya fueron anuladas.
+        </p>
+        <Button
+          className="w-full bg-blue-600 hover:bg-blue-700"
+          disabled={fixingCxC}
+          onClick={fixCxC}
+        >
+          {fixingCxC ? 'Procesando...' : 'Corregir CxC pendientes'}
+        </Button>
+        {fixCxCResult && (
+          <p className={`text-xs font-mono ${fixCxCResult.startsWith('✅') ? 'text-blue-700' : 'text-red-600'}`}>
+            {fixCxCResult}
+          </p>
+        )}
+      </div>
 
       <div className="bg-red-50 border border-red-200 rounded-xl p-5 space-y-3">
         <p className="font-bold text-red-700 text-sm">⚠️ ACCIÓN IRREVERSIBLE</p>

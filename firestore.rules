@@ -113,9 +113,9 @@ service cloud.firestore {
     // ── Ventas ────────────────────────────────────────────────────────────
 
     match /ventas/{id} {
-      allow read: if isStaff();
+      allow read:   if isStaff();
       allow create: if isAdmin() || hasRole('vendedor');
-      allow update: if isAdmin();
+      allow update: if isAdmin() || hasRole('vendedor');
       allow delete: if false;
     }
 

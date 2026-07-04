@@ -184,7 +184,7 @@ export default function CxCPage() {
         fecha:        new Date(),
         monto,
         metodoPago,
-        referencia:   refCobro || undefined,
+        ...(refCobro ? { referencia: refCobro } : {}),
         usuarioId:    user.uid,
         usuarioNombre:user.nombre ?? user.email ?? 'Usuario',
       };

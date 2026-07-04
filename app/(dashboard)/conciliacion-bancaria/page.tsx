@@ -316,6 +316,7 @@ export default function ConciliacionBancariaPage() {
           {(['pendientes', 'conciliados', 'ignorados'] as const).map(tab => (
             <TabsContent key={tab} value={tab} className="mt-4">
               <div className="bg-white rounded-xl border overflow-hidden">
+                <div className="overflow-x-auto">
                 <Table>
                   <TableHeader>
                     <TableRow className="bg-slate-50">
@@ -398,6 +399,7 @@ export default function ConciliacionBancariaPage() {
                     ))}
                   </TableBody>
                 </Table>
+                </div>
               </div>
             </TabsContent>
           ))}
@@ -410,7 +412,7 @@ export default function ConciliacionBancariaPage() {
           <DialogHeader>
             <DialogTitle>Nueva Cuenta Bancaria</DialogTitle>
           </DialogHeader>
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div className="col-span-2">
               <Label>Banco *</Label>
               <Input value={formCuenta.banco}

@@ -276,7 +276,7 @@ export default function ProductosPage() {
           <DialogHeader>
             <DialogTitle>{editing ? 'Editar Producto' : 'Nuevo Producto'}</DialogTitle>
           </DialogHeader>
-          <div className="grid grid-cols-2 gap-4 py-2">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 py-2">
 
             {/* Imagen */}
             <div className="col-span-2">

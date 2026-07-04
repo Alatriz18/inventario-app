@@ -137,7 +137,7 @@ export default function ComprobantesPage() {
       />
 
       {/* Stats */}
-      <div className="grid grid-cols-3 gap-3 mb-6">
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-6">
         {[
           { label: 'Autorizados', value: stats.autorizados, color: 'text-green-600' },
           { label: 'Pendientes',  value: stats.pendientes,  color: 'text-amber-600' },
@@ -155,7 +155,7 @@ export default function ComprobantesPage() {
         <Input placeholder="Buscar por cliente, clave de acceso o autorización..."
           value={search} onChange={e => setSearch(e.target.value)} className="max-w-sm" />
         <Select onValueChange={setFiltroEstado} defaultValue="todos">
-          <SelectTrigger className="w-44">
+          <SelectTrigger className="w-full sm:w-44">
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
@@ -169,6 +169,7 @@ export default function ComprobantesPage() {
       </div>
 
       <div className="bg-white rounded-xl border overflow-hidden">
+        <div className="overflow-x-auto">
         <Table>
           <TableHeader>
             <TableRow className="bg-slate-50">
@@ -282,6 +283,7 @@ export default function ComprobantesPage() {
             })}
           </TableBody>
         </Table>
+        </div>
       </div>
     </div>
   );

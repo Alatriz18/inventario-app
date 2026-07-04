@@ -146,12 +146,12 @@ export default function KardexPage() {
         <div>
           <Label className="text-xs">Desde</Label>
           <Input type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)}
-            className="mt-1 w-36 h-9 text-sm" />
+            className="mt-1 w-full sm:w-36 h-9 text-sm" />
         </div>
         <div>
           <Label className="text-xs">Hasta</Label>
           <Input type="date" value={dateTo} onChange={e => setDateTo(e.target.value)}
-            className="mt-1 w-36 h-9 text-sm" />
+            className="mt-1 w-full sm:w-36 h-9 text-sm" />
         </div>
         {(dateFrom || dateTo) && (
           <Button variant="ghost" size="sm" onClick={() => { setDateFrom(''); setDateTo(''); }}>
@@ -197,6 +197,7 @@ export default function KardexPage() {
       ) : (
         <div className="bg-white rounded-xl border overflow-hidden">
           {/* Header con producto */}
+
           <div className="px-5 py-3 bg-slate-50 border-b flex items-center justify-between">
             <div>
               <span className="font-mono text-xs text-slate-400 mr-2">{productoSel?.sku}</span>
@@ -205,6 +206,7 @@ export default function KardexPage() {
             <Badge variant="outline" className="text-xs">{kardex.length} movimientos</Badge>
           </div>
 
+          <div className="overflow-x-auto">
           <Table>
             <TableHeader>
               <TableRow className="bg-slate-50/60">
@@ -259,6 +261,7 @@ export default function KardexPage() {
               })}
             </TableBody>
           </Table>
+          </div>
 
           {/* Totales */}
           <div className="px-4 py-3 border-t bg-slate-50 flex justify-between text-sm">

@@ -116,6 +116,7 @@ export default function ICEPage() {
       </div>
 
       <div className="bg-white rounded-xl border overflow-hidden">
+        <div className="overflow-x-auto">
         <Table>
           <TableHeader>
             <TableRow className="bg-slate-50">
@@ -177,6 +178,7 @@ export default function ICEPage() {
             ))}
           </TableBody>
         </Table>
+        </div>
       </div>
 
       {items.length > 0 && (
@@ -191,7 +193,7 @@ export default function ICEPage() {
             <DialogTitle>{editing ? 'Editar' : 'Nueva'} Tarifa ICE</DialogTitle>
           </DialogHeader>
           <div className="space-y-3 py-2">
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div className="space-y-1.5">
                 <Label>Código SRI *</Label>
                 <Input placeholder="3610" {...register('codigo')} />
@@ -217,7 +219,7 @@ export default function ICEPage() {
                 </SelectContent>
               </Select>
             </div>
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               {(tipoTarifa === 'especifica' || tipoTarifa === 'mixta') && (
                 <div className="space-y-1.5">
                   <Label>Tarifa específica ($)</Label>

@@ -282,13 +282,13 @@ export default function ReportesPage() {
             <span className="text-xs text-slate-400">Desde</span>
             <Input type="date" value={dateFrom}
               onChange={e => { setDateFrom(e.target.value); setPreset(''); }}
-              className="w-36 h-8 text-sm" />
+              className="w-full sm:w-36 h-8 text-sm" />
           </div>
           <div className="flex items-center gap-2">
             <span className="text-xs text-slate-400">Hasta</span>
             <Input type="date" value={dateTo}
               onChange={e => { setDateTo(e.target.value); setPreset(''); }}
-              className="w-36 h-8 text-sm" />
+              className="w-full sm:w-36 h-8 text-sm" />
           </div>
           <Badge variant="outline" className="text-xs">
             {ventasFiltradas.length} venta(s) en el período
@@ -434,6 +434,7 @@ export default function ReportesPage() {
           </div>
 
           <div className="bg-white rounded-xl border overflow-hidden">
+            <div className="overflow-x-auto">
             <Table>
               <TableHeader>
                 <TableRow className="bg-slate-50">
@@ -487,6 +488,7 @@ export default function ReportesPage() {
                 })}
               </TableBody>
             </Table>
+            </div>
             {ventasFiltradas.length > 0 && (
               <div className="px-4 py-3 border-t bg-slate-50 flex justify-between text-sm">
                 <span className="text-slate-400">{ventasFiltradas.length} ventas</span>
@@ -529,6 +531,7 @@ export default function ReportesPage() {
           </div>
 
           <div className="bg-white rounded-xl border overflow-hidden">
+            <div className="overflow-x-auto">
             <Table>
               <TableHeader>
                 <TableRow className="bg-slate-50">
@@ -585,6 +588,7 @@ export default function ReportesPage() {
                 ))}
               </TableBody>
             </Table>
+            </div>
             {inventario.length > 0 && (
               <div className="px-4 py-3 border-t bg-slate-50 flex justify-between text-sm">
                 <span className="text-slate-400">{inventario.length} productos</span>
@@ -635,6 +639,7 @@ export default function ReportesPage() {
           </div>
 
           <div className="bg-white rounded-xl border overflow-hidden">
+            <div className="overflow-x-auto">
             <Table>
               <TableHeader>
                 <TableRow className="bg-slate-50">
@@ -679,6 +684,7 @@ export default function ReportesPage() {
                 })}
               </TableBody>
             </Table>
+            </div>
           </div>
         </TabsContent>
 
@@ -696,6 +702,7 @@ export default function ReportesPage() {
             </Button>
           </div>
           <div className="bg-white rounded-xl border overflow-hidden">
+            <div className="overflow-x-auto">
             <Table>
               <TableHeader>
                 <TableRow className="bg-slate-50">
@@ -733,6 +740,7 @@ export default function ReportesPage() {
                 })()}
               </TableBody>
             </Table>
+            </div>
           </div>
         </TabsContent>
 
@@ -747,6 +755,7 @@ export default function ReportesPage() {
             </Button>
           </div>
           <div className="bg-white rounded-xl border overflow-hidden">
+            <div className="overflow-x-auto">
             <Table>
               <TableHeader>
                 <TableRow className="bg-slate-50">
@@ -794,6 +803,7 @@ export default function ReportesPage() {
                 })}
               </TableBody>
             </Table>
+            </div>
           </div>
         </TabsContent>
 
@@ -808,6 +818,7 @@ export default function ReportesPage() {
             </Button>
           </div>
           <div className="bg-white rounded-xl border overflow-hidden">
+            <div className="overflow-x-auto">
             <Table>
               <TableHeader>
                 <TableRow className="bg-slate-50">
@@ -844,6 +855,7 @@ export default function ReportesPage() {
                 ))}
               </TableBody>
             </Table>
+            </div>
           </div>
         </TabsContent>
 

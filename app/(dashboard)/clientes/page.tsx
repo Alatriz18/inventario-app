@@ -174,6 +174,7 @@ export default function ClientesPage() {
       </div>
 
       <div className="bg-white rounded-xl border overflow-hidden">
+        <div className="overflow-x-auto">
         <Table>
           <TableHeader>
             <TableRow className="bg-slate-50">
@@ -250,6 +251,7 @@ export default function ClientesPage() {
             ))}
           </TableBody>
         </Table>
+        </div>
       </div>
 
       {/* ─── DIALOG ─── */}
@@ -267,7 +269,7 @@ export default function ClientesPage() {
                 <Globe className="h-4 w-4 text-slate-400" />
                 <p className="text-sm font-semibold text-slate-700">Identificación SRI</p>
               </div>
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div className="space-y-1.5">
                   <Label>Tipo de Identificación *</Label>
                   <Select onValueChange={v => setValue('tipoIdentificacion', v as TipoIdentificacionCliente)}
@@ -322,7 +324,7 @@ export default function ClientesPage() {
                 <MapPin className="h-4 w-4 text-slate-400" />
                 <p className="text-sm font-semibold text-slate-700">Contacto y Dirección</p>
               </div>
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div className="space-y-1.5">
                   <Label>Teléfono</Label>
                   <Input placeholder="0999999999" {...register('telefono')} />
@@ -374,7 +376,7 @@ export default function ClientesPage() {
                 <CreditCard className="h-4 w-4 text-slate-400" />
                 <p className="text-sm font-semibold text-slate-700">Condiciones Comerciales</p>
               </div>
-              <div className="grid grid-cols-3 gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
                 <div className="space-y-1.5">
                   <Label>Tipo de Pago *</Label>
                   <Select onValueChange={v => setValue('tipoPago', v as TipoPago)}

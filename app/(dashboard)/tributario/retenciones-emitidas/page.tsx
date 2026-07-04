@@ -289,6 +289,7 @@ export default function RetencionesEmitidasPage() {
       />
 
       <div className="bg-white rounded-xl border overflow-hidden">
+        <div className="overflow-x-auto">
         <Table>
           <TableHeader>
             <TableRow className="bg-slate-50">
@@ -348,6 +349,7 @@ export default function RetencionesEmitidasPage() {
             ))}
           </TableBody>
         </Table>
+        </div>
       </div>
 
       {/* Dialog */}

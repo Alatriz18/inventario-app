@@ -366,7 +366,8 @@ export default function POSPage() {
               <p className="text-sm">Busca y selecciona productos</p>
             </div>
           ) : (
-            <div className="flex-1 overflow-y-auto overflow-x-auto">
+            <div className="flex-1 overflow-y-auto">
+            <div className="overflow-x-auto">
               <table className="w-full text-sm min-w-[480px]">
                 <thead className="bg-slate-50 sticky top-0">
                   <tr>
@@ -448,6 +449,7 @@ export default function POSPage() {
                   ))}
                 </tbody>
               </table>
+            </div>
             </div>
           )}
 

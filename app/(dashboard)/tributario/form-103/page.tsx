@@ -95,15 +95,15 @@ export default function Form103Page() {
         cada factura de proveedor al momento de pagarla. Esta vista muestra los códigos configurados.
       </div>
 
-      <div className="bg-white rounded-xl border p-4 flex gap-3 items-center mb-5">
+      <div className="bg-white rounded-xl border p-4 flex flex-wrap gap-3 items-center mb-5">
         <Select onValueChange={setAnio} defaultValue={anio}>
-          <SelectTrigger className="w-28"><SelectValue /></SelectTrigger>
+          <SelectTrigger className="w-full sm:w-28"><SelectValue /></SelectTrigger>
           <SelectContent>
             {anios.map(a => <SelectItem key={a} value={a}>{a}</SelectItem>)}
           </SelectContent>
         </Select>
         <Select onValueChange={setMes} defaultValue={mes}>
-          <SelectTrigger className="w-36"><SelectValue /></SelectTrigger>
+          <SelectTrigger className="w-full sm:w-36"><SelectValue /></SelectTrigger>
           <SelectContent>
             {MESES.map((m, i) => (
               <SelectItem key={i+1} value={String(i+1)}>{m}</SelectItem>
@@ -114,7 +114,7 @@ export default function Form103Page() {
 
       {loading ? <Skeleton className="h-64 w-full" /> : (
         <div className="space-y-4">
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div className="bg-white rounded-xl border p-4">
               <p className="text-xs text-slate-400">Facturas proveedores en el período</p>
               <p className="text-2xl font-bold mt-1">{comprasMes.length}</p>
@@ -133,6 +133,7 @@ export default function Form103Page() {
                 Códigos de retención configurados — {MESES[Number(mes)-1]} {anio}
               </p>
             </div>
+            <div className="overflow-x-auto">
             <Table>
               <TableHeader>
                 <TableRow className="bg-slate-50">
@@ -161,6 +162,7 @@ export default function Form103Page() {
                 ))}
               </TableBody>
             </Table>
+            </div>
           </div>
 
           <div className="bg-slate-50 rounded-xl border p-4 text-sm text-slate-500">

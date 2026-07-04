@@ -112,7 +112,7 @@ export default function HistorialVentasPage() {
         <Input placeholder="Buscar por cliente..."
           value={search} onChange={e => setSearch(e.target.value)} className="flex-1 min-w-[160px] max-w-xs" />
         <Select onValueChange={setFiltroMetodo} defaultValue="todos">
-          <SelectTrigger className="w-44">
+          <SelectTrigger className="w-full sm:w-44">
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
@@ -123,7 +123,7 @@ export default function HistorialVentasPage() {
           </SelectContent>
         </Select>
         <Input type="date" value={filtroFecha}
-          onChange={e => setFiltroFecha(e.target.value)} className="w-44" />
+          onChange={e => setFiltroFecha(e.target.value)} className="w-full sm:w-44" />
         {(search || filtroMetodo !== 'todos' || filtroFecha) && (
           <button onClick={() => { setSearch(''); setFiltroMetodo('todos'); setFiltroFecha(''); }}
             className="text-xs text-slate-400 hover:text-slate-600 underline self-center">
@@ -250,7 +250,7 @@ export default function HistorialVentasPage() {
             const fecha = (ventaDetalle.fecha as any)?.toDate?.() ?? new Date(ventaDetalle.fecha);
             return (
               <div className="space-y-4">
-                <div className="grid grid-cols-2 gap-3 text-sm">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm">
                   <div><p className="text-slate-400 text-xs">Cliente</p><p className="font-medium">{ventaDetalle.clienteNombre}</p></div>
                   <div><p className="text-slate-400 text-xs">Fecha</p><p className="font-medium">{format(fecha, "dd/MM/yyyy HH:mm")}</p></div>
                   <div><p className="text-slate-400 text-xs">Método de pago</p><p className="font-medium">{METODO_LABELS[ventaDetalle.metodoPago]}</p></div>

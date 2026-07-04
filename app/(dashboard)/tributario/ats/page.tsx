@@ -282,13 +282,13 @@ export default function ATSPage() {
       {/* Selector período */}
       <div className="bg-white rounded-xl border p-4 flex flex-wrap gap-3 items-center mb-5">
         <Select onValueChange={setAnio} defaultValue={anio}>
-          <SelectTrigger className="w-28"><SelectValue /></SelectTrigger>
+          <SelectTrigger className="w-full sm:w-28"><SelectValue /></SelectTrigger>
           <SelectContent>
             {anios.map(a => <SelectItem key={a} value={a}>{a}</SelectItem>)}
           </SelectContent>
         </Select>
         <Select onValueChange={setMes} defaultValue={mes}>
-          <SelectTrigger className="w-36"><SelectValue /></SelectTrigger>
+          <SelectTrigger className="w-full sm:w-36"><SelectValue /></SelectTrigger>
           <SelectContent>
             {MESES.map((m, i) => (
               <SelectItem key={i+1} value={String(i+1)}>{m}</SelectItem>
@@ -322,7 +322,7 @@ export default function ATSPage() {
       </div>
 
       {/* Botones de exportación */}
-      <div className="flex gap-3 mb-5">
+      <div className="flex flex-wrap gap-3 mb-5">
         <Button variant="outline" onClick={exportExcel}
           disabled={loading || (ventasMes.length === 0 && comprasMes.length === 0)}>
           <Download className="mr-2 h-4 w-4" /> Exportar Excel
@@ -341,6 +341,7 @@ export default function ATSPage() {
             Ventas — {ventasMes.length} transacciones
           </p>
         </div>
+        <div className="overflow-x-auto">
         <Table>
           <TableHeader>
             <TableRow className="bg-slate-50">
@@ -376,6 +377,7 @@ export default function ATSPage() {
             ))}
           </TableBody>
         </Table>
+        </div>
       </div>
 
       {/* Detalle compras */}
@@ -385,6 +387,7 @@ export default function ATSPage() {
             Compras / Facturas Proveedores — {comprasMes.length} facturas
           </p>
         </div>
+        <div className="overflow-x-auto">
         <Table>
           <TableHeader>
             <TableRow className="bg-slate-50">
@@ -417,6 +420,7 @@ export default function ATSPage() {
             ))}
           </TableBody>
         </Table>
+        </div>
       </div>
     </div>
   );

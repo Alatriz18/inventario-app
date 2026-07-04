@@ -138,6 +138,7 @@ function ReciboInternoInner() {
         </div>
       ) : (
         <div className="bg-white rounded-xl border overflow-hidden">
+          <div className="overflow-x-auto">
           <Table>
             <TableHeader>
               <TableRow className="bg-slate-50">
@@ -196,6 +197,7 @@ function ReciboInternoInner() {
               })}
             </TableBody>
           </Table>
+          </div>
         </div>
       )}
     </div>

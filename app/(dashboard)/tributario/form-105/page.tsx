@@ -91,15 +91,15 @@ export default function Form105Page() {
         <strong> código ICE</strong> correspondiente. Próximamente disponible.
       </div>
 
-      <div className="bg-white rounded-xl border p-4 flex gap-3 items-center mb-5">
+      <div className="bg-white rounded-xl border p-4 flex flex-wrap gap-3 items-center mb-5">
         <Select onValueChange={setAnio} defaultValue={anio}>
-          <SelectTrigger className="w-28"><SelectValue /></SelectTrigger>
+          <SelectTrigger className="w-full sm:w-28"><SelectValue /></SelectTrigger>
           <SelectContent>
             {anios.map(a => <SelectItem key={a} value={a}>{a}</SelectItem>)}
           </SelectContent>
         </Select>
         <Select onValueChange={setMes} defaultValue={mes}>
-          <SelectTrigger className="w-36"><SelectValue /></SelectTrigger>
+          <SelectTrigger className="w-full sm:w-36"><SelectValue /></SelectTrigger>
           <SelectContent>
             {MESES.map((m, i) => (
               <SelectItem key={i+1} value={String(i+1)}>{m}</SelectItem>
@@ -110,7 +110,7 @@ export default function Form105Page() {
 
       {loading ? <Skeleton className="h-64 w-full" /> : (
         <div className="space-y-4">
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div className="bg-white rounded-xl border p-4">
               <p className="text-xs text-slate-400">Ventas en el período</p>
               <p className="text-2xl font-bold mt-1">{ventasMes.length}</p>
@@ -127,6 +127,7 @@ export default function Form105Page() {
             <div className="px-4 py-3 border-b bg-slate-50">
               <p className="font-semibold text-slate-700 text-sm">Tarifas ICE configuradas</p>
             </div>
+            <div className="overflow-x-auto">
             <Table>
               <TableHeader>
                 <TableRow className="bg-slate-50">
@@ -160,6 +161,7 @@ export default function Form105Page() {
                 ))}
               </TableBody>
             </Table>
+            </div>
           </div>
         </div>
       )}

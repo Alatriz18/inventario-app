@@ -501,7 +501,7 @@ function EmitirComprobanteInner() {
         {ventaSeleccionada && (
           <div className="bg-white rounded-xl border p-5 space-y-3">
             <h3 className="font-semibold text-slate-700">Resumen</h3>
-            <div className="grid grid-cols-2 gap-3 text-sm">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm">
               <div><p className="text-slate-400 text-xs">Cliente</p><p className="font-medium">{ventaSeleccionada.clienteNombre}</p></div>
               <div><p className="text-slate-400 text-xs">Identificación</p><p className="font-medium">{ventaSeleccionada.clienteIdentificacion}</p></div>
               <div><p className="text-slate-400 text-xs">Ítems</p><p className="font-medium">{ventaSeleccionada.items.length} producto(s)</p></div>

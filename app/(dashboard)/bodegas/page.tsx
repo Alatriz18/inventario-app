@@ -124,6 +124,7 @@ export default function BodegasPage() {
       />
 
       <div className="bg-white rounded-xl border overflow-hidden">
+        <div className="overflow-x-auto">
         <Table>
           <TableHeader>
             <TableRow className="bg-slate-50">
@@ -195,6 +196,7 @@ export default function BodegasPage() {
             )}
           </TableBody>
         </Table>
+        </div>
       </div>
 
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
@@ -205,7 +207,7 @@ export default function BodegasPage() {
           <div className="space-y-4 py-2">
 
             {/* Datos generales */}
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div className="space-y-1.5">
                 <Label>Código *</Label>
                 <Input placeholder="BOD-01" {...register('codigo')} />
@@ -242,7 +244,7 @@ export default function BodegasPage() {
                 Configuración Contable
                 <span className="ml-2 text-xs font-normal text-slate-400">(opcional)</span>
               </p>
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div className="space-y-1.5">
                   <Label className="text-xs">Cuenta de Inventario</Label>
                   <Input placeholder="ej: 1.1.05.001" {...register('cuentaInventario')} />

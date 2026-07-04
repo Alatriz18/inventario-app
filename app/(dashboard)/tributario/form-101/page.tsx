@@ -151,7 +151,7 @@ export default function Form101Page() {
       />
 
       {/* Selector de año */}
-      <div className="bg-white rounded-xl border p-4 flex items-end gap-4">
+      <div className="bg-white rounded-xl border p-4 flex flex-wrap items-end gap-4">
         <div>
           <Label>Ejercicio fiscal</Label>
           <Input type="number" value={anio} onChange={e => setAnio(e.target.value)}
@@ -178,6 +178,7 @@ export default function Form101Page() {
         </div>
       ) : (
         <div className="bg-white rounded-xl border overflow-hidden">
+          <div className="overflow-x-auto">
           <table className="w-full text-sm">
             <thead>
               <tr className="bg-slate-800 text-white">
@@ -205,6 +206,7 @@ export default function Form101Page() {
               ))}
             </tbody>
           </table>
+          </div>
         </div>
       )}
 

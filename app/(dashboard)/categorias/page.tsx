@@ -119,6 +119,7 @@ export default function CategoriasPage() {
       />
 
       <div className="bg-white rounded-xl border overflow-hidden">
+        <div className="overflow-x-auto">
         <Table>
           <TableHeader>
             <TableRow className="bg-slate-50">
@@ -179,6 +180,7 @@ export default function CategoriasPage() {
             )}
           </TableBody>
         </Table>
+        </div>
       </div>
 
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>

@@ -108,7 +108,7 @@ export default function BalanceGeneralPage() {
 
       <div className="bg-white rounded-xl border p-4 flex items-center gap-3 mb-4">
         <span className="text-xs text-slate-400">Al</span>
-        <Input type="date" value={dateTo} onChange={e => setDateTo(e.target.value)} className="w-40 h-8 text-sm" />
+        <Input type="date" value={dateTo} onChange={e => setDateTo(e.target.value)} className="w-full sm:w-40 h-8 text-sm" />
         {!loading && (
           <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${cuadra ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
             {cuadra ? '✓ Cuadra' : '✗ No cuadra'}

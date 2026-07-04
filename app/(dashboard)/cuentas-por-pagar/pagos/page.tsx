@@ -103,7 +103,7 @@ export default function PagosPendientesPage() {
       )}
 
       {/* Stats */}
-      <div className="grid grid-cols-3 gap-3 mb-6">
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-6">
         {[
           { label: 'Total pendiente', value: currency(totalPendiente), color: 'text-slate-900' },
           { label: 'Facturas',        value: pendientes.length,        color: 'text-slate-700' },
@@ -117,6 +117,7 @@ export default function PagosPendientesPage() {
       </div>
 
       <div className="bg-white rounded-xl border overflow-hidden">
+        <div className="overflow-x-auto">
         <Table>
           <TableHeader>
             <TableRow className="bg-slate-50">
@@ -189,6 +190,7 @@ export default function PagosPendientesPage() {
           </TableBody>
         </Table>
 
+        </div>
         {!loading && pendientes.length > 0 && (
           <div className="px-4 py-3 border-t bg-slate-50 flex justify-between text-sm">
             <span className="text-slate-400">{pendientes.length} factura(s) pendiente(s)</span>

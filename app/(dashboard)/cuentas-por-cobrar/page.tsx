@@ -235,7 +235,7 @@ export default function CxCPage() {
         title="Cuentas por Cobrar"
         description="Gestión de créditos a clientes, cobros y aging"
         action={
-          <div className="flex gap-2">
+          <div className="flex flex-wrap gap-2">
             <Button size="sm" onClick={() => setNuevaOpen(true)}>
               <Plus className="mr-2 h-4 w-4" /> Nueva CxC
             </Button>
@@ -300,10 +300,11 @@ export default function CxCPage() {
             <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-slate-400" />
             <Input placeholder="Buscar cliente..." value={search}
               onChange={e => setSearch(e.target.value)}
-              className="pl-8 w-52 h-9 text-sm" />
+              className="pl-8 w-full sm:w-52 h-9 text-sm" />
           </div>
         </div>
 
+        <div className="overflow-x-auto">
         <Table>
           <TableHeader>
             <TableRow className="bg-slate-50">
@@ -369,6 +370,7 @@ export default function CxCPage() {
             })}
           </TableBody>
         </Table>
+        </div>
       </div>
 
       {/* Dialog nueva CxC manual */}
@@ -413,7 +415,7 @@ export default function CxCPage() {
                 </div>
               )}
             </div>
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div>
                 <Label>Monto ($) *</Label>
                 <Input type="number" step="0.01" className="mt-1"
@@ -455,7 +457,7 @@ export default function CxCPage() {
                 </p>
               </div>
 
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div className="col-span-2">
                   <Label>Monto a cobrar *</Label>
                   <Input type="number" step="0.01" value={montoCobro}

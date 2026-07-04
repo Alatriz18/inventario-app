@@ -191,6 +191,7 @@ export default function ProveedoresPage() {
       </div>
 
       <div className="bg-white rounded-xl border overflow-hidden">
+        <div className="overflow-x-auto">
         <Table>
           <TableHeader>
             <TableRow className="bg-slate-50">
@@ -273,6 +274,7 @@ export default function ProveedoresPage() {
             ))}
           </TableBody>
         </Table>
+        </div>
       </div>
 
       {/* ─── DIALOG ─── */}
@@ -290,7 +292,7 @@ export default function ProveedoresPage() {
                 <Globe className="h-4 w-4 text-slate-400" />
                 <p className="text-sm font-semibold text-slate-700">Identificación SRI</p>
               </div>
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div className="space-y-1.5">
                   <Label>Tipo de Identificación *</Label>
                   <Select onValueChange={v => setValue('tipoIdentificacion', v as TipoIdentificacionProv)}
@@ -351,7 +353,7 @@ export default function ProveedoresPage() {
                 <MapPin className="h-4 w-4 text-slate-400" />
                 <p className="text-sm font-semibold text-slate-700">Contacto y Dirección</p>
               </div>
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div className="space-y-1.5">
                   <Label>Persona de contacto</Label>
                   <Input placeholder="Juan Pérez" {...register('contacto')} />
@@ -407,7 +409,7 @@ export default function ProveedoresPage() {
                 <CreditCard className="h-4 w-4 text-slate-400" />
                 <p className="text-sm font-semibold text-slate-700">Condiciones Comerciales y SRI</p>
               </div>
-              <div className="grid grid-cols-3 gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
                 <div className="space-y-1.5">
                   <Label>Tipo de Pago *</Label>
                   <Select onValueChange={v => setValue('tipoPago', v as TipoPago)}
@@ -448,7 +450,7 @@ export default function ProveedoresPage() {
                 <p className="text-sm font-semibold text-slate-700">Configuración Contable</p>
                 <span className="text-xs text-slate-400">(opcional)</span>
               </div>
-              <div className="grid grid-cols-3 gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
                 <div className="space-y-1.5">
                   <Label className="text-xs">Cuenta CxP</Label>
                   <Input placeholder="ej: 2.1.01.001" {...register('cuentaCxP')} />
@@ -470,7 +472,7 @@ export default function ProveedoresPage() {
                 <p className="text-sm font-semibold text-slate-700">Datos Bancarios</p>
                 <span className="text-xs text-slate-400">(para pagos por transferencia / archivo)</span>
               </div>
-              <div className="grid grid-cols-3 gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
                 <div className="space-y-1.5">
                   <Label className="text-xs">Banco</Label>
                   <Input placeholder="Banco Pichincha" {...register('bancoNombre')} />

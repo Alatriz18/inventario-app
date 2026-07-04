@@ -99,11 +99,11 @@ export default function BalanceComprobacionPage() {
       <div className="bg-white rounded-xl border p-4 flex flex-wrap gap-3 items-center mb-4">
         <div className="flex items-center gap-2">
           <span className="text-xs text-slate-400">Desde</span>
-          <Input type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)} className="w-36 h-8 text-sm" />
+          <Input type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)} className="w-full sm:w-36 h-8 text-sm" />
         </div>
         <div className="flex items-center gap-2">
           <span className="text-xs text-slate-400">Hasta</span>
-          <Input type="date" value={dateTo} onChange={e => setDateTo(e.target.value)} className="w-36 h-8 text-sm" />
+          <Input type="date" value={dateTo} onChange={e => setDateTo(e.target.value)} className="w-full sm:w-36 h-8 text-sm" />
         </div>
         {balance.length > 0 && (
           <Badge className={cuadra ? 'bg-green-600' : 'bg-red-600'}>
@@ -113,6 +113,7 @@ export default function BalanceComprobacionPage() {
       </div>
 
       <div className="bg-white rounded-xl border overflow-hidden">
+        <div className="overflow-x-auto">
         <Table>
           <TableHeader>
             <TableRow className="bg-slate-50">
@@ -153,6 +154,7 @@ export default function BalanceComprobacionPage() {
             })}
           </TableBody>
         </Table>
+        </div>
         {balance.length > 0 && (
           <div className={`px-4 py-3 border-t flex justify-end gap-8 text-sm font-bold ${cuadra ? 'bg-green-50' : 'bg-red-50'}`}>
             <span className="text-blue-600">Total Debe: ${totales.debe.toFixed(2)}</span>

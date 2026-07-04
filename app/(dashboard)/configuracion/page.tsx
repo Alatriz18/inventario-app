@@ -127,7 +127,7 @@ export default function ConfiguracionPage() {
             <Building2 className="h-4 w-4 text-slate-400" />
             <h3 className="font-semibold text-slate-700">Datos de la Empresa</h3>
           </div>
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div className="col-span-2 space-y-1.5">
               <Label>Razón Social *</Label>
               <Input {...register('nombreEmpresa')} placeholder="Empresa S.A." />
@@ -198,7 +198,7 @@ export default function ConfiguracionPage() {
 
           {/* Preview del régimen seleccionado */}
           {comprobantes && reglas && (
-            <div className="mt-4 grid grid-cols-2 gap-4">
+            <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 gap-4">
 
               {/* Comprobantes habilitados */}
               <div className="rounded-lg border bg-slate-50 p-4">
@@ -264,7 +264,7 @@ export default function ConfiguracionPage() {
             <Shield className="h-4 w-4 text-slate-400" />
             <h3 className="font-semibold text-slate-700">Opciones Adicionales</h3>
           </div>
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div className="space-y-1.5">
               <Label>Moneda</Label>
               <Select
@@ -339,7 +339,7 @@ function EmailConfigCard() {
         </span>
       </div>
 
-      <div className="grid grid-cols-2 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <div className="space-y-1.5">
           <Label>Proveedor</Label>
           <Select value={cfg.proveedor} onValueChange={v => setCfg(c => ({ ...c, proveedor: v as ProveedorEmail }))}>

@@ -217,7 +217,7 @@ export default function AsientosPage() {
         title="Asientos Contables"
         description="Registro de asientos manuales y automáticos"
         action={
-          <div className="flex gap-2">
+          <div className="flex flex-wrap gap-2">
             <Button variant="outline" size="sm" onClick={exportar}>
               <Download className="mr-2 h-4 w-4" /> Excel
             </Button>
@@ -340,7 +340,7 @@ export default function AsientosPage() {
             )}
           </DialogHeader>
           <div className="space-y-4 py-2">
-            <div className="grid grid-cols-3 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
               <div className="space-y-1.5">
                 <Label>Fecha *</Label>
                 <Input type="date" {...register('fecha')} />
@@ -448,6 +448,7 @@ export default function AsientosPage() {
                 <div className="col-span-2"><p className="text-xs text-slate-400">Concepto</p><p className="font-medium">{detalle.concepto}</p></div>
               </div>
               <Separator />
+              <div className="overflow-x-auto">
               <Table>
                 <TableHeader>
                   <TableRow className="bg-slate-50">
@@ -473,6 +474,7 @@ export default function AsientosPage() {
                   ))}
                 </TableBody>
               </Table>
+              </div>
               <div className="bg-slate-50 rounded-lg p-3 flex justify-end gap-8 text-sm">
                 <span>Debe: <strong className="text-blue-600">{currency(detalle.totalDebe)}</strong></span>
                 <span>Haber: <strong className="text-red-600">{currency(detalle.totalHaber)}</strong></span>

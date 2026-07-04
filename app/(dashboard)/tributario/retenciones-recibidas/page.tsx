@@ -184,6 +184,7 @@ export default function RetencionesRecibidasPage() {
       />
 
       <div className="bg-white rounded-xl border overflow-hidden">
+        <div className="overflow-x-auto">
         <Table>
           <TableHeader>
             <TableRow className="bg-slate-50">
@@ -238,6 +239,7 @@ export default function RetencionesRecibidasPage() {
             ))}
           </TableBody>
         </Table>
+        </div>
       </div>
 
       {/* Dialog nueva retención */}
@@ -249,7 +251,7 @@ export default function RetencionesRecibidasPage() {
 
           <div className="space-y-4 py-2">
             {/* Datos cliente */}
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div className="space-y-1.5">
                 <Label>Cliente / Razón Social *</Label>
                 <Input value={clienteNombre} onChange={e => setClienteNombre(e.target.value)}
@@ -262,7 +264,7 @@ export default function RetencionesRecibidasPage() {
               </div>
             </div>
 
-            <div className="grid grid-cols-3 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
               <div className="space-y-1.5">
                 <Label>N° Comprobante Retención *</Label>
                 <Input value={numeroRetencion} onChange={e => setNumeroRetencion(e.target.value)}
@@ -302,7 +304,7 @@ export default function RetencionesRecibidasPage() {
 
                 return (
                   <div key={i} className="border rounded-lg p-3 space-y-2 bg-slate-50">
-                    <div className="grid grid-cols-2 gap-2">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                       <div className="space-y-1">
                         <Label className="text-xs">Tipo</Label>
                         <Select value={linea.tipo}
@@ -334,7 +336,7 @@ export default function RetencionesRecibidasPage() {
                       </div>
                     </div>
 
-                    <div className="grid grid-cols-3 gap-2 items-end">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2 items-end">
                       <div className="space-y-1">
                         <Label className="text-xs">Base Imponible</Label>
                         <Input

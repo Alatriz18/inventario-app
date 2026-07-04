@@ -246,6 +246,7 @@ export default function NotasDebitoPage() {
       />
 
       <div className="bg-white rounded-xl border overflow-hidden">
+        <div className="overflow-x-auto">
         <Table>
           <TableHeader>
             <TableRow className="bg-slate-50">
@@ -302,6 +303,7 @@ export default function NotasDebitoPage() {
             ))}
           </TableBody>
         </Table>
+        </div>
       </div>
 
       {/* Dialog */}

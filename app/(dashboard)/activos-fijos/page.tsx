@@ -191,7 +191,7 @@ export default function ActivosFijosPage() {
       />
 
       {/* KPIs */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
         {[
           { label: 'Activos en uso',       value: kpis.countActivos,                color: 'text-slate-800' },
           { label: 'Costo de adquisición', value: currency(kpis.totalAdquisicion),  color: 'text-slate-800' },
@@ -207,6 +207,7 @@ export default function ActivosFijosPage() {
 
       {/* Tabla activos */}
       <div className="bg-white rounded-xl border overflow-hidden">
+        <div className="overflow-x-auto">
         <Table>
           <TableHeader>
             <TableRow className="bg-slate-50">
@@ -321,6 +322,7 @@ export default function ActivosFijosPage() {
             ))}
           </TableBody>
         </Table>
+        </div>
       </div>
 
       {/* Dialog crear activo */}
@@ -329,7 +331,7 @@ export default function ActivosFijosPage() {
           <DialogHeader>
             <DialogTitle>Nuevo Activo Fijo</DialogTitle>
           </DialogHeader>
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
               <Label>Código *</Label>
               <Input value={form.codigo}
@@ -410,7 +412,7 @@ export default function ActivosFijosPage() {
 
             <div className="col-span-2 border-t pt-3">
               <p className="text-xs font-semibold text-slate-600 mb-2">Cuentas contables</p>
-              <div className="grid grid-cols-3 gap-2">
+              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2">
                 <div>
                   <Label className="text-xs">Activo (cód.)</Label>
                   <Input value={form.cuentaActivoCodigo}

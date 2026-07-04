@@ -121,14 +121,14 @@ export default function LibroMayorPage() {
       <div className="bg-white rounded-xl border p-4 flex flex-wrap gap-3 items-center mb-4">
         <div className="flex items-center gap-2">
           <span className="text-xs text-slate-400">Desde</span>
-          <Input type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)} className="w-36 h-8 text-sm" />
+          <Input type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)} className="w-full sm:w-36 h-8 text-sm" />
         </div>
         <div className="flex items-center gap-2">
           <span className="text-xs text-slate-400">Hasta</span>
-          <Input type="date" value={dateTo} onChange={e => setDateTo(e.target.value)} className="w-36 h-8 text-sm" />
+          <Input type="date" value={dateTo} onChange={e => setDateTo(e.target.value)} className="w-full sm:w-36 h-8 text-sm" />
         </div>
         <Select onValueChange={setCuentaId} defaultValue="todas">
-          <SelectTrigger className="w-56 h-8 text-sm"><SelectValue placeholder="Todas las cuentas" /></SelectTrigger>
+          <SelectTrigger className="w-full sm:w-56 h-8 text-sm"><SelectValue placeholder="Todas las cuentas" /></SelectTrigger>
           <SelectContent>
             <SelectItem value="todas">Todas las cuentas</SelectItem>
             {cuentasMovimiento.map(c => (
@@ -164,6 +164,7 @@ export default function LibroMayorPage() {
                   Naturaleza: {cuenta.naturaleza}
                 </Badge>
               </div>
+              <div className="overflow-x-auto">
               <Table>
                 <TableHeader>
                   <TableRow className="bg-slate-50">
@@ -201,6 +202,7 @@ export default function LibroMayorPage() {
                   })}
                 </TableBody>
               </Table>
+              </div>
               <div className="px-4 py-2.5 border-t bg-slate-50 flex justify-end gap-8 text-sm font-bold">
                 <span className="text-blue-600">Debe: {currency(totalDebe)}</span>
                 <span className="text-red-600">Haber: {currency(totalHaber)}</span>

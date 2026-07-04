@@ -173,7 +173,7 @@ export default function UsuariosPage() {
       />
 
       {/* Stats */}
-      <div className="grid grid-cols-3 gap-3 mb-6">
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-6">
         {[
           { label: 'Total usuarios', value: stats.total,    color: 'text-slate-700' },
           { label: 'Activos',        value: stats.activos,  color: 'text-green-600' },
@@ -192,6 +192,7 @@ export default function UsuariosPage() {
       </div>
 
       <div className="bg-white rounded-xl border overflow-hidden">
+        <div className="overflow-x-auto">
         <Table>
           <TableHeader>
             <TableRow className="bg-slate-50">
@@ -266,6 +267,7 @@ export default function UsuariosPage() {
             })}
           </TableBody>
         </Table>
+        </div>
       </div>
 
       {/* ─── DIALOG CREAR ─── */}

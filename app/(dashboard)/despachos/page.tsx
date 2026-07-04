@@ -221,6 +221,7 @@ export default function DespachosPage() {
       </div>
 
       <div className="bg-white rounded-xl border overflow-hidden">
+        <div className="overflow-x-auto">
         <Table>
           <TableHeader>
             <TableRow className="bg-slate-50">
@@ -288,6 +289,7 @@ export default function DespachosPage() {
             ))}
           </TableBody>
         </Table>
+        </div>
       </div>
 
       {/* ─── DIALOG NUEVO DESPACHO ─── */}
@@ -298,7 +300,7 @@ export default function DespachosPage() {
           </DialogHeader>
 
           <div className="space-y-5 py-2">
-            <div className="grid grid-cols-3 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
               <div className="space-y-1.5">
                 <Label>Fecha *</Label>
                 <Input type="date" {...register('fecha')} />
@@ -368,6 +370,7 @@ export default function DespachosPage() {
             {/* Tabla items */}
             {fields.length > 0 && (
               <div className="border rounded-lg overflow-hidden">
+                <div className="overflow-x-auto">
                 <Table>
                   <TableHeader>
                     <TableRow className="bg-slate-50">
@@ -420,6 +423,7 @@ export default function DespachosPage() {
                     })}
                   </TableBody>
                 </Table>
+                </div>
                 <div className="bg-slate-50 px-4 py-3 flex justify-end border-t">
                   <span className="text-sm text-slate-600 font-bold">
                     Total: <span className="text-slate-900">{formatCurrency(total)}</span>

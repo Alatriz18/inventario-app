@@ -188,6 +188,7 @@ export default function PeriodosPage() {
       />
 
       <div className="bg-white rounded-xl border overflow-hidden">
+        <div className="overflow-x-auto">
         <Table>
           <TableHeader>
             <TableRow className="bg-slate-50">
@@ -248,6 +249,7 @@ export default function PeriodosPage() {
             ))}
           </TableBody>
         </Table>
+        </div>
       </div>
 
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
@@ -296,7 +298,7 @@ export default function PeriodosPage() {
           </p>
           <div className="space-y-2">
             {lineasApertura.map((l, i) => (
-              <div key={i} className="grid grid-cols-4 gap-2 items-end">
+              <div key={i} className="grid grid-cols-2 sm:grid-cols-4 gap-2 items-end">
                 <div className="col-span-2 space-y-1">
                   {i === 0 && <Label className="text-xs">Código de Cuenta</Label>}
                   <Input className="h-8 text-sm" value={l.codigoCuenta}

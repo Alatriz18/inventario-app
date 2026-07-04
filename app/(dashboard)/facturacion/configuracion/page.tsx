@@ -209,7 +209,7 @@ export default function ConfiguracionSRIPage() {
             <h3 className="font-semibold text-slate-700">Datos del Emisor</h3>
           </div>
 
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div className="space-y-1.5">
               <Label>RUC *</Label>
               <Input placeholder="1234567890001" {...register('ruc')} />
@@ -248,7 +248,7 @@ export default function ConfiguracionSRIPage() {
         {/* Establecimiento y ambiente */}
         <div className="bg-white rounded-xl border p-6 space-y-4">
           <h3 className="font-semibold text-slate-700">Establecimiento y Ambiente</h3>
-          <div className="grid grid-cols-3 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
             <div className="space-y-1.5">
               <Label>Establecimiento *</Label>
               <Input placeholder="001" maxLength={3} {...register('establecimiento')} />
@@ -367,7 +367,7 @@ export default function ConfiguracionSRIPage() {
                     </span>
                   </div>
 
-                  <div className="grid grid-cols-2 gap-2 text-xs">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
                     <div>
                       <p className="text-slate-500 font-medium">Titular</p>
                       <p className="text-slate-800">{infoCert.titular || '—'}</p>

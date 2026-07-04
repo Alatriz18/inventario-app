@@ -121,15 +121,15 @@ export default function Form104Page() {
         Verifica siempre los datos antes de declarar.
       </div>
 
-      <div className="bg-white rounded-xl border p-4 flex gap-3 items-center mb-5">
+      <div className="bg-white rounded-xl border p-4 flex flex-wrap gap-3 items-center mb-5">
         <Select onValueChange={setAnio} defaultValue={anio}>
-          <SelectTrigger className="w-28"><SelectValue /></SelectTrigger>
+          <SelectTrigger className="w-full sm:w-28"><SelectValue /></SelectTrigger>
           <SelectContent>
             {anios.map(a => <SelectItem key={a} value={a}>{a}</SelectItem>)}
           </SelectContent>
         </Select>
         <Select onValueChange={setMes} defaultValue={mes}>
-          <SelectTrigger className="w-36"><SelectValue /></SelectTrigger>
+          <SelectTrigger className="w-full sm:w-36"><SelectValue /></SelectTrigger>
           <SelectContent>
             {MESES.map((m, i) => (
               <SelectItem key={i+1} value={String(i+1)}>{m}</SelectItem>

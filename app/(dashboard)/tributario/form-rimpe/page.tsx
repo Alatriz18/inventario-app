@@ -128,7 +128,7 @@ export default function FormRIMPEPage() {
         <div className="flex items-center gap-2">
           <span className="text-sm font-medium text-slate-600">Año:</span>
           <Select value={anio} onValueChange={setAnio}>
-            <SelectTrigger className="w-28"><SelectValue /></SelectTrigger>
+            <SelectTrigger className="w-full sm:w-28"><SelectValue /></SelectTrigger>
             <SelectContent>
               {anios.map(a => <SelectItem key={a} value={a}>{a}</SelectItem>)}
             </SelectContent>
@@ -137,7 +137,7 @@ export default function FormRIMPEPage() {
         <div className="flex items-center gap-2">
           <span className="text-sm font-medium text-slate-600">Mes:</span>
           <Select value={mes} onValueChange={setMes}>
-            <SelectTrigger className="w-36"><SelectValue /></SelectTrigger>
+            <SelectTrigger className="w-full sm:w-36"><SelectValue /></SelectTrigger>
             <SelectContent>
               {MESES.map((m, i) => (
                 <SelectItem key={i + 1} value={String(i + 1)}>{m}</SelectItem>
@@ -158,7 +158,7 @@ export default function FormRIMPEPage() {
       </div>
 
       {/* Resumen */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-6">
         <div className="bg-white border rounded-xl p-4">
           <p className="text-xs text-slate-500 mb-1">Ingresos del mes</p>
           {loading ? <Skeleton className="h-6 w-24" /> :

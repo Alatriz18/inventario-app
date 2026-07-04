@@ -326,6 +326,7 @@ export default function NotasCreditoPage() {
 
       {/* Tabla */}
       <div className="bg-white rounded-xl border overflow-hidden">
+        <div className="overflow-x-auto">
         <Table>
           <TableHeader>
             <TableRow className="bg-slate-50">
@@ -384,7 +385,7 @@ export default function NotasCreditoPage() {
                         {n.numeroAutorizacion && (
                           <p><strong>N° autorización:</strong> <span className="font-mono">{n.numeroAutorizacion}</span></p>
                         )}
-                        <div className="grid grid-cols-3 gap-3 mt-2">
+                        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3 mt-2">
                           <div className="bg-white rounded-lg p-2 border">
                             <p className="text-slate-400">Subtotal</p>
                             <p className="font-semibold">{currency(n.subtotal)}</p>
@@ -418,6 +419,7 @@ export default function NotasCreditoPage() {
             ))}
           </TableBody>
         </Table>
+        </div>
       </div>
 
       {/* Dialog emitir */}
@@ -456,7 +458,7 @@ export default function NotasCreditoPage() {
             )}
 
             {/* Motivo */}
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div>
                 <Label>Motivo *</Label>
                 <Select value={motivo} onValueChange={v => setMotivo(v as MotivoNotaCredito)}>

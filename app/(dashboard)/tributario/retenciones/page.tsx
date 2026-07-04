@@ -111,6 +111,7 @@ export default function RetencionesPage() {
           <Plus className="mr-1 h-3.5 w-3.5" /> Nueva
         </Button>
       </div>
+      <div className="overflow-x-auto">
       <Table>
         <TableHeader>
           <TableRow className="bg-slate-50">
@@ -163,6 +164,7 @@ export default function RetencionesPage() {
           ))}
         </TableBody>
       </Table>
+      </div>
     </div>
   );
 
@@ -202,7 +204,7 @@ export default function RetencionesPage() {
             <DialogTitle>{editing ? 'Editar' : 'Nueva'} Retención</DialogTitle>
           </DialogHeader>
           <div className="space-y-3 py-2">
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div className="space-y-1.5">
                 <Label>Código SRI *</Label>
                 <Input placeholder="303" {...register('codigo')} />
@@ -218,7 +220,7 @@ export default function RetencionesPage() {
               <Input placeholder="Honorarios profesionales y demás pagos..." {...register('descripcion')} />
               {errors.descripcion && <p className="text-xs text-red-500">{errors.descripcion.message}</p>}
             </div>
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div className="space-y-1.5">
                 <Label>Tipo</Label>
                 <Select onValueChange={v => setValue('tipo', v as any)}

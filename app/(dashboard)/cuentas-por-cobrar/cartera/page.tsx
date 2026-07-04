@@ -146,7 +146,7 @@ export default function CarteraPage() {
         <Input placeholder="Buscar por cliente o número…"
           value={search} onChange={e => setSearch(e.target.value)} className="max-w-xs" />
         <Select value={filtro} onValueChange={setFiltro}>
-          <SelectTrigger className="w-44"><SelectValue /></SelectTrigger>
+          <SelectTrigger className="w-full sm:w-44"><SelectValue /></SelectTrigger>
           <SelectContent>
             <SelectItem value="todos">Todas</SelectItem>
             <SelectItem value="cobrada">Cobradas</SelectItem>
@@ -159,6 +159,7 @@ export default function CarteraPage() {
       </div>
 
       <div className="bg-white rounded-xl border overflow-hidden">
+        <div className="overflow-x-auto">
         <Table>
           <TableHeader>
             <TableRow className="bg-slate-50">
@@ -210,6 +211,7 @@ export default function CarteraPage() {
             ))}
           </TableBody>
         </Table>
+        </div>
       </div>
     </div>
   );

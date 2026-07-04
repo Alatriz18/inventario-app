@@ -203,6 +203,7 @@ export default function EntradasPage() {
       </div>
 
       <div className="bg-white rounded-xl border overflow-hidden">
+        <div className="overflow-x-auto">
         <Table>
           <TableHeader>
             <TableRow className="bg-slate-50">
@@ -266,6 +267,7 @@ export default function EntradasPage() {
             ))}
           </TableBody>
         </Table>
+        </div>
       </div>
 
       {/* ─── DIALOG NUEVA ENTRADA ─── */}
@@ -275,7 +277,7 @@ export default function EntradasPage() {
             <DialogTitle>Nueva Entrada de Inventario</DialogTitle>
           </DialogHeader>
           <div className="space-y-5 py-2">
-            <div className="grid grid-cols-3 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
               <div className="space-y-1.5">
                 <div className="flex items-center justify-between">
                   <Label>Proveedor *</Label>
@@ -344,6 +346,7 @@ export default function EntradasPage() {
 
             {fields.length > 0 && (
               <div className="border rounded-lg overflow-hidden">
+                <div className="overflow-x-auto">
                 <Table>
                   <TableHeader>
                     <TableRow className="bg-slate-50">
@@ -389,6 +392,7 @@ export default function EntradasPage() {
                     })}
                   </TableBody>
                 </Table>
+                </div>
                 <div className="bg-slate-50 px-4 py-3 flex justify-end gap-8 text-sm border-t">
                   <div className="text-slate-500">Subtotal: <span className="font-semibold text-slate-700">{formatCurrency(subtotal)}</span></div>
                   <div className="text-slate-500">IVA 15%: <span className="font-semibold text-slate-700">{formatCurrency(iva)}</span></div>

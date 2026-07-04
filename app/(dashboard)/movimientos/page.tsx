@@ -131,7 +131,7 @@ export default function MovimientosPage() {
           className="max-w-xs"
         />
         <Select onValueChange={setFiltroTipo} defaultValue="todos">
-          <SelectTrigger className="w-48">
+          <SelectTrigger className="w-full sm:w-48">
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
@@ -144,7 +144,7 @@ export default function MovimientosPage() {
           type="date"
           value={filtroFecha}
           onChange={(e) => setFiltroFecha(e.target.value)}
-          className="w-44"
+          className="w-full sm:w-44"
         />
         {(search || filtroTipo !== 'todos' || filtroFecha) && (
           <button
@@ -158,6 +158,7 @@ export default function MovimientosPage() {
 
       {/* Tabla */}
       <div className="bg-white rounded-xl border overflow-hidden">
+        <div className="overflow-x-auto">
         <Table>
           <TableHeader>
             <TableRow className="bg-slate-50">
@@ -251,6 +252,7 @@ export default function MovimientosPage() {
             )}
           </TableBody>
         </Table>
+        </div>
 
         {/* Footer con conteo */}
         {!loading && filtered.length > 0 && (

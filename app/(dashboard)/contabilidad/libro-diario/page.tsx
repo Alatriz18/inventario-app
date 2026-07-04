@@ -92,16 +92,17 @@ export default function LibroDiarioPage() {
       <div className="bg-white rounded-xl border p-4 flex flex-wrap gap-3 items-center mb-4">
         <div className="flex items-center gap-2">
           <span className="text-xs text-slate-400">Desde</span>
-          <Input type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)} className="w-36 h-8 text-sm" />
+          <Input type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)} className="w-full sm:w-36 h-8 text-sm" />
         </div>
         <div className="flex items-center gap-2">
           <span className="text-xs text-slate-400">Hasta</span>
-          <Input type="date" value={dateTo} onChange={e => setDateTo(e.target.value)} className="w-36 h-8 text-sm" />
+          <Input type="date" value={dateTo} onChange={e => setDateTo(e.target.value)} className="w-full sm:w-36 h-8 text-sm" />
         </div>
         <Badge variant="outline">{filtrados.length} asiento(s)</Badge>
       </div>
 
       <div className="bg-white rounded-xl border overflow-hidden">
+        <div className="overflow-x-auto">
         <Table>
           <TableHeader>
             <TableRow className="bg-slate-50">
@@ -178,6 +179,7 @@ export default function LibroDiarioPage() {
             })}
           </TableBody>
         </Table>
+        </div>
 
         {filtrados.length > 0 && (
           <div className="px-4 py-3 border-t bg-slate-50 flex justify-end gap-8 text-sm font-bold">

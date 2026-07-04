@@ -48,6 +48,7 @@ export default function DocumentosRecibidosPage() {
       </div>
 
       <div className="bg-white rounded-xl border overflow-hidden">
+        <div className="overflow-x-auto">
         <Table>
           <TableHeader>
             <TableRow className="bg-slate-50">
@@ -98,6 +99,7 @@ export default function DocumentosRecibidosPage() {
             ))}
           </TableBody>
         </Table>
+        </div>
       </div>
     </div>
   );

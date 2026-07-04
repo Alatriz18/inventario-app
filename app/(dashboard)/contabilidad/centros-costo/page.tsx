@@ -89,6 +89,7 @@ export default function CentrosCostoPage() {
       />
 
       <div className="bg-white rounded-xl border overflow-hidden">
+        <div className="overflow-x-auto">
         <Table>
           <TableHeader>
             <TableRow className="bg-slate-50">
@@ -136,6 +137,7 @@ export default function CentrosCostoPage() {
             ))}
           </TableBody>
         </Table>
+        </div>
       </div>
 
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>

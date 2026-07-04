@@ -606,7 +606,7 @@ export default function FacturasProveedorPage() {
         <Input placeholder="Buscar por proveedor o número..."
           value={search} onChange={e => setSearch(e.target.value)} className="max-w-xs" />
         <Select onValueChange={setFiltroEstado} defaultValue="todos">
-          <SelectTrigger className="w-40"><SelectValue /></SelectTrigger>
+          <SelectTrigger className="w-full sm:w-40"><SelectValue /></SelectTrigger>
           <SelectContent>
             <SelectItem value="todos">Todos</SelectItem>
             <SelectItem value="pendiente">Pendientes</SelectItem>
@@ -619,6 +619,7 @@ export default function FacturasProveedorPage() {
 
       {/* Tabla */}
       <div className="bg-white rounded-xl border overflow-hidden">
+        <div className="overflow-x-auto">
         <Table>
           <TableHeader>
             <TableRow className="bg-slate-50">
@@ -700,6 +701,7 @@ export default function FacturasProveedorPage() {
             })}
           </TableBody>
         </Table>
+        </div>
       </div>
 
       {/* ─── DIALOG NUEVA FACTURA ─── */}
@@ -708,7 +710,7 @@ export default function FacturasProveedorPage() {
           <DialogHeader>
             <DialogTitle>Registrar Factura de Proveedor</DialogTitle>
           </DialogHeader>
-          <div className="grid grid-cols-2 gap-4 py-2">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 py-2">
             <div className="space-y-1.5 col-span-2">
               <Label>Proveedor *</Label>
               <Select onValueChange={v => facturaForm.setValue('proveedorId', v)}>
@@ -882,7 +884,7 @@ export default function FacturasProveedorPage() {
           </DialogHeader>
           {detailDialog && (
             <div className="space-y-4">
-              <div className="grid grid-cols-2 gap-3 text-sm">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm">
                 <div><p className="text-xs text-slate-400">Proveedor</p><p className="font-medium">{detailDialog.proveedorNombre}</p></div>
                 <div><p className="text-xs text-slate-400">RUC</p><p className="font-medium">{detailDialog.proveedorRuc}</p></div>
                 <div><p className="text-xs text-slate-400">Número</p><p className="font-mono text-xs">{detailDialog.numeroFactura}</p></div>
@@ -1011,7 +1013,7 @@ export default function FacturasProveedorPage() {
             <DialogTitle>Pago a proveedores por archivo bancario</DialogTitle>
           </DialogHeader>
           <div className="space-y-4 py-2">
-            <div className="grid grid-cols-2 gap-4 items-end">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 items-end">
               <div className="space-y-1.5">
                 <Label>Banco</Label>
                 <Select value={bancoSel} onValueChange={v => setBancoSel(v as BancoPago)}>

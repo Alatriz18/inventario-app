@@ -130,7 +130,7 @@ export default function PlanCuentasPage() {
         title="Plan de Cuentas"
         description="Plan de cuentas contable NEC/NIIF para Ecuador"
         action={
-          <div className="flex gap-2">
+          <div className="flex flex-wrap gap-2">
             {cuentas.length === 0 && (
               <Button variant="outline" onClick={handleSeed} disabled={seeding}>
                 <RefreshCw className={`mr-2 h-4 w-4 ${seeding ? 'animate-spin' : ''}`} />
@@ -158,7 +158,7 @@ export default function PlanCuentasPage() {
         <Input placeholder="Buscar por código o nombre..."
           value={search} onChange={e => setSearch(e.target.value)} className="max-w-xs" />
         <Select onValueChange={setFiltroTipo} defaultValue="todos">
-          <SelectTrigger className="w-40"><SelectValue /></SelectTrigger>
+          <SelectTrigger className="w-full sm:w-40"><SelectValue /></SelectTrigger>
           <SelectContent>
             <SelectItem value="todos">Todos</SelectItem>
             <SelectItem value="activo">Activo</SelectItem>
@@ -173,6 +173,7 @@ export default function PlanCuentasPage() {
       </div>
 
       <div className="bg-white rounded-xl border overflow-hidden">
+        <div className="overflow-x-auto">
         <Table>
           <TableHeader>
             <TableRow className="bg-slate-50">
@@ -235,6 +236,7 @@ export default function PlanCuentasPage() {
             ))}
           </TableBody>
         </Table>
+        </div>
       </div>
 
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
@@ -242,7 +244,7 @@ export default function PlanCuentasPage() {
           <DialogHeader>
             <DialogTitle>{editing ? 'Editar Cuenta' : 'Nueva Cuenta Contable'}</DialogTitle>
           </DialogHeader>
-          <div className="grid grid-cols-2 gap-3 py-2">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 py-2">
             <div className="space-y-1.5">
               <Label>Código *</Label>
               <Input placeholder="ej: 1.1.09" {...register('codigo')} />

@@ -124,11 +124,11 @@ export default function EstadoResultadosPage() {
       <div className="bg-white rounded-xl border p-4 flex flex-wrap gap-3 items-center mb-4">
         <div className="flex items-center gap-2">
           <span className="text-xs text-slate-400">Desde</span>
-          <Input type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)} className="w-36 h-8 text-sm" />
+          <Input type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)} className="w-full sm:w-36 h-8 text-sm" />
         </div>
         <div className="flex items-center gap-2">
           <span className="text-xs text-slate-400">Hasta</span>
-          <Input type="date" value={dateTo} onChange={e => setDateTo(e.target.value)} className="w-36 h-8 text-sm" />
+          <Input type="date" value={dateTo} onChange={e => setDateTo(e.target.value)} className="w-full sm:w-36 h-8 text-sm" />
         </div>
       </div>
 

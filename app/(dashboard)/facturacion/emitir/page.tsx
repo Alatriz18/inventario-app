@@ -357,7 +357,7 @@ function EmitirComprobanteInner() {
             establecimiento: config.establecimiento, puntoEmision: config.puntoEmision,
             direccionMatriz: config.direccionMatriz,
             obligadoContabilidad: config.obligadoContabilidad,
-            contribuyenteEspecial: config.contribuyenteEspecial ?? false,
+            ...(config.contribuyenteEspecial ? { contribuyenteEspecial: config.contribuyenteEspecial } : {}),
             tipoIdComprador: tipoId,
             identificacion: ventaSeleccionada.clienteIdentificacion,
             razonSocialComprador: ventaSeleccionada.clienteNombre,

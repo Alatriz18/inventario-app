@@ -81,8 +81,8 @@ export default function BodegasPage() {
     try {
       const payload = {
         ...data,
-        cuentaInventario:  data.cuentaInventario  || undefined,
-        cuentaCostoVentas: data.cuentaCostoVentas || undefined,
+        ...(data.cuentaInventario  ? { cuentaInventario:  data.cuentaInventario  } : {}),
+        ...(data.cuentaCostoVentas ? { cuentaCostoVentas: data.cuentaCostoVentas } : {}),
       };
       if (editing) {
         await updateBodega(editing.id, payload);

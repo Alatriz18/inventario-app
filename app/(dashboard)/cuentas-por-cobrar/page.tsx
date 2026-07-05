@@ -139,7 +139,7 @@ export default function CxCPage() {
         diasCredito:           dias,
         total:                 monto,
         saldoPendiente:        monto,
-        notas:                 nuevaDesc || undefined,
+        ...(nuevaDesc ? { notas: nuevaDesc } : {}),
         usuarioId:             user.uid,
         usuarioNombre:         user.nombre ?? user.email ?? 'Usuario',
       });

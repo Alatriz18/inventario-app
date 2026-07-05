@@ -161,7 +161,7 @@ export default function DespachosPage() {
           fecha:         new Date(data.fecha),
           motivo:        data.motivo,
           motivoDetalle: data.motivoDetalle,
-          bodegaId:      data.bodegaId || undefined,
+          ...(data.bodegaId ? { bodegaId: data.bodegaId } : {}),
           bodegaNombre:  bodega?.nombre,
           items,
           total,

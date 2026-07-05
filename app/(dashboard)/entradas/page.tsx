@@ -141,7 +141,7 @@ export default function EntradasPage() {
           fecha:           new Date(data.fecha),
           proveedorId:     data.proveedorId,
           proveedorNombre: prov?.nombre ?? '',
-          bodegaId:        data.bodegaId || undefined,
+          ...(data.bodegaId ? { bodegaId: data.bodegaId } : {}),
           bodegaNombre:    bodega?.nombre,
           items,
           subtotal,

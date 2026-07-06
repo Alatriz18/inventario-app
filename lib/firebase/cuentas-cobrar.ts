@@ -73,8 +73,8 @@ export async function registrarCobroCxC(
     const nuevoCobro: CobroCxC = { ...cobro, id, usuarioId, usuarioNombre };
 
     const cobros         = [...(cxc.cobros ?? []), nuevoCobro];
-    const totalCobrado   = cobros.reduce((s, c) => s + c.monto, 0);
-    const saldoPendiente = Math.max(0, cxc.total - totalCobrado);
+    const totalCobrado   = Math.round(cobros.reduce((s, c) => s + c.monto, 0) * 100) / 100;
+    const saldoPendiente = Math.round(Math.max(0, cxc.total - totalCobrado) * 100) / 100;
     const estado: EstadoCxC =
       saldoPendiente === 0 ? 'pagada'  :
       totalCobrado   > 0   ? 'parcial' :

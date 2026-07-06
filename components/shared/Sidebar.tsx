@@ -61,8 +61,9 @@ const NAV: NavItem[] = [
   {
     label: 'Cuentas por Cobrar', icon: DollarSign,
     children: [
-      { label: 'Saldos y Cobros',    href: '/cuentas-por-cobrar',         icon: DollarSign, modulo: 'cxc' },
-      { label: 'Cartera (Facturas)', href: '/cuentas-por-cobrar/cartera', icon: Wallet,     modulo: 'cxc_cartera' },
+      { label: 'Saldos y Cobros',    href: '/cuentas-por-cobrar',          icon: DollarSign, modulo: 'cxc' },
+      { label: 'Cartera (Facturas)', href: '/cuentas-por-cobrar/cartera',  icon: Wallet,     modulo: 'cxc_cartera' },
+      { label: 'Reporte de Cobros',  href: '/cuentas-por-cobrar/reportes', icon: BarChart3,  modulo: 'cxc' },
     ],
   },
   {

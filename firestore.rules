@@ -39,10 +39,19 @@ service cloud.firestore {
 
     // ── Configuración del sistema ─────────────────────────────────────────
 
-    // config_sri contiene el certificado .p12 — lectura staff (para emitir), escritura solo admin
+    // config_sri contiene el certificado .p12 — lectura staff (para emitir).
+    // Escritura completa solo admin; el staff solo puede incrementar los
+    // secuenciales al emitir comprobantes (no puede tocar certificado/clave).
     match /config_sri/{id} {
       allow read: if isStaff();
-      allow write: if isAdmin();
+      allow create, delete: if isAdmin();
+      allow update: if isAdmin() ||
+        (isStaff() && request.resource.data.diff(resource.data).affectedKeys()
+          .hasOnly([
+            'secuencialFactura', 'secuencialNotaVenta', 'secuencialRetencion',
+            'secuencialNotaCredito', 'secuencialNotaDebito',
+            'secuencialLiquidacion', 'secuencialGuia'
+          ]));
     }
 
     match /config_empresa/{id} {

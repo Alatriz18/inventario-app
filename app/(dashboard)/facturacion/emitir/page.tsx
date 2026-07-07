@@ -19,7 +19,6 @@ import { getConfigSRI, incrementarSecuencial } from '@/lib/firebase/config-sri';
 import { subscribeToConfigEmpresa } from '@/lib/firebase/config-empresa';
 import { ComprobantesHabilitados } from '@/types';
 import { generarXMLFactura }   from '@/lib/sri/generador-factura';
-import { generarXMLNotaVenta } from '@/lib/sri/generador-nota-venta';
 import { generarClaveAcceso }  from '@/lib/sri/clave-acceso';
 import { Venta } from '@/types';
 import { useAuth } from '@/context/AuthContext';
@@ -111,7 +110,8 @@ function EmitirComprobanteInner() {
       // 1. Obtener configuración SRI
       const config = await getConfigSRI();
       if (!config) throw new Error('Configura el SRI antes de emitir comprobantes');
-      if (!config.certificadoP12) throw new Error('No hay certificado digital configurado');
+      // La Nota de Venta es un documento manual — no se firma ni se envía al SRI
+      if (tipo === 'factura' && !config.certificadoP12) throw new Error('No hay certificado digital configurado');
 
       // 2. Obtener secuencial e incrementar
       const secuencial = tipo === 'factura'
@@ -158,60 +158,73 @@ function EmitirComprobanteInner() {
       // El total del XML debe incluir el IVA (el POS guarda precios sin IVA)
       const total     = tipo === 'factura' ? base + iva : ventaSeleccionada.total;
 
-      // 6. Generar XML
-      let xml: string;
-      if (tipo === 'factura') {
-        xml = generarXMLFactura({
+      const serie = `${config.establecimiento.padStart(3,'0')}-${config.puntoEmision.padStart(3,'0')}`;
+
+      // La Nota de Venta es un comprobante manual/interno: no se firma ni se
+      // envía al SRI, solo se registra y se imprime el recibo.
+      if (tipo === 'nota_venta') {
+        const compId = await createComprobante({
+          tipo,
+          ventaId:              ventaSeleccionada.id,
           claveAcceso,
-          secuencial,
-          fechaEmision:        fechaComprobante,
-          ambiente:            config.ambiente,
-          ruc:                 config.ruc,
-          razonSocial:         config.razonSocial,
-          nombreComercial:     config.nombreComercial,
-          establecimiento:     config.establecimiento,
-          puntoEmision:        config.puntoEmision,
-          direccionMatriz:     config.direccionMatriz,
-          contribuyenteEspecial: config.contribuyenteEspecial,
-          obligadoContabilidad:  config.obligadoContabilidad,
-          tipoIdComprador:     tipoId,
-          identificacion:      ventaSeleccionada.clienteIdentificacion,
-          razonSocialComprador:ventaSeleccionada.clienteNombre,
-          items,
-          subtotal15:          tipo === 'factura' ? base : 0,
-          subtotal0:           0,
-          totalDescuento:      descuento,
-          iva,
+          secuencial:           String(secuencial).padStart(9, '0'),
+          serie,
+          fechaEmision:         fechaComprobante,
+          clienteNombre:        ventaSeleccionada.clienteNombre,
+          clienteIdentificacion:ventaSeleccionada.clienteIdentificacion,
+          subtotal:             base,
+          iva:                  0,
           total,
-          formaPago: FORMA_PAGO_MAP[ventaSeleccionada.metodoPago] ?? '01',
+          estado:               'autorizado',
+          emailEnviado:         false,
+          mensajesSRI:          ['Emitida manualmente — la Nota de Venta no requiere autorización electrónica del SRI'],
+          usuarioId:            user.uid,
+          usuarioNombre:        user.nombre,
+          createdAt:            new Date(),
         });
-      } else {
-        xml = generarXMLNotaVenta({
-          claveAcceso,
-          secuencial,
-          fechaEmision:          fechaComprobante,
-          ambiente:              config.ambiente,
-          ruc:                   config.ruc,
-          razonSocial:           config.razonSocial,
-          nombreComercial:       config.nombreComercial,
-          establecimiento:       config.establecimiento,
-          puntoEmision:          config.puntoEmision,
-          direccionMatriz:       config.direccionMatriz,
-          obligadoContabilidad:  config.obligadoContabilidad,
-          contribuyenteEspecial: config.contribuyenteEspecial || undefined,
-          tipoIdComprador:       tipoId,
-          identificacion:        ventaSeleccionada.clienteIdentificacion,
-          razonSocialComprador:  ventaSeleccionada.clienteNombre,
-          items,
-          totalSinImpuestos:     base,
-          totalDescuento:        descuento,
-          importeTotal:          total,
-          formaPago: FORMA_PAGO_MAP[ventaSeleccionada.metodoPago] ?? '01',
-        });
+
+        setResultado({ estado: 'AUTORIZADO', compId, claveAcceso, manual: true });
+        toast.success('Nota de venta emitida');
+
+        const datos: DatosTicket = {
+          nombreNegocio: config.nombreComercial || config.razonSocial,
+          ruc:           config.ruc,
+          direccion:     config.direccionMatriz,
+          venta:         ventaSeleccionada,
+          numeracion:    `NV-${serie}-${String(secuencial).padStart(9, '0')}`,
+        };
+        setTicketData(datos);
+        try { abrirTicketEnNuevaPestana(datos); } catch { /* popup bloqueado */ }
+        return;
       }
 
+      // 6. Generar XML (solo Factura Electrónica)
+      const xml = generarXMLFactura({
+        claveAcceso,
+        secuencial,
+        fechaEmision:        fechaComprobante,
+        ambiente:            config.ambiente,
+        ruc:                 config.ruc,
+        razonSocial:         config.razonSocial,
+        nombreComercial:     config.nombreComercial,
+        establecimiento:     config.establecimiento,
+        puntoEmision:        config.puntoEmision,
+        direccionMatriz:     config.direccionMatriz,
+        contribuyenteEspecial: config.contribuyenteEspecial,
+        obligadoContabilidad:  config.obligadoContabilidad,
+        tipoIdComprador:     tipoId,
+        identificacion:      ventaSeleccionada.clienteIdentificacion,
+        razonSocialComprador:ventaSeleccionada.clienteNombre,
+        items,
+        subtotal15:          base,
+        subtotal0:           0,
+        totalDescuento:      descuento,
+        iva,
+        total,
+        formaPago: FORMA_PAGO_MAP[ventaSeleccionada.metodoPago] ?? '01',
+      });
+
       // 7. Crear registro en Firestore (estado: pendiente)
-      const serie      = `${config.establecimiento.padStart(3,'0')}-${config.puntoEmision.padStart(3,'0')}`;
       const compId     = await createComprobante({
         tipo,
         ventaId:              ventaSeleccionada.id,
@@ -297,19 +310,6 @@ function EmitirComprobanteInner() {
       }
 
       setResultado({ ...result, compId, claveAcceso });
-
-      // Para nota de venta: abrir recibo (ticket simple) en nueva pestaña
-      if (tipo === 'nota_venta' && ventaSeleccionada) {
-        const datos: DatosTicket = {
-          nombreNegocio: config.nombreComercial || config.razonSocial,
-          ruc:           config.ruc,
-          direccion:     config.direccionMatriz,
-          venta:         ventaSeleccionada,
-          numeracion:    `NV-${serie}-${String(secuencial).padStart(9, '0')}`,
-        };
-        setTicketData(datos);
-        try { abrirTicketEnNuevaPestana(datos); } catch { /* popup bloqueado */ }
-      }
 
     } catch (err: any) {
       toast.error(err.message ?? 'Error al emitir comprobante');
@@ -593,14 +593,16 @@ function EmitirComprobanteInner() {
           </div>
         )}
 
-        {/* Botones diagnóstico + XML */}
+        {/* Botones diagnóstico + XML (la firma/autorización solo aplica a Factura) */}
         {ventaId && (
           <div className="flex gap-2">
-            <Button variant="outline" className="flex-1" onClick={diagnosticarFirma} disabled={diagLoading}>
-              {diagLoading
-                ? <><Loader2 className="mr-2 h-4 w-4 animate-spin" />Analizando...</>
-                : <><Bug className="mr-2 h-4 w-4" />Diagnosticar Firma</>}
-            </Button>
+            {tipo === 'factura' && (
+              <Button variant="outline" className="flex-1" onClick={diagnosticarFirma} disabled={diagLoading}>
+                {diagLoading
+                  ? <><Loader2 className="mr-2 h-4 w-4 animate-spin" />Analizando...</>
+                  : <><Bug className="mr-2 h-4 w-4" />Diagnosticar Firma</>}
+              </Button>
+            )}
             <Button variant="outline" className="flex-1" onClick={descargarXML}>
               <Download className="mr-2 h-4 w-4" />
               Descargar XML

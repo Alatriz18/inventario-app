@@ -157,24 +157,30 @@ function EmitirComprobanteInner() {
         ? '07'  // consumidor final
         : cliente.clienteIdentificacion.length === 13 ? '04' : '05';
 
-      // 5. Preparar ítems
-      const items = ventaSeleccionada.items.map(i => ({
-        codigoPrincipal:        i.sku,
-        descripcion:            i.nombre,
-        cantidad:               i.cantidad,
-        precioUnitario:         i.precioUnitario,
-        descuento:              i.precioUnitario * i.cantidad * (i.descuento / 100),
-        precioTotalSinImpuesto: i.subtotal,
-        tieneIVA:               tipo === 'factura',
-        precioTotal:            i.subtotal,
-      }));
+      // 5. Preparar ítems — los precios del catálogo YA incluyen IVA, así que
+      // para la factura hay que extraer la base (precio / 1.15), no sumarla.
+      const items = ventaSeleccionada.items.map(i => {
+        const precioBase = tipo === 'factura' ? i.subtotal / 1.15 : i.subtotal;
+        return {
+          codigoPrincipal:        i.sku,
+          descripcion:            i.nombre,
+          cantidad:               i.cantidad,
+          precioUnitario:         i.precioUnitario,
+          descuento:              i.precioUnitario * i.cantidad * (i.descuento / 100),
+          precioTotalSinImpuesto: precioBase,
+          tieneIVA:               tipo === 'factura',
+          precioTotal:            precioBase,
+        };
+      });
 
-      const subtotal = ventaSeleccionada.subtotal;
-      const descuento = subtotal * (ventaSeleccionada.descuentoGlobal / 100);
-      const base      = subtotal - descuento;
-      const iva       = tipo === 'factura' ? base * 0.15 : 0;
-      // El total del XML debe incluir el IVA (el POS guarda precios sin IVA)
-      const total     = tipo === 'factura' ? base + iva : ventaSeleccionada.total;
+      // El total ya incluye IVA (es lo que realmente pagó el cliente); para
+      // la factura se extrae la base imponible y el IVA de adentro de ese total.
+      const subtotal    = ventaSeleccionada.subtotal;
+      const descuento   = subtotal * (ventaSeleccionada.descuentoGlobal / 100);
+      const totalConIva = subtotal - descuento;
+      const base        = tipo === 'factura' ? totalConIva / 1.15 : totalConIva;
+      const iva         = tipo === 'factura' ? totalConIva - base : 0;
+      const total       = totalConIva;
 
       const serie = `${config.establecimiento.padStart(3,'0')}-${config.puntoEmision.padStart(3,'0')}`;
 
@@ -353,14 +359,19 @@ function EmitirComprobanteInner() {
       });
       const tipoId = ventaSeleccionada.clienteIdentificacion === '9999999999999' ? '07'
         : ventaSeleccionada.clienteIdentificacion.length === 13 ? '04' : '05';
-      const items = ventaSeleccionada.items.map(i => ({
-        codigoPrincipal: i.sku, descripcion: i.nombre, cantidad: i.cantidad,
-        precioUnitario: i.precioUnitario, descuento: 0,
-        precioTotalSinImpuesto: i.subtotal, tieneIVA: tipo === 'factura', precioTotal: i.subtotal,
-      }));
-      const base = ventaSeleccionada.subtotal;
-      const iva  = tipo === 'factura' ? base * 0.15 : 0;
-      const total = tipo === 'factura' ? base + iva : ventaSeleccionada.total;
+      const items = ventaSeleccionada.items.map(i => {
+        const precioBase = tipo === 'factura' ? i.subtotal / 1.15 : i.subtotal;
+        return {
+          codigoPrincipal: i.sku, descripcion: i.nombre, cantidad: i.cantidad,
+          precioUnitario: i.precioUnitario, descuento: 0,
+          precioTotalSinImpuesto: precioBase, tieneIVA: tipo === 'factura', precioTotal: precioBase,
+        };
+      });
+      // Los precios ya incluyen IVA — para la factura se extrae la base de adentro del total.
+      const totalConIva = ventaSeleccionada.subtotal;
+      const base  = tipo === 'factura' ? totalConIva / 1.15 : totalConIva;
+      const iva   = tipo === 'factura' ? totalConIva - base : 0;
+      const total = tipo === 'factura' ? totalConIva : ventaSeleccionada.total;
       const { generarXMLFactura: gxf } = await import('@/lib/sri/generador-factura');
       const { generarXMLNotaVenta: gxn } = await import('@/lib/sri/generador-nota-venta');
       const xml = tipo === 'factura'
@@ -418,13 +429,17 @@ function EmitirComprobanteInner() {
       });
       const tipoId = ventaSeleccionada.clienteIdentificacion === '9999999999999' ? '07'
         : ventaSeleccionada.clienteIdentificacion.length === 13 ? '04' : '05';
-      const items = ventaSeleccionada.items.map(i => ({
-        codigoPrincipal: i.sku, descripcion: i.nombre, cantidad: i.cantidad,
-        precioUnitario: i.precioUnitario, descuento: 0,
-        precioTotalSinImpuesto: i.subtotal, tieneIVA: true, precioTotal: i.subtotal,
-      }));
-      const base = ventaSeleccionada.subtotal;
-      const iva  = base * 0.15;
+      const items = ventaSeleccionada.items.map(i => {
+        const precioBase = i.subtotal / 1.15;
+        return {
+          codigoPrincipal: i.sku, descripcion: i.nombre, cantidad: i.cantidad,
+          precioUnitario: i.precioUnitario, descuento: 0,
+          precioTotalSinImpuesto: precioBase, tieneIVA: true, precioTotal: precioBase,
+        };
+      });
+      const totalConIva = ventaSeleccionada.subtotal;
+      const base = totalConIva / 1.15;
+      const iva  = totalConIva - base;
       const xml  = generarXMLFactura({
         claveAcceso, secuencial, fechaEmision: new Date(), ambiente: config.ambiente,
         ruc: config.ruc, razonSocial: config.razonSocial, nombreComercial: config.nombreComercial,
@@ -434,7 +449,7 @@ function EmitirComprobanteInner() {
         tipoIdComprador: tipoId, identificacion: ventaSeleccionada.clienteIdentificacion,
         razonSocialComprador: ventaSeleccionada.clienteNombre,
         items, subtotal15: base, subtotal0: 0, totalDescuento: 0,
-        iva, total: base + iva, formaPago: '01',
+        iva, total: totalConIva, formaPago: '01',
       });
 
       const res  = await fetch('/api/sri/debug-xml', {

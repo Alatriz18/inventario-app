@@ -153,7 +153,7 @@ export default function ReporteCobrosPage() {
       <PageHeader
         title="Reporte de Cobros"
         description="Análisis de cobros registrados por período"
-        actions={
+        action={
           <Button variant="outline" size="sm" onClick={exportar} disabled={cobros.length === 0}>
             <Download className="h-4 w-4 mr-2" />
             Exportar Excel

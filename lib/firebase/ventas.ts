@@ -125,6 +125,11 @@ export async function getVentaById(id: string): Promise<Venta | null> {
   return { id: snap.id, ...snap.data() } as Venta;
 }
 
+export async function vincularComprobante(ventaId: string, comprobanteId: string): Promise<void> {
+  const { updateDoc } = await import('firebase/firestore');
+  await updateDoc(doc(db, COL, ventaId), { comprobanteId });
+}
+
 export async function anularVenta(
   ventaId: string,
   usuarioId: string,

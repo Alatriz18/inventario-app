@@ -12,7 +12,8 @@ import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from '@/components/ui/select';
 
-import { subscribeToVentas } from '@/lib/firebase/ventas';
+import { subscribeToVentas, vincularComprobante } from '@/lib/firebase/ventas';
+import { Input } from '@/components/ui/input';
 import { createComprobante, updateComprobante } from '@/lib/firebase/comprobantes';
 import { abrirTicketEnNuevaPestana, descargarTicket, DatosTicket } from '@/lib/pdf/ticket-venta';
 import { getConfigSRI, incrementarSecuencial } from '@/lib/firebase/config-sri';
@@ -51,11 +52,23 @@ function EmitirComprobanteInner() {
   const [xmlPreview,   setXmlPreview]   = useState<string | null>(null);
   const [habilitados,  setHabilitados]  = useState<ComprobantesHabilitados | null>(null);
   const [ticketData, setTicketData] = useState<DatosTicket | null>(null);
+  const [filtroDesde, setFiltroDesde] = useState('');
+  const [filtroHasta, setFiltroHasta] = useState('');
 
-  // Solo ventas completadas sin comprobante
-  const ventasSinComp = ventas.filter(
-    v => v.estado === 'completada' && !v.comprobanteId
-  );
+  const RECIENTES = 15;
+  const hayFiltroFecha = !!(filtroDesde || filtroHasta);
+
+  // Ventas completadas, más recientes primero. Sin filtro de fecha se
+  // muestran solo las últimas; con filtro se muestran todas las que calcen
+  // en el rango (incluye las ya autorizadas, para poder identificarlas).
+  const ventasCompletadas = ventas.filter(v => v.estado === 'completada').filter(v => {
+    if (!hayFiltroFecha) return true;
+    const f = format((v.fecha as any)?.toDate?.() ?? new Date(v.fecha), 'yyyy-MM-dd');
+    if (filtroDesde && f < filtroDesde) return false;
+    if (filtroHasta && f > filtroHasta) return false;
+    return true;
+  });
+  const ventasSinComp = hayFiltroFecha ? ventasCompletadas : ventasCompletadas.slice(0, RECIENTES);
 
   // Tipos de comprobante permitidos según el régimen tributario de la empresa.
   // Si aún no carga la config, se muestran ambos para no bloquear.
@@ -95,6 +108,11 @@ function EmitirComprobanteInner() {
 
   const emitirComprobante = async () => {
     if (!ventaSeleccionada || !user) return;
+
+    if (ventaSeleccionada.comprobanteId) {
+      toast.error('Esta venta ya tiene un comprobante autorizado.');
+      return;
+    }
 
     // Validar que el tipo de comprobante esté habilitado para el régimen
     if (!tiposPermitidos[tipo]) {
@@ -182,6 +200,7 @@ function EmitirComprobanteInner() {
           usuarioNombre:        user.nombre,
           createdAt:            new Date(),
         });
+        await vincularComprobante(ventaSeleccionada.id, compId);
 
         setResultado({ estado: 'AUTORIZADO', compId, claveAcceso, manual: true });
         toast.success('Nota de venta emitida');
@@ -288,6 +307,7 @@ function EmitirComprobanteInner() {
           xmlAutorizado:      result.xmlAutorizado,
           mensajesSRI:        result.mensajes ?? [],
         });
+        await vincularComprobante(ventaSeleccionada.id, compId);
         toast.success('¡Comprobante autorizado por el SRI!');
       } else if (result.estado === 'DEVUELTA' || result.estado === 'ERROR') {
         // El SRI devolvió el comprobante con errores — mostrar mensajes exactos
@@ -442,25 +462,47 @@ function EmitirComprobanteInner() {
         <div className="bg-white rounded-xl border p-5 space-y-4">
           <h3 className="font-semibold text-slate-700">Venta a facturar</h3>
           <div className="space-y-1.5">
-            <Label>Selecciona la venta *</Label>
-            <Select onValueChange={setVentaId}>
+            <div className="flex items-center justify-between gap-2">
+              <Label>Selecciona la venta *</Label>
+              {!hayFiltroFecha && (
+                <span className="text-xs text-slate-400">Mostrando las {RECIENTES} más recientes</span>
+              )}
+            </div>
+            <Select onValueChange={setVentaId} value={ventaId}>
               <SelectTrigger>
                 <SelectValue placeholder={loading ? 'Cargando...' : 'Selecciona una venta'} />
               </SelectTrigger>
               <SelectContent>
                 {ventasSinComp.map(v => {
                   const fecha = (v.fecha as any)?.toDate?.() ?? new Date(v.fecha);
+                  const yaAutorizada = !!v.comprobanteId;
                   return (
-                    <SelectItem key={v.id} value={v.id}>
+                    <SelectItem key={v.id} value={v.id} disabled={yaAutorizada}>
                       {format(fecha, 'dd/MM/yyyy')} — {v.clienteNombre} — ${v.total.toFixed(2)}
+                      {yaAutorizada && '  ✅ Ya autorizada'}
                     </SelectItem>
                   );
                 })}
               </SelectContent>
             </Select>
             {ventasSinComp.length === 0 && !loading && (
-              <p className="text-xs text-slate-400">No hay ventas pendientes de comprobante.</p>
+              <p className="text-xs text-slate-400">No hay ventas en este rango.</p>
             )}
+
+            {/* Filtro por fecha para buscar ventas más antiguas */}
+            <div className="flex flex-wrap items-center gap-2 pt-1">
+              <Input type="date" value={filtroDesde} onChange={e => setFiltroDesde(e.target.value)}
+                className="w-full sm:w-40" placeholder="Desde" />
+              <span className="text-xs text-slate-400">a</span>
+              <Input type="date" value={filtroHasta} onChange={e => setFiltroHasta(e.target.value)}
+                className="w-full sm:w-40" placeholder="Hasta" />
+              {hayFiltroFecha && (
+                <button onClick={() => { setFiltroDesde(''); setFiltroHasta(''); }}
+                  className="text-xs text-slate-400 hover:text-slate-600 underline">
+                  Limpiar filtro
+                </button>
+              )}
+            </div>
           </div>
 
           {/* Tipo de comprobante (solo los habilitados según el régimen) */}
@@ -659,12 +701,17 @@ function EmitirComprobanteInner() {
         <Button
           className="w-full h-12 text-base"
           onClick={emitirComprobante}
-          disabled={!ventaId || procesando}
+          disabled={!ventaId || procesando || !!ventaSeleccionada?.comprobanteId}
         >
           {procesando ? (
             <>
               <Loader2 className="mr-2 h-4 w-4 animate-spin" />
               Procesando con el SRI...
+            </>
+          ) : ventaSeleccionada?.comprobanteId ? (
+            <>
+              <CheckCircle className="mr-2 h-4 w-4" />
+              Ya autorizada
             </>
           ) : (
             <>

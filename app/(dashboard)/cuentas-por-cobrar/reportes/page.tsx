@@ -243,7 +243,7 @@ export default function ReporteCobrosPage() {
                 <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
                 <XAxis dataKey="dia" tick={{ fontSize: 11 }} />
                 <YAxis tick={{ fontSize: 11 }} tickFormatter={v => `$${v}`} width={60} />
-                <Tooltip formatter={(v: number) => [currency(v), 'Cobrado']} />
+                <Tooltip formatter={(v) => [currency(Number(v)), 'Cobrado']} />
                 <Bar dataKey="total" name="Cobrado" fill="#2E75B6" radius={[4, 4, 0, 0]} />
               </BarChart>
             </ResponsiveContainer>
@@ -263,7 +263,7 @@ export default function ReporteCobrosPage() {
                       <Cell key={i} fill={COLORS[i % COLORS.length]} />
                     ))}
                   </Pie>
-                  <Tooltip formatter={(v: number) => [currency(v), 'Total']} />
+                  <Tooltip formatter={(v) => [currency(Number(v)), 'Total']} />
                   <Legend
                     formatter={(value) => <span className="text-xs text-slate-600">{value}</span>}
                     iconSize={10}

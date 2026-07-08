@@ -134,7 +134,9 @@ export async function anularVenta(
   ventaId: string,
   usuarioId: string,
   usuarioNombre: string
-): Promise<void> {
+): Promise<{ advertencia?: string }> {
+  let advertencia: string | undefined;
+
   await runTransaction(db, async (tx) => {
     const ventaRef  = doc(db, COL, ventaId);
     const ventaSnap = await tx.get(ventaRef);
@@ -178,15 +180,20 @@ export async function anularVenta(
 
     tx.update(ventaRef, { estado: 'anulada', anuladaAt: serverTimestamp() });
 
-    // Si era venta a crédito, cancelar el registro CxC vinculado
+    // Si era venta a crédito, cancelar el registro CxC vinculado — siempre,
+    // incluso si ya estaba pagada, para que desaparezca de saldos pendientes
+    // y reportes. Si ya tenía cobros registrados, se avisa para conciliar
+    // manualmente un posible reembolso (el historial de cobros no se borra).
     if (venta.esCxC && (venta as any).cxcId) {
       const cxcRef  = doc(db, 'cuentas_cobrar', (venta as any).cxcId);
       const cxcSnap = await tx.get(cxcRef);
       if (cxcSnap.exists()) {
         const cxcData = cxcSnap.data();
-        if (cxcData.estado !== 'pagada') {
-          tx.update(cxcRef, { estado: 'anulada' as EstadoCxC, anuladaAt: serverTimestamp() });
+        const totalCobrado = (cxcData.cobros ?? []).reduce((s: number, c: any) => s + c.monto, 0);
+        if (totalCobrado > 0) {
+          advertencia = `Esta venta ya tenía $${totalCobrado.toFixed(2)} cobrado(s) antes de anularse — revisa si corresponde un reembolso al cliente.`;
         }
+        tx.update(cxcRef, { estado: 'anulada' as EstadoCxC, anuladaAt: serverTimestamp() });
       }
     }
   });
@@ -206,4 +213,6 @@ export async function anularVenta(
     });
     await batch.commit();
   }
+
+  return { advertencia };
 }

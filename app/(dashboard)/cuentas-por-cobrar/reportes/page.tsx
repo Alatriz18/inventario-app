@@ -81,6 +81,7 @@ export default function ReporteCobrosPage() {
     const to   = new Date(dateTo   + 'T23:59:59');
     const result: CobroFlat[] = [];
     for (const cxc of cxcList) {
+      if (cxc.estado === 'anulada') continue; // venta/CxC anulada: no cuenta como cobro válido
       for (const c of cxc.cobros ?? []) {
         const fecha = toDate(c.fecha);
         if (fecha >= from && fecha <= to) {

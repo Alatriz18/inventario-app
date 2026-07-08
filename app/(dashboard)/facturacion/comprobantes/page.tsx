@@ -58,7 +58,10 @@ export default function ComprobantesPage() {
     try {
       // 1. Anular la venta (repone stock + marca anulada) si está vinculada
       if (comp.ventaId) {
-        try { await anularVenta(comp.ventaId, user.uid, user.nombre); } catch { /* ya anulada o sin stock */ }
+        try {
+          const { advertencia } = await anularVenta(comp.ventaId, user.uid, user.nombre);
+          if (advertencia) toast.warning(advertencia, { duration: 8000 });
+        } catch { /* ya anulada o sin stock */ }
         // 2. Reversar el asiento contable de la venta
         const rev = await crearAsientoReversion({
           referenciaId:   comp.ventaId,

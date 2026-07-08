@@ -78,7 +78,7 @@ export default function DashboardPage() {
     const activos   = productos.filter(p => p.activo).length;
 
     const porCobrar = cxc
-      .filter(c => c.estado !== 'pagada')
+      .filter(c => c.estado !== 'pagada' && c.estado !== 'anulada')
       .reduce((s, c) => s + (c.saldoPendiente ?? 0), 0);
 
     const diffPct = totalAyer > 0 ? ((totalHoy - totalAyer) / totalAyer) * 100 : null;

@@ -72,8 +72,9 @@ export default function HistorialVentasPage() {
   const confirmarAnulacion = async () => {
     if (!anulando || !user) return;
     try {
-      await anularVenta(anulando, user.uid, user.nombre);
+      const { advertencia } = await anularVenta(anulando, user.uid, user.nombre);
       toast.success('Venta anulada y stock revertido');
+      if (advertencia) toast.warning(advertencia, { duration: 8000 });
     } catch (err: any) {
       toast.error(err.message ?? 'Error al anular');
     } finally {

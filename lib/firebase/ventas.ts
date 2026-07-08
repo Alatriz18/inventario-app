@@ -153,6 +153,13 @@ export async function anularVenta(
       }
     }
 
+    // Leer la CxC vinculada (si existe) ANTES de cualquier escritura — Firestore
+    // exige que todas las lecturas de una transacción ocurran antes que las escrituras.
+    const cxcRef = venta.esCxC && (venta as any).cxcId
+      ? doc(db, 'cuentas_cobrar', (venta as any).cxcId)
+      : null;
+    const cxcSnap = cxcRef ? await tx.get(cxcRef) : null;
+
     for (const item of venta.items) {
       const anterior = stockPrevio.get(item.productoId);
       // Solo revertir stock si el producto aún existe en Firestore
@@ -184,17 +191,13 @@ export async function anularVenta(
     // incluso si ya estaba pagada, para que desaparezca de saldos pendientes
     // y reportes. Si ya tenía cobros registrados, se avisa para conciliar
     // manualmente un posible reembolso (el historial de cobros no se borra).
-    if (venta.esCxC && (venta as any).cxcId) {
-      const cxcRef  = doc(db, 'cuentas_cobrar', (venta as any).cxcId);
-      const cxcSnap = await tx.get(cxcRef);
-      if (cxcSnap.exists()) {
-        const cxcData = cxcSnap.data();
-        const totalCobrado = (cxcData.cobros ?? []).reduce((s: number, c: any) => s + c.monto, 0);
-        if (totalCobrado > 0) {
-          advertencia = `Esta venta ya tenía $${totalCobrado.toFixed(2)} cobrado(s) antes de anularse — revisa si corresponde un reembolso al cliente.`;
-        }
-        tx.update(cxcRef, { estado: 'anulada' as EstadoCxC, anuladaAt: serverTimestamp() });
+    if (cxcRef && cxcSnap?.exists()) {
+      const cxcData = cxcSnap.data();
+      const totalCobrado = (cxcData.cobros ?? []).reduce((s: number, c: any) => s + c.monto, 0);
+      if (totalCobrado > 0) {
+        advertencia = `Esta venta ya tenía $${totalCobrado.toFixed(2)} cobrado(s) antes de anularse — revisa si corresponde un reembolso al cliente.`;
       }
+      tx.update(cxcRef, { estado: 'anulada' as EstadoCxC, anuladaAt: serverTimestamp() });
     }
   });
 

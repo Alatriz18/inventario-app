@@ -157,19 +157,23 @@ function EmitirComprobanteInner() {
         ? '07'  // consumidor final
         : cliente.clienteIdentificacion.length === 13 ? '04' : '05';
 
-      // 5. Preparar ítems — los precios del catálogo YA incluyen IVA, así que
-      // para la factura hay que extraer la base (precio / 1.15), no sumarla.
+      // 5. Preparar ítems — los precios del catálogo YA incluyen IVA. El SRI
+      // valida que precioTotalSinImpuesto == cantidad*precioUnitario-descuento
+      // usando el precioUnitario tal como va en el XML, así que el
+      // precioUnitario (y el descuento) también deben ir sin IVA, no solo el total.
       const items = ventaSeleccionada.items.map(i => {
-        const precioBase = tipo === 'factura' ? i.subtotal / 1.15 : i.subtotal;
+        const precioUnitarioXml = tipo === 'factura' ? i.precioUnitario / 1.15 : i.precioUnitario;
+        const descuentoXml      = precioUnitarioXml * i.cantidad * (i.descuento / 100);
+        const precioTotalSinImpuesto = precioUnitarioXml * i.cantidad - descuentoXml;
         return {
           codigoPrincipal:        i.sku,
           descripcion:            i.nombre,
           cantidad:               i.cantidad,
-          precioUnitario:         i.precioUnitario,
-          descuento:              i.precioUnitario * i.cantidad * (i.descuento / 100),
-          precioTotalSinImpuesto: precioBase,
+          precioUnitario:         precioUnitarioXml,
+          descuento:              descuentoXml,
+          precioTotalSinImpuesto,
           tieneIVA:               tipo === 'factura',
-          precioTotal:            precioBase,
+          precioTotal:            precioTotalSinImpuesto,
         };
       });
 
@@ -360,11 +364,12 @@ function EmitirComprobanteInner() {
       const tipoId = ventaSeleccionada.clienteIdentificacion === '9999999999999' ? '07'
         : ventaSeleccionada.clienteIdentificacion.length === 13 ? '04' : '05';
       const items = ventaSeleccionada.items.map(i => {
-        const precioBase = tipo === 'factura' ? i.subtotal / 1.15 : i.subtotal;
+        const precioUnitarioXml = tipo === 'factura' ? i.precioUnitario / 1.15 : i.precioUnitario;
+        const precioTotalSinImpuesto = precioUnitarioXml * i.cantidad;
         return {
           codigoPrincipal: i.sku, descripcion: i.nombre, cantidad: i.cantidad,
-          precioUnitario: i.precioUnitario, descuento: 0,
-          precioTotalSinImpuesto: precioBase, tieneIVA: tipo === 'factura', precioTotal: precioBase,
+          precioUnitario: precioUnitarioXml, descuento: 0,
+          precioTotalSinImpuesto, tieneIVA: tipo === 'factura', precioTotal: precioTotalSinImpuesto,
         };
       });
       // Los precios ya incluyen IVA — para la factura se extrae la base de adentro del total.
@@ -430,11 +435,12 @@ function EmitirComprobanteInner() {
       const tipoId = ventaSeleccionada.clienteIdentificacion === '9999999999999' ? '07'
         : ventaSeleccionada.clienteIdentificacion.length === 13 ? '04' : '05';
       const items = ventaSeleccionada.items.map(i => {
-        const precioBase = i.subtotal / 1.15;
+        const precioUnitarioXml = i.precioUnitario / 1.15;
+        const precioTotalSinImpuesto = precioUnitarioXml * i.cantidad;
         return {
           codigoPrincipal: i.sku, descripcion: i.nombre, cantidad: i.cantidad,
-          precioUnitario: i.precioUnitario, descuento: 0,
-          precioTotalSinImpuesto: precioBase, tieneIVA: true, precioTotal: precioBase,
+          precioUnitario: precioUnitarioXml, descuento: 0,
+          precioTotalSinImpuesto, tieneIVA: true, precioTotal: precioTotalSinImpuesto,
         };
       });
       const totalConIva = ventaSeleccionada.subtotal;

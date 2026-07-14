@@ -33,7 +33,12 @@ import { useAuth } from '@/context/AuthContext';
 import { toast } from 'sonner';
 
 const METODO_LABELS: Record<string, string> = {
-  efectivo: 'Efectivo', tarjeta: 'Tarjeta', transferencia: 'Transferencia',
+  efectivo:      'Efectivo',
+  tarjeta:       'Tarjeta',
+  transferencia: 'Transferencia',
+  deposito:      'Depósito',
+  cheque:        'Cheque',
+  credito:       'Crédito',
 };
 
 function currency(v: number) { return `$${v.toFixed(2)}`; }
@@ -228,18 +233,16 @@ export default function HistorialVentasPage() {
                       </Button>
                       {v.estado === 'completada' && (
                         <>
-                          {(!v.metodoPago || (v.esCxC && !v.cxcId)) && (
-                            <Button variant="ghost" size="icon"
-                              className="h-8 w-8 text-amber-500 hover:text-amber-700"
-                              title="Reparar venta (datos incompletos)"
-                              onClick={() => {
-                                setReparandoId(v.id);
-                                setRepMetodo((v.metodoPago as MetodoPago) || 'efectivo');
-                                setRepDias(String(v.diasCredito ?? 30));
-                              }}>
-                              <Wrench className="h-4 w-4" />
-                            </Button>
-                          )}
+                          <Button variant="ghost" size="icon"
+                            className="h-8 w-8 text-amber-500 hover:text-amber-700"
+                            title="Editar método de pago"
+                            onClick={() => {
+                              setReparandoId(v.id);
+                              setRepMetodo((v.metodoPago as MetodoPago) || 'efectivo');
+                              setRepDias(String(v.diasCredito ?? 30));
+                            }}>
+                            <Wrench className="h-4 w-4" />
+                          </Button>
                           <Button variant="ghost" size="icon"
                             className="h-8 w-8 text-slate-500 hover:text-slate-800"
                             title="Imprimir ticket"
@@ -343,13 +346,13 @@ export default function HistorialVentasPage() {
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <Wrench className="h-5 w-5 text-amber-500" />
-              Reparar venta
+              Editar método de pago
             </DialogTitle>
           </DialogHeader>
           {ventaReparar && (
             <div className="space-y-4">
-              <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 text-sm text-amber-800">
-                Esta venta tiene datos incompletos. Corrígelos para que aparezca correctamente en cartera y contabilidad.
+              <div className="bg-slate-50 border border-slate-200 rounded-lg p-3 text-sm text-slate-700">
+                Cambia el método de pago de esta venta. Si seleccionas Crédito y no existe cartera, se creará automáticamente.
               </div>
               <div className="text-sm text-slate-600">
                 <p className="font-medium">{ventaReparar.clienteNombre}</p>

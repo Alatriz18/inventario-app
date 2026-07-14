@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react';
 import { format } from 'date-fns';
 import { es } from 'date-fns/locale';
-import { Receipt, XCircle, ChevronDown, TrendingUp, Printer } from 'lucide-react';
+import { Receipt, XCircle, ChevronDown, TrendingUp, Printer, Wrench } from 'lucide-react';
 
 import PageHeader  from '@/components/shared/PageHeader';
 import { Input }   from '@/components/ui/input';
@@ -25,8 +25,8 @@ import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from '@/components/ui/table';
 
-import { Venta } from '@/types';
-import { subscribeToVentas, anularVenta } from '@/lib/firebase/ventas';
+import { Venta, MetodoPago } from '@/types';
+import { subscribeToVentas, anularVenta, repararVenta } from '@/lib/firebase/ventas';
 import { getConfigSRI } from '@/lib/firebase/config-sri';
 import { descargarTicket } from '@/lib/pdf/ticket-venta';
 import { useAuth } from '@/context/AuthContext';
@@ -46,8 +46,12 @@ export default function HistorialVentasPage() {
   const [search,    setSearch]    = useState('');
   const [filtroMetodo, setFiltroMetodo] = useState('todos');
   const [filtroFecha,  setFiltroFecha]  = useState('');
-  const [detailId,  setDetailId]  = useState<string | null>(null);
-  const [anulando,  setAnulando]  = useState<string | null>(null);
+  const [detailId,    setDetailId]    = useState<string | null>(null);
+  const [anulando,    setAnulando]    = useState<string | null>(null);
+  const [reparandoId, setReparandoId] = useState<string | null>(null);
+  const [repMetodo,   setRepMetodo]   = useState<MetodoPago>('efectivo');
+  const [repDias,     setRepDias]     = useState('30');
+  const [reparando,   setReparando]   = useState(false);
 
   useEffect(() => {
     return subscribeToVentas((data) => { setVentas(data); setLoading(false); });
@@ -82,7 +86,29 @@ export default function HistorialVentasPage() {
     }
   };
 
-  const ventaDetalle = ventas.find(v => v.id === detailId);
+  const ventaDetalle   = ventas.find(v => v.id === detailId);
+  const ventaReparar   = ventas.find(v => v.id === reparandoId);
+
+  const handleReparar = async () => {
+    if (!reparandoId || !user) return;
+    setReparando(true);
+    try {
+      const { cxcCreada } = await repararVenta(
+        reparandoId, repMetodo,
+        repMetodo === 'credito' ? parseInt(repDias) : undefined,
+        user.uid, user.nombre ?? user.email ?? 'Admin'
+      );
+      toast.success(cxcCreada
+        ? 'Venta corregida y cuenta por cobrar creada en cartera'
+        : 'Método de pago actualizado correctamente'
+      );
+      setReparandoId(null);
+    } catch (e: any) {
+      toast.error(e.message ?? 'Error al reparar la venta');
+    } finally {
+      setReparando(false);
+    }
+  };
 
   return (
     <div>
@@ -202,6 +228,18 @@ export default function HistorialVentasPage() {
                       </Button>
                       {v.estado === 'completada' && (
                         <>
+                          {(!v.metodoPago || (v.esCxC && !v.cxcId)) && (
+                            <Button variant="ghost" size="icon"
+                              className="h-8 w-8 text-amber-500 hover:text-amber-700"
+                              title="Reparar venta (datos incompletos)"
+                              onClick={() => {
+                                setReparandoId(v.id);
+                                setRepMetodo((v.metodoPago as MetodoPago) || 'efectivo');
+                                setRepDias(String(v.diasCredito ?? 30));
+                              }}>
+                              <Wrench className="h-4 w-4" />
+                            </Button>
+                          )}
                           <Button variant="ghost" size="icon"
                             className="h-8 w-8 text-slate-500 hover:text-slate-800"
                             title="Imprimir ticket"
@@ -296,6 +334,71 @@ export default function HistorialVentasPage() {
               </div>
             );
           })()}
+        </DialogContent>
+      </Dialog>
+
+      {/* DIALOG REPARAR */}
+      <Dialog open={!!reparandoId} onOpenChange={() => setReparandoId(null)}>
+        <DialogContent className="sm:max-w-sm">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Wrench className="h-5 w-5 text-amber-500" />
+              Reparar venta
+            </DialogTitle>
+          </DialogHeader>
+          {ventaReparar && (
+            <div className="space-y-4">
+              <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 text-sm text-amber-800">
+                Esta venta tiene datos incompletos. Corrígelos para que aparezca correctamente en cartera y contabilidad.
+              </div>
+              <div className="text-sm text-slate-600">
+                <p className="font-medium">{ventaReparar.clienteNombre}</p>
+                <p className="text-xs text-slate-400">Total: ${ventaReparar.total.toFixed(2)}</p>
+              </div>
+              <div className="space-y-3">
+                <div>
+                  <label className="text-sm font-medium text-slate-700">Método de pago</label>
+                  <Select value={repMetodo} onValueChange={v => setRepMetodo(v as MetodoPago)}>
+                    <SelectTrigger className="mt-1">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="efectivo">Efectivo</SelectItem>
+                      <SelectItem value="tarjeta">Tarjeta</SelectItem>
+                      <SelectItem value="transferencia">Transferencia</SelectItem>
+                      <SelectItem value="deposito">Depósito</SelectItem>
+                      <SelectItem value="cheque">Cheque</SelectItem>
+                      <SelectItem value="credito">Crédito (CxC)</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                {repMetodo === 'credito' && !ventaReparar.cxcId && (
+                  <div>
+                    <label className="text-sm font-medium text-slate-700">Días de crédito</label>
+                    <input
+                      type="number" min="1" value={repDias}
+                      onChange={e => setRepDias(e.target.value)}
+                      className="mt-1 w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-slate-300"
+                    />
+                    <p className="text-xs text-slate-400 mt-1">
+                      Se creará el registro en Cartera (CxC) con este plazo.
+                    </p>
+                  </div>
+                )}
+                {repMetodo === 'credito' && ventaReparar.cxcId && (
+                  <p className="text-xs text-green-600">✓ Esta venta ya tiene registro en cartera.</p>
+                )}
+              </div>
+              <div className="flex gap-2 pt-1">
+                <Button variant="outline" className="flex-1" onClick={() => setReparandoId(null)}>
+                  Cancelar
+                </Button>
+                <Button className="flex-1" onClick={handleReparar} disabled={reparando}>
+                  {reparando ? 'Guardando...' : 'Guardar cambios'}
+                </Button>
+              </div>
+            </div>
+          )}
         </DialogContent>
       </Dialog>
 

@@ -1,7 +1,7 @@
 import {
   collection, doc, onSnapshot,
   query, orderBy, serverTimestamp, runTransaction,
-  where, getDocs, writeBatch,
+  where, getDocs, writeBatch, updateDoc,
 } from 'firebase/firestore';
 import { db } from './config';
 import { Venta, EstadoCxC } from '@/types';
@@ -218,4 +218,62 @@ export async function anularVenta(
   }
 
   return { advertencia };
+}
+
+// Repara una venta con datos incompletos (sin metodoPago, sin CxC vinculada, etc.)
+// Si el nuevo método es 'credito' y la venta no tiene CxC, crea el registro en cuentas_cobrar.
+export async function repararVenta(
+  ventaId:       string,
+  metodoPago:    string,
+  diasCredito:   number | undefined,
+  usuarioId:     string,
+  usuarioNombre: string
+): Promise<{ cxcCreada: boolean }> {
+  let cxcCreada = false;
+
+  await runTransaction(db, async (tx) => {
+    const ventaRef  = doc(db, COL, ventaId);
+    const ventaSnap = await tx.get(ventaRef);
+    if (!ventaSnap.exists()) throw new Error('Venta no encontrada');
+
+    const venta = ventaSnap.data() as Venta;
+    if (venta.estado === 'anulada') throw new Error('No se puede editar una venta anulada');
+
+    const cambios: Record<string, unknown> = { metodoPago };
+
+    if (metodoPago === 'credito' && diasCredito && !venta.cxcId) {
+      const cxcRef  = doc(collection(db, 'cuentas_cobrar'));
+      const fechaVenta = (venta.fecha as any)?.toDate?.() ?? new Date(venta.fecha);
+      const venc    = new Date(fechaVenta);
+      venc.setDate(venc.getDate() + diasCredito);
+
+      tx.set(cxcRef, {
+        ventaId:               ventaId,
+        clienteId:             venta.clienteId,
+        clienteNombre:         venta.clienteNombre,
+        clienteIdentificacion: venta.clienteIdentificacion,
+        fechaEmision:          venta.fecha,
+        fechaVencimiento:      venc,
+        diasCredito,
+        total:          venta.total,
+        saldoPendiente: venta.total,
+        estado:         'pendiente' as EstadoCxC,
+        cobros:         [],
+        usuarioId,
+        usuarioNombre,
+        createdAt:      serverTimestamp(),
+      });
+
+      cambios.esCxC       = true;
+      cambios.diasCredito = diasCredito;
+      cambios.cxcId       = cxcRef.id;
+      cxcCreada = true;
+    } else if (metodoPago !== 'credito') {
+      cambios.esCxC = false;
+    }
+
+    tx.update(ventaRef, cambios);
+  });
+
+  return { cxcCreada };
 }

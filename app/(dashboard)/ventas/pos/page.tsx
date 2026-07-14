@@ -228,7 +228,10 @@ export default function POSPage() {
         ganancia:       i.ganancia,
       }));
 
-      const fechaSeleccionada = new Date(fechaVenta + 'T12:00:00');
+      const hoy = new Date().toISOString().split('T')[0];
+      const fechaSeleccionada = fechaVenta === hoy
+        ? new Date()
+        : new Date(fechaVenta + 'T12:00:00');
       const ventaId = await createVenta(
         {
           fecha:                 fechaSeleccionada,

@@ -290,7 +290,7 @@ export default function DashboardPage() {
                   <div key={p.id} className="flex items-center justify-between gap-2">
                     <span className="text-xs text-amber-900 font-medium truncate">{p.nombre}</span>
                     <span className="text-xs font-bold text-amber-700 bg-amber-100 px-2 py-0.5 rounded-full shrink-0">
-                      {p.stockActual} uds
+                      {Number(p.stockActual.toFixed(2))} uds
                     </span>
                   </div>
                 ))}

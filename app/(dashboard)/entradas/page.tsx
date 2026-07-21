@@ -335,7 +335,7 @@ export default function EntradasPage() {
                       className="w-full text-left px-4 py-2.5 hover:bg-slate-50 flex items-center justify-between border-b last:border-0">
                       <div>
                         <p className="text-sm font-medium">{p.nombre}</p>
-                        <p className="text-xs text-slate-400">{p.sku} — Stock: {p.stockActual}</p>
+                        <p className="text-xs text-slate-400">{p.sku} — Stock: {Number(p.stockActual.toFixed(2))}</p>
                       </div>
                       <span className="text-sm font-semibold text-slate-700">{formatCurrency(p.precioCompra)}</span>
                     </button>

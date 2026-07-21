@@ -46,6 +46,9 @@ const schema = z.object({
   stockActual:  z.coerce.number().min(0),
   stockMinimo:  z.coerce.number().min(0),
   activo:       z.boolean(),
+}).refine(data => data.precioVenta >= data.precioCompra, {
+  message: 'El precio de venta no puede ser menor al precio de costo',
+  path: ['precioVenta'],
 });
 
 type ProductoForm = z.infer<typeof schema>;
@@ -240,7 +243,7 @@ export default function ProductosPage() {
                 )}
                 <TableCell className="text-center">
                   <span className={`font-semibold text-sm ${p.stockActual <= p.stockMinimo ? 'text-red-600' : 'text-slate-700'}`}>
-                    {p.stockActual}
+                    {Number(p.stockActual.toFixed(2))}
                   </span>
                   {p.stockActual <= p.stockMinimo && <span className="ml-1 text-xs text-red-400">⚠</span>}
                 </TableCell>
@@ -365,14 +368,16 @@ export default function ProductosPage() {
             </div>
 
             {precioVenta > 0 && verGanancias && (
-              <div className="col-span-2 bg-slate-50 rounded-lg p-3 flex gap-6">
+              <div className={`col-span-2 rounded-lg p-3 flex gap-6 ${precioVenta < precioCompra ? 'bg-red-50' : 'bg-slate-50'}`}>
                 <div>
                   <p className="text-xs text-slate-400">Ganancia unitaria</p>
-                  <p className="font-semibold text-slate-700">{formatCurrency(precioVenta - precioCompra)}</p>
+                  <p className={`font-semibold ${precioVenta < precioCompra ? 'text-red-600' : 'text-slate-700'}`}>
+                    {formatCurrency(precioVenta - precioCompra)}
+                  </p>
                 </div>
                 <div>
                   <p className="text-xs text-slate-400">Margen</p>
-                  <p className="font-semibold text-slate-700">
+                  <p className={`font-semibold ${precioVenta < precioCompra ? 'text-red-600' : 'text-slate-700'}`}>
                     {(((precioVenta - precioCompra) / precioVenta) * 100).toFixed(1)}%
                   </p>
                 </div>

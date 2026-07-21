@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { format } from 'date-fns';
+import { format, startOfDay, startOfWeek, startOfMonth } from 'date-fns';
 import { es } from 'date-fns/locale';
 import { Receipt, XCircle, ChevronDown, TrendingUp, Printer, Wrench } from 'lucide-react';
 
@@ -51,6 +51,7 @@ export default function HistorialVentasPage() {
   const [search,    setSearch]    = useState('');
   const [filtroMetodo, setFiltroMetodo] = useState('todos');
   const [filtroFecha,  setFiltroFecha]  = useState('');
+  const [periodo,      setPeriodo]      = useState<'todos' | 'hoy' | 'semana' | 'mes' | 'fecha'>('todos');
   const [detailId,    setDetailId]    = useState<string | null>(null);
   const [anulando,    setAnulando]    = useState<string | null>(null);
   const [reparandoId, setReparandoId] = useState<string | null>(null);
@@ -67,9 +68,16 @@ export default function HistorialVentasPage() {
       v.clienteNombre.toLowerCase().includes(search.toLowerCase()) ||
       v.clienteIdentificacion.includes(search);
     const matchMetodo = filtroMetodo === 'todos' || v.metodoPago === filtroMetodo;
-    const matchFecha  = !filtroFecha || (() => {
+    const matchFecha  = (() => {
       const f = (v.fecha as any)?.toDate?.() ?? new Date(v.fecha);
-      return format(f, 'yyyy-MM-dd') === filtroFecha;
+      const ahora = new Date();
+      switch (periodo) {
+        case 'hoy':    return f >= startOfDay(ahora);
+        case 'semana': return f >= startOfWeek(ahora, { weekStartsOn: 1 });
+        case 'mes':    return f >= startOfMonth(ahora);
+        case 'fecha':  return !filtroFecha || format(f, 'yyyy-MM-dd') === filtroFecha;
+        default:       return true;
+      }
     })();
     return matchSearch && matchMetodo && matchFecha;
   });
@@ -127,7 +135,7 @@ export default function HistorialVentasPage() {
         {[
           { label: 'Total ventas',      value: filtered.filter(v => v.estado === 'completada').length, tipo: 'count', color: 'text-blue-600' },
           { label: 'Ingresos',          value: totalVentas,    tipo: 'money', color: 'text-slate-800' },
-          { label: 'Ganancia estimada', value: totalGanancias, tipo: 'money', color: 'text-green-600' },
+          { label: 'Ganancia estimada', value: totalGanancias, tipo: 'money', color: totalGanancias >= 0 ? 'text-green-600' : 'text-red-600' },
           { label: 'Anuladas',          value: filtered.filter(v => v.estado === 'anulada').length,    tipo: 'count', color: 'text-red-500' },
         ].map(({ label, value, tipo, color }) => (
           <div key={label} className="bg-white rounded-xl border p-4">
@@ -154,10 +162,24 @@ export default function HistorialVentasPage() {
             <SelectItem value="transferencia">Transferencia</SelectItem>
           </SelectContent>
         </Select>
-        <Input type="date" value={filtroFecha}
-          onChange={e => setFiltroFecha(e.target.value)} className="w-full sm:w-44" />
-        {(search || filtroMetodo !== 'todos' || filtroFecha) && (
-          <button onClick={() => { setSearch(''); setFiltroMetodo('todos'); setFiltroFecha(''); }}
+        <Select value={periodo} onValueChange={(v) => setPeriodo(v as typeof periodo)}>
+          <SelectTrigger className="w-full sm:w-40">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="todos">Todo el período</SelectItem>
+            <SelectItem value="hoy">Hoy</SelectItem>
+            <SelectItem value="semana">Esta semana</SelectItem>
+            <SelectItem value="mes">Este mes</SelectItem>
+            <SelectItem value="fecha">Fecha específica</SelectItem>
+          </SelectContent>
+        </Select>
+        {periodo === 'fecha' && (
+          <Input type="date" value={filtroFecha}
+            onChange={e => setFiltroFecha(e.target.value)} className="w-full sm:w-44" />
+        )}
+        {(search || filtroMetodo !== 'todos' || periodo !== 'todos') && (
+          <button onClick={() => { setSearch(''); setFiltroMetodo('todos'); setFiltroFecha(''); setPeriodo('todos'); }}
             className="text-xs text-slate-400 hover:text-slate-600 underline self-center">
             Limpiar filtros
           </button>
@@ -279,7 +301,7 @@ export default function HistorialVentasPage() {
         {!loading && filtered.length > 0 && (
           <div className="px-4 py-3 border-t bg-slate-50 text-xs text-slate-400">
             {filtered.length} venta(s) — Ingresos: <span className="font-semibold text-slate-700">{currency(totalVentas)}</span>
-            {' '}— Ganancia: <span className="font-semibold text-green-600">{currency(totalGanancias)}</span>
+            {' '}— Ganancia: <span className={`font-semibold ${totalGanancias >= 0 ? 'text-green-600' : 'text-red-600'}`}>{currency(totalGanancias)}</span>
           </div>
         )}
       </div>
@@ -311,7 +333,7 @@ export default function HistorialVentasPage() {
                       </div>
                       <div className="text-right">
                         <p className="font-semibold">{currency(item.subtotal)}</p>
-                        <p className="text-xs text-green-600">+{currency(item.ganancia)}</p>
+                        <p className={`text-xs ${item.ganancia >= 0 ? 'text-green-600' : 'text-red-600'}`}>{item.ganancia >= 0 ? '+' : ''}{currency(item.ganancia)}</p>
                       </div>
                     </div>
                   ))}
@@ -330,7 +352,7 @@ export default function HistorialVentasPage() {
                   <div className="flex justify-between font-bold text-base">
                     <span>Total</span><span>{currency(ventaDetalle.total)}</span>
                   </div>
-                  <div className="flex justify-between text-green-600 font-semibold">
+                  <div className={`flex justify-between font-semibold ${ventaDetalle.gananciaTotal >= 0 ? 'text-green-600' : 'text-red-600'}`}>
                     <span>Ganancia</span><span>{currency(ventaDetalle.gananciaTotal)}</span>
                   </div>
                 </div>

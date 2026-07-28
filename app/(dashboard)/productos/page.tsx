@@ -81,6 +81,7 @@ export default function ProductosPage() {
   const [imagePreview, setImagePreview] = useState<string | null>(null); // base64 (data URL)
   const [procesandoImg,setProcesandoImg]= useState(false);
   const [search,       setSearch]       = useState('');
+  const [filtroCategoria, setFiltroCategoria] = useState('todas');
   const [quickCat,     setQuickCat]     = useState(false); // ← dentro del componente
   const fileRef = useRef<HTMLInputElement>(null);
 
@@ -166,8 +167,9 @@ export default function ProductosPage() {
   };
 
   const filtered = productos.filter((p) =>
-    p.nombre.toLowerCase().includes(search.toLowerCase()) ||
-    p.sku.toLowerCase().includes(search.toLowerCase())
+    (p.nombre.toLowerCase().includes(search.toLowerCase()) ||
+     p.sku.toLowerCase().includes(search.toLowerCase())) &&
+    (filtroCategoria === 'todas' || p.categoriaId === filtroCategoria)
   );
 
   return (
@@ -178,9 +180,24 @@ export default function ProductosPage() {
         action={puedeEditar ? <Button onClick={openCreate}><Plus className="mr-2 h-4 w-4" />Nuevo Producto</Button> : undefined}
       />
 
-      <div className="mb-4">
+      <div className="mb-4 flex flex-wrap gap-3">
         <Input placeholder="Buscar por nombre o SKU..." value={search}
           onChange={(e) => setSearch(e.target.value)} className="max-w-sm" />
+        <Select value={filtroCategoria} onValueChange={setFiltroCategoria}>
+          <SelectTrigger className="w-full sm:w-48"><SelectValue /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value="todas">Todas las categorías</SelectItem>
+            {categorias.filter(c => c.activo).map(c => (
+              <SelectItem key={c.id} value={c.id}>{c.nombre}</SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        {filtroCategoria !== 'todas' && (
+          <button onClick={() => setFiltroCategoria('todas')}
+            className="text-xs text-slate-400 hover:text-slate-600 underline self-center">
+            Limpiar filtro
+          </button>
+        )}
       </div>
 
       <div className="bg-white rounded-xl border overflow-hidden">

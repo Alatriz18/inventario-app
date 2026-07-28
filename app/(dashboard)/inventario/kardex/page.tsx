@@ -16,8 +16,9 @@ import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from '@/components/ui/table';
 
-import { Producto, Movimiento } from '@/types';
+import { Producto, Categoria, Movimiento } from '@/types';
 import { subscribeToProductos }  from '@/lib/firebase/productos';
+import { subscribeToCategorias } from '@/lib/firebase/categorias';
 import { subscribeToMovimientos } from '@/lib/firebase/movimientos';
 
 const currency = (v: number) => `$${v.toFixed(2)}`;
@@ -42,8 +43,10 @@ const TIPO_COLOR: Record<string, string> = {
 
 export default function KardexPage() {
   const [productos,    setProductos]    = useState<Producto[]>([]);
+  const [categorias,   setCategorias]   = useState<Categoria[]>([]);
   const [movimientos,  setMovimientos]  = useState<Movimiento[]>([]);
   const [loading,      setLoading]      = useState(true);
+  const [filtroCategoria, setFiltroCategoria] = useState('todas');
   const [productoId,   setProductoId]   = useState<string>('');
   const [dateFrom,     setDateFrom]     = useState('');
   const [dateTo,       setDateTo]       = useState('');
@@ -51,8 +54,13 @@ export default function KardexPage() {
   useEffect(() => {
     const u1 = subscribeToProductos(d => { setProductos(d); setLoading(false); });
     const u2 = subscribeToMovimientos(setMovimientos);
-    return () => { u1(); u2(); };
+    const u3 = subscribeToCategorias(setCategorias);
+    return () => { u1(); u2(); u3(); };
   }, []);
+
+  const productosParaSelect = useMemo(() => (
+    filtroCategoria === 'todas' ? productos : productos.filter(p => p.categoriaId === filtroCategoria)
+  ), [productos, filtroCategoria]);
 
   const productoSel = useMemo(
     () => productos.find(p => p.id === productoId) ?? null,
@@ -127,6 +135,23 @@ export default function KardexPage() {
 
       {/* Filtros */}
       <div className="bg-white rounded-xl border p-4 flex flex-wrap gap-4 items-end">
+        <div className="min-w-44">
+          <Label className="text-xs">Categoría</Label>
+          <Select value={filtroCategoria} onValueChange={(v) => {
+            setFiltroCategoria(v);
+            if (productoSel && v !== 'todas' && productoSel.categoriaId !== v) setProductoId('');
+          }}>
+            <SelectTrigger className="mt-1">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="todas">Todas las categorías</SelectItem>
+              {categorias.filter(c => c.activo).map(c => (
+                <SelectItem key={c.id} value={c.id}>{c.nombre}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
         <div className="flex-1 min-w-56">
           <Label className="text-xs">Producto *</Label>
           <Select value={productoId} onValueChange={setProductoId}>
@@ -134,7 +159,7 @@ export default function KardexPage() {
               <SelectValue placeholder="Seleccionar producto…" />
             </SelectTrigger>
             <SelectContent>
-              {productos.filter(p => p.activo).map(p => (
+              {productosParaSelect.filter(p => p.activo).map(p => (
                 <SelectItem key={p.id} value={p.id}>
                   <span className="font-mono text-xs text-slate-400 mr-2">{p.sku}</span>
                   {p.nombre}
@@ -164,7 +189,7 @@ export default function KardexPage() {
       {productoSel && (
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
           {[
-            { label: 'Stock actual',      value: productoSel.stockActual,              color: 'text-slate-900' },
+            { label: 'Stock actual',      value: Number(productoSel.stockActual.toFixed(2)), color: 'text-slate-900' },
             { label: 'Entradas período',  value: resumen.entradas,                    color: 'text-green-600' },
             { label: 'Salidas período',   value: resumen.salidas,                     color: 'text-red-600'   },
             { label: 'Precio compra',     value: currency(productoSel.precioCompra),  color: 'text-slate-700' },
@@ -250,7 +275,7 @@ export default function KardexPage() {
                       )}
                     </TableCell>
                     <TableCell className="text-center">
-                      <span className="font-bold text-slate-800">{m.stockNuevo}</span>
+                      <span className="font-bold text-slate-800">{Number(m.stockNuevo.toFixed(2))}</span>
                     </TableCell>
                     <TableCell className="text-sm text-slate-500">{m.usuarioNombre}</TableCell>
                     <TableCell className="text-xs text-slate-400 max-w-32 truncate">
@@ -274,7 +299,7 @@ export default function KardexPage() {
                 Salidas: <strong>−{resumen.salidas}</strong>
               </span>
               <span className="text-slate-700">
-                Saldo final: <strong>{productoSel?.stockActual ?? 0}</strong>
+                Saldo final: <strong>{Number((productoSel?.stockActual ?? 0).toFixed(2))}</strong>
               </span>
             </div>
           </div>

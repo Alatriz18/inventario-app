@@ -18,6 +18,10 @@ import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from '@/components/ui/table';
 
+import { Producto, Categoria } from '@/types';
+import { subscribeToProductos } from '@/lib/firebase/productos';
+import { subscribeToCategorias } from '@/lib/firebase/categorias';
+
 // ─── Tipos ─────────────────────────────────────────────────────────────────
 interface Movimiento {
   id:             string;
@@ -59,10 +63,14 @@ const FILTROS_TIPO = [
 
 export default function MovimientosPage() {
   const [movimientos, setMovimientos] = useState<Movimiento[]>([]);
+  const [productos,   setProductos]   = useState<Producto[]>([]);
+  const [categorias,  setCategorias]  = useState<Categoria[]>([]);
   const [loading,     setLoading]     = useState(true);
   const [search,      setSearch]      = useState('');
   const [filtroTipo,  setFiltroTipo]  = useState('todos');
   const [filtroFecha, setFiltroFecha] = useState('');
+  const [filtroCategoria, setFiltroCategoria] = useState('todas');
+  const [filtroProducto,  setFiltroProducto]  = useState('todos');
 
   useEffect(() => {
     const q = query(
@@ -73,8 +81,14 @@ export default function MovimientosPage() {
       setMovimientos(snap.docs.map((d) => ({ id: d.id, ...d.data() } as Movimiento)));
       setLoading(false);
     });
-    return unsub;
+    const u2 = subscribeToProductos(setProductos);
+    const u3 = subscribeToCategorias(setCategorias);
+    return () => { unsub(); u2(); u3(); };
   }, []);
+
+  const productosPorId = new Map(productos.map(p => [p.id, p]));
+  const productosParaSelect = filtroCategoria === 'todas'
+    ? productos : productos.filter(p => p.categoriaId === filtroCategoria);
 
   // Filtros en cliente
   const filtered = movimientos.filter((m) => {
@@ -89,7 +103,11 @@ export default function MovimientosPage() {
       return format(fecha, 'yyyy-MM-dd') === filtroFecha;
     })();
 
-    return matchSearch && matchTipo && matchFecha;
+    const matchProducto = filtroProducto === 'todos' || m.productoId === filtroProducto;
+    const matchCategoria = filtroCategoria === 'todas' ||
+      productosPorId.get(m.productoId)?.categoriaId === filtroCategoria;
+
+    return matchSearch && matchTipo && matchFecha && matchProducto && matchCategoria;
   });
 
   // Estadísticas rápidas
@@ -146,9 +164,27 @@ export default function MovimientosPage() {
           onChange={(e) => setFiltroFecha(e.target.value)}
           className="w-full sm:w-44"
         />
-        {(search || filtroTipo !== 'todos' || filtroFecha) && (
+        <Select value={filtroCategoria} onValueChange={(v) => { setFiltroCategoria(v); setFiltroProducto('todos'); }}>
+          <SelectTrigger className="w-full sm:w-44"><SelectValue /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value="todas">Todas las categorías</SelectItem>
+            {categorias.filter(c => c.activo).map(c => (
+              <SelectItem key={c.id} value={c.id}>{c.nombre}</SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        <Select value={filtroProducto} onValueChange={setFiltroProducto}>
+          <SelectTrigger className="w-full sm:w-52"><SelectValue /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value="todos">Todos los productos</SelectItem>
+            {productosParaSelect.map(p => (
+              <SelectItem key={p.id} value={p.id}>{p.nombre}</SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        {(search || filtroTipo !== 'todos' || filtroFecha || filtroCategoria !== 'todas' || filtroProducto !== 'todos') && (
           <button
-            onClick={() => { setSearch(''); setFiltroTipo('todos'); setFiltroFecha(''); }}
+            onClick={() => { setSearch(''); setFiltroTipo('todos'); setFiltroFecha(''); setFiltroCategoria('todas'); setFiltroProducto('todos'); }}
             className="text-xs text-slate-400 hover:text-slate-600 underline self-center"
           >
             Limpiar filtros

@@ -20,9 +20,14 @@ import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from '@/components/ui/table';
 
-import { Venta, Producto, Entrada, FacturaProveedor } from '@/types';
+import {
+  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
+} from '@/components/ui/select';
+
+import { Venta, Producto, Categoria, Entrada, FacturaProveedor, ItemVenta } from '@/types';
 import { subscribeToVentas }           from '@/lib/firebase/ventas';
 import { subscribeToProductos }        from '@/lib/firebase/productos';
+import { subscribeToCategorias }       from '@/lib/firebase/categorias';
 import { subscribeToEntradas }         from '@/lib/firebase/entradas';
 import { subscribeToFacturasProveedor }from '@/lib/firebase/facturas-proveedor';
 
@@ -43,19 +48,23 @@ const PRESETS = [
 export default function ReportesPage() {
   const [ventas,    setVentas]    = useState<Venta[]>([]);
   const [productos, setProductos] = useState<Producto[]>([]);
+  const [categorias,setCategorias]= useState<Categoria[]>([]);
   const [entradas,  setEntradas]  = useState<Entrada[]>([]);
   const [facturasP, setFacturasP] = useState<FacturaProveedor[]>([]);
   const [loading,   setLoading]   = useState(true);
   const [dateFrom,  setDateFrom]  = useState(format(startOfMonth(new Date()), 'yyyy-MM-dd'));
   const [dateTo,    setDateTo]    = useState(format(new Date(), 'yyyy-MM-dd'));
   const [preset,    setPreset]    = useState('Este mes');
+  const [filtroCategoria, setFiltroCategoria] = useState('todas');
+  const [filtroProducto,  setFiltroProducto]  = useState('todos');
 
   useEffect(() => {
     const u1 = subscribeToVentas((d) => { setVentas(d); setLoading(false); });
     const u2 = subscribeToProductos(setProductos);
     const u3 = subscribeToEntradas(setEntradas);
     const u4 = subscribeToFacturasProveedor(setFacturasP);
-    return () => { u1(); u2(); u3(); u4(); };
+    const u5 = subscribeToCategorias(setCategorias);
+    return () => { u1(); u2(); u3(); u4(); u5(); };
   }, []);
 
   const applyPreset = (p: typeof PRESETS[0]) => {
@@ -64,45 +73,75 @@ export default function ReportesPage() {
     setPreset(p.label);
   };
 
-  // ── Filtrar ventas por período ──
+  const productosPorId = useMemo(() => new Map(productos.map(p => [p.id, p])), [productos]);
+
+  // productos disponibles en el selector, acotados por la categoría elegida
+  const productosParaSelect = useMemo(() => (
+    filtroCategoria === 'todas' ? productos : productos.filter(p => p.categoriaId === filtroCategoria)
+  ), [productos, filtroCategoria]);
+
+  const hayFiltroProducto = filtroCategoria !== 'todas' || filtroProducto !== 'todos';
+
+  const itemMatches = (item: ItemVenta) => {
+    if (filtroProducto !== 'todos') return item.productoId === filtroProducto;
+    if (filtroCategoria !== 'todas') return productosPorId.get(item.productoId)?.categoriaId === filtroCategoria;
+    return true;
+  };
+
+  // total/ganancia de una venta, recortados a los ítems que coinciden con el filtro
+  const totalesVenta = (v: Venta) => {
+    if (!hayFiltroProducto) return { total: v.total, ganancia: v.gananciaTotal };
+    const items = v.items.filter(itemMatches);
+    return {
+      total:    items.reduce((s, i) => s + i.subtotal, 0),
+      ganancia: items.reduce((s, i) => s + i.ganancia, 0),
+    };
+  };
+
+  // ── Filtrar ventas por período + categoría/producto ──
   const ventasFiltradas = useMemo(() => {
     const from = new Date(dateFrom + 'T00:00:00');
     const to   = new Date(dateTo   + 'T23:59:59');
     return ventas.filter(v => {
       if (v.estado === 'anulada') return false;
       const fecha = (v.fecha as any)?.toDate?.() ?? new Date(v.fecha);
-      return fecha >= from && fecha <= to;
+      if (fecha < from || fecha > to) return false;
+      if (hayFiltroProducto && !v.items.some(itemMatches)) return false;
+      return true;
     });
-  }, [ventas, dateFrom, dateTo]);
+  }, [ventas, dateFrom, dateTo, filtroCategoria, filtroProducto, productosPorId]);
 
   // ── KPIs ──
-  const kpis = useMemo(() => ({
-    totalVentas:    ventasFiltradas.reduce((s, v) => s + v.total, 0),
-    totalGanancias: ventasFiltradas.reduce((s, v) => s + v.gananciaTotal, 0),
-    numVentas:      ventasFiltradas.length,
-    ticketPromedio: ventasFiltradas.length
-      ? ventasFiltradas.reduce((s, v) => s + v.total, 0) / ventasFiltradas.length
-      : 0,
-  }), [ventasFiltradas]);
+  const kpis = useMemo(() => {
+    const totalVentas    = ventasFiltradas.reduce((s, v) => s + totalesVenta(v).total, 0);
+    const totalGanancias = ventasFiltradas.reduce((s, v) => s + totalesVenta(v).ganancia, 0);
+    return {
+      totalVentas,
+      totalGanancias,
+      numVentas:      ventasFiltradas.length,
+      ticketPromedio: ventasFiltradas.length ? totalVentas / ventasFiltradas.length : 0,
+    };
+  }, [ventasFiltradas, filtroCategoria, filtroProducto]);
 
   // ── Ventas por día ──
   const ventasPorDia = useMemo(() => {
     const map = new Map<string, { ventas: number; ganancia: number }>();
     ventasFiltradas.forEach(v => {
       const fecha = format((v.fecha as any)?.toDate?.() ?? new Date(v.fecha), 'dd/MM');
+      const { total, ganancia } = totalesVenta(v);
       const prev  = map.get(fecha) ?? { ventas: 0, ganancia: 0 };
-      map.set(fecha, { ventas: prev.ventas + v.total, ganancia: prev.ganancia + v.gananciaTotal });
+      map.set(fecha, { ventas: prev.ventas + total, ganancia: prev.ganancia + ganancia });
     });
     return Array.from(map.entries())
       .map(([fecha, data]) => ({ fecha, ...data }))
       .slice(-30); // últimos 30 días
-  }, [ventasFiltradas]);
+  }, [ventasFiltradas, filtroCategoria, filtroProducto]);
 
   // ── Top productos ──
   const topProductos = useMemo(() => {
     const map = new Map<string, { nombre: string; cantidad: number; total: number; ganancia: number }>();
     ventasFiltradas.forEach(v => {
-      v.items.forEach(item => {
+      v.items.filter(itemMatches).forEach(item => {
         const prev = map.get(item.productoId) ?? { nombre: item.nombre, cantidad: 0, total: 0, ganancia: 0 };
         map.set(item.productoId, {
           nombre:   item.nombre,
@@ -115,49 +154,54 @@ export default function ReportesPage() {
     return Array.from(map.values())
       .sort((a, b) => b.total - a.total)
       .slice(0, 10);
-  }, [ventasFiltradas]);
+  }, [ventasFiltradas, filtroCategoria, filtroProducto]);
 
   // ── Métodos de pago ──
   const metodosPago = useMemo(() => {
     const map = new Map<string, number>();
     ventasFiltradas.forEach(v => {
-      map.set(v.metodoPago, (map.get(v.metodoPago) ?? 0) + v.total);
+      map.set(v.metodoPago, (map.get(v.metodoPago) ?? 0) + totalesVenta(v).total);
     });
     return Array.from(map.entries()).map(([name, value]) => ({
       name: name === 'efectivo' ? 'Efectivo' : name === 'tarjeta' ? 'Tarjeta' : 'Transferencia',
       value: parseFloat(value.toFixed(2)),
     }));
-  }, [ventasFiltradas]);
+  }, [ventasFiltradas, filtroCategoria, filtroProducto]);
 
   // ── Inventario valorizado ──
   const inventario = useMemo(() => {
     return productos
       .filter(p => p.activo)
+      .filter(p => filtroCategoria === 'todas' || p.categoriaId === filtroCategoria)
+      .filter(p => filtroProducto === 'todos' || p.id === filtroProducto)
       .map(p => ({
         ...p,
         valorTotal: p.stockActual * p.precioCompra,
         bajoMinimo: p.stockActual <= p.stockMinimo,
       }))
       .sort((a, b) => b.valorTotal - a.valorTotal);
-  }, [productos]);
+  }, [productos, filtroCategoria, filtroProducto]);
 
   const valorTotalInventario = inventario.reduce((s, p) => s + p.valorTotal, 0);
   const productosBajoMinimo  = inventario.filter(p => p.bajoMinimo).length;
 
   // ── Exportar Excel ──
   const exportVentas = () => {
-    const rows = ventasFiltradas.map(v => ({
-      Fecha:         format((v.fecha as any)?.toDate?.() ?? new Date(v.fecha), 'dd/MM/yyyy HH:mm'),
-      Cliente:       v.clienteNombre,
-      Identificacion:v.clienteIdentificacion,
-      Items:         v.items.length,
-      Subtotal:      v.subtotal,
-      Descuento:     v.descuentoGlobal,
-      Total:         v.total,
-      Ganancia:      v.gananciaTotal,
-      MetodoPago:    v.metodoPago,
-      Vendedor:      v.usuarioNombre,
-    }));
+    const rows = ventasFiltradas.map(v => {
+      const { total, ganancia } = totalesVenta(v);
+      return {
+        Fecha:         format((v.fecha as any)?.toDate?.() ?? new Date(v.fecha), 'dd/MM/yyyy HH:mm'),
+        Cliente:       v.clienteNombre,
+        Identificacion:v.clienteIdentificacion,
+        Items:         hayFiltroProducto ? v.items.filter(itemMatches).length : v.items.length,
+        Subtotal:      v.subtotal,
+        Descuento:     v.descuentoGlobal,
+        Total:         total,
+        Ganancia:      ganancia,
+        MetodoPago:    v.metodoPago,
+        Vendedor:      v.usuarioNombre,
+      };
+    });
     const ws = XLSX.utils.json_to_sheet(rows);
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, 'Ventas');
@@ -293,6 +337,38 @@ export default function ReportesPage() {
           <Badge variant="outline" className="text-xs">
             {ventasFiltradas.length} venta(s) en el período
           </Badge>
+        </div>
+        <div className="flex flex-wrap gap-3 items-center pt-1 border-t mt-1">
+          <div className="flex items-center gap-2">
+            <span className="text-xs text-slate-400">Categoría</span>
+            <Select value={filtroCategoria} onValueChange={(v) => { setFiltroCategoria(v); setFiltroProducto('todos'); }}>
+              <SelectTrigger className="w-full sm:w-44 h-8 text-sm"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="todas">Todas las categorías</SelectItem>
+                {categorias.filter(c => c.activo).map(c => (
+                  <SelectItem key={c.id} value={c.id}>{c.nombre}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="text-xs text-slate-400">Producto</span>
+            <Select value={filtroProducto} onValueChange={setFiltroProducto}>
+              <SelectTrigger className="w-full sm:w-52 h-8 text-sm"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="todos">Todos los productos</SelectItem>
+                {productosParaSelect.map(p => (
+                  <SelectItem key={p.id} value={p.id}>{p.nombre}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          {hayFiltroProducto && (
+            <button onClick={() => { setFiltroCategoria('todas'); setFiltroProducto('todos'); }}
+              className="text-xs text-slate-400 hover:text-slate-600 underline self-center">
+              Limpiar filtro de producto
+            </button>
+          )}
         </div>
       </div>
 
@@ -461,6 +537,8 @@ export default function ReportesPage() {
                   </TableRow>
                 ) : ventasFiltradas.map(v => {
                   const fecha = (v.fecha as any)?.toDate?.() ?? new Date(v.fecha);
+                  const { total, ganancia } = totalesVenta(v);
+                  const itemsCount = hayFiltroProducto ? v.items.filter(itemMatches).length : v.items.length;
                   return (
                     <TableRow key={v.id}>
                       <TableCell className="text-sm text-slate-500">
@@ -471,12 +549,12 @@ export default function ReportesPage() {
                         <p className="text-xs text-slate-400">{v.clienteIdentificacion}</p>
                       </TableCell>
                       <TableCell className="text-center">
-                        <Badge variant="outline" className="text-xs">{v.items.length}</Badge>
+                        <Badge variant="outline" className="text-xs">{itemsCount}</Badge>
                       </TableCell>
-                      <TableCell className="text-right font-bold">{currency(v.total)}</TableCell>
+                      <TableCell className="text-right font-bold">{currency(total)}</TableCell>
                       <TableCell className="text-right">
-                        <span className={`text-sm font-semibold ${v.gananciaTotal >= 0 ? 'text-green-600' : 'text-red-600'}`}>
-                          {currency(v.gananciaTotal)}
+                        <span className={`text-sm font-semibold ${ganancia >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                          {currency(ganancia)}
                         </span>
                       </TableCell>
                       <TableCell className="text-center">

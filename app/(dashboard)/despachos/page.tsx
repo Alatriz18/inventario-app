@@ -31,9 +31,10 @@ import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from '@/components/ui/table';
 
-import { Producto, Bodega } from '@/types';
+import { Producto, Categoria, Bodega } from '@/types';
 import { subscribeToDespachos, createDespacho, anularDespacho, Despacho } from '@/lib/firebase/despachos';
 import { subscribeToProductos } from '@/lib/firebase/productos';
+import { subscribeToCategorias } from '@/lib/firebase/categorias';
 import { subscribeToBodegas }   from '@/lib/firebase/bodegas';
 import { useAuth } from '@/context/AuthContext';
 
@@ -81,6 +82,7 @@ export default function DespachosPage() {
 
   const [despachos,   setDespachos]   = useState<Despacho[]>([]);
   const [productos,   setProductos]   = useState<Producto[]>([]);
+  const [categorias,  setCategorias]  = useState<Categoria[]>([]);
   const [bodegas,     setBodegas]     = useState<Bodega[]>([]);
   const [loading,     setLoading]     = useState(true);
   const [dialogOpen,  setDialogOpen]  = useState(false);
@@ -89,6 +91,8 @@ export default function DespachosPage() {
   const [saving,      setSaving]      = useState(false);
   const [search,      setSearch]      = useState('');
   const [busquedaProd,setBusquedaProd]= useState('');
+  const [filtroCategoria, setFiltroCategoria] = useState('todas');
+  const [filtroProducto,  setFiltroProducto]  = useState('todos');
 
   const { register, handleSubmit, reset, watch, setValue, control, formState: { errors } } =
     useForm<DespachoForm>({
@@ -109,7 +113,8 @@ export default function DespachosPage() {
     const u1 = subscribeToDespachos((d) => { setDespachos(d); setLoading(false); });
     const u2 = subscribeToProductos(setProductos);
     const u3 = subscribeToBodegas(setBodegas);
-    return () => { u1(); u2(); u3(); };
+    const u4 = subscribeToCategorias(setCategorias);
+    return () => { u1(); u2(); u3(); u4(); };
   }, []);
 
   const productosFiltrados = productos.filter(
@@ -195,11 +200,23 @@ export default function DespachosPage() {
     }
   };
 
-  const filtered = despachos.filter((d) =>
-    MOTIVOS.find((m) => m.value === d.motivo)?.label
-      .toLowerCase().includes(search.toLowerCase()) ||
-    d.usuarioNombre.toLowerCase().includes(search.toLowerCase())
-  );
+  const productosPorId = new Map(productos.map(p => [p.id, p]));
+  const productosParaSelect = filtroCategoria === 'todas'
+    ? productos : productos.filter(p => p.categoriaId === filtroCategoria);
+  const hayFiltroProducto = filtroCategoria !== 'todas' || filtroProducto !== 'todos';
+
+  const filtered = despachos.filter((d) => {
+    const matchSearch =
+      MOTIVOS.find((m) => m.value === d.motivo)?.label
+        .toLowerCase().includes(search.toLowerCase()) ||
+      d.usuarioNombre.toLowerCase().includes(search.toLowerCase());
+    const matchProducto = !hayFiltroProducto || d.items.some(i =>
+      filtroProducto !== 'todos'
+        ? i.productoId === filtroProducto
+        : productosPorId.get(i.productoId)?.categoriaId === filtroCategoria
+    );
+    return matchSearch && matchProducto;
+  });
 
   const despachoDetalle = despachos.find((d) => d.id === detailId);
 
@@ -215,9 +232,33 @@ export default function DespachosPage() {
         }
       />
 
-      <div className="mb-4">
+      <div className="mb-4 flex flex-wrap gap-3">
         <Input placeholder="Buscar por motivo o usuario..."
           value={search} onChange={(e) => setSearch(e.target.value)} className="max-w-sm" />
+        <Select value={filtroCategoria} onValueChange={(v) => { setFiltroCategoria(v); setFiltroProducto('todos'); }}>
+          <SelectTrigger className="w-full sm:w-44"><SelectValue /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value="todas">Todas las categorías</SelectItem>
+            {categorias.filter(c => c.activo).map(c => (
+              <SelectItem key={c.id} value={c.id}>{c.nombre}</SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        <Select value={filtroProducto} onValueChange={setFiltroProducto}>
+          <SelectTrigger className="w-full sm:w-52"><SelectValue /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value="todos">Todos los productos</SelectItem>
+            {productosParaSelect.map(p => (
+              <SelectItem key={p.id} value={p.id}>{p.nombre}</SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        {hayFiltroProducto && (
+          <button onClick={() => { setFiltroCategoria('todas'); setFiltroProducto('todos'); }}
+            className="text-xs text-slate-400 hover:text-slate-600 underline self-center">
+            Limpiar filtro
+          </button>
+        )}
       </div>
 
       <div className="bg-white rounded-xl border overflow-hidden">
@@ -358,7 +399,7 @@ export default function DespachosPage() {
                       <div className="text-right">
                         <p className="text-sm font-semibold">{formatCurrency(p.precioVenta)}</p>
                         <p className={`text-xs ${p.stockActual <= p.stockMinimo ? 'text-red-500' : 'text-slate-400'}`}>
-                          Stock: {p.stockActual}
+                          Stock: {Number(p.stockActual.toFixed(2))}
                         </p>
                       </div>
                     </button>
@@ -392,7 +433,7 @@ export default function DespachosPage() {
                             <div>
                               <p className="font-medium text-sm">{field.nombre}</p>
                               <p className="text-xs text-slate-400">
-                                {field.sku} — Stock disponible: {prod?.stockActual ?? 0}
+                                {field.sku} — Stock disponible: {Number((prod?.stockActual ?? 0).toFixed(2))}
                               </p>
                             </div>
                           </TableCell>

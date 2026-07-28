@@ -25,8 +25,10 @@ import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from '@/components/ui/table';
 
-import { Venta, MetodoPago } from '@/types';
+import { Venta, MetodoPago, Producto, Categoria, ItemVenta } from '@/types';
 import { subscribeToVentas, anularVenta, repararVenta } from '@/lib/firebase/ventas';
+import { subscribeToProductos } from '@/lib/firebase/productos';
+import { subscribeToCategorias } from '@/lib/firebase/categorias';
 import { getConfigSRI } from '@/lib/firebase/config-sri';
 import { descargarTicket } from '@/lib/pdf/ticket-venta';
 import { useAuth } from '@/context/AuthContext';
@@ -47,11 +49,15 @@ export default function HistorialVentasPage() {
   const { user } = useAuth();
 
   const [ventas,    setVentas]    = useState<Venta[]>([]);
+  const [productos, setProductos] = useState<Producto[]>([]);
+  const [categorias,setCategorias]= useState<Categoria[]>([]);
   const [loading,   setLoading]   = useState(true);
   const [search,    setSearch]    = useState('');
   const [filtroMetodo, setFiltroMetodo] = useState('todos');
   const [filtroFecha,  setFiltroFecha]  = useState('');
   const [periodo,      setPeriodo]      = useState<'todos' | 'hoy' | 'semana' | 'mes' | 'fecha'>('todos');
+  const [filtroCategoria, setFiltroCategoria] = useState('todas');
+  const [filtroProducto,  setFiltroProducto]  = useState('todos');
   const [detailId,    setDetailId]    = useState<string | null>(null);
   const [anulando,    setAnulando]    = useState<string | null>(null);
   const [reparandoId, setReparandoId] = useState<string | null>(null);
@@ -60,8 +66,32 @@ export default function HistorialVentasPage() {
   const [reparando,   setReparando]   = useState(false);
 
   useEffect(() => {
-    return subscribeToVentas((data) => { setVentas(data); setLoading(false); });
+    const u1 = subscribeToVentas((data) => { setVentas(data); setLoading(false); });
+    const u2 = subscribeToProductos(setProductos);
+    const u3 = subscribeToCategorias(setCategorias);
+    return () => { u1(); u2(); u3(); };
   }, []);
+
+  const productosPorId = new Map(productos.map(p => [p.id, p]));
+  const productosParaSelect = filtroCategoria === 'todas'
+    ? productos : productos.filter(p => p.categoriaId === filtroCategoria);
+  const hayFiltroProducto = filtroCategoria !== 'todas' || filtroProducto !== 'todos';
+
+  const itemMatches = (item: ItemVenta) => {
+    if (filtroProducto !== 'todos') return item.productoId === filtroProducto;
+    if (filtroCategoria !== 'todas') return productosPorId.get(item.productoId)?.categoriaId === filtroCategoria;
+    return true;
+  };
+
+  // total/ganancia de una venta, recortados a los ítems que coinciden con el filtro de producto/categoría
+  const totalesVenta = (v: Venta) => {
+    if (!hayFiltroProducto) return { total: v.total, ganancia: v.gananciaTotal };
+    const items = v.items.filter(itemMatches);
+    return {
+      total:    items.reduce((s, i) => s + i.subtotal, 0),
+      ganancia: items.reduce((s, i) => s + i.ganancia, 0),
+    };
+  };
 
   const filtered = ventas.filter(v => {
     const matchSearch = !search ||
@@ -79,12 +109,13 @@ export default function HistorialVentasPage() {
         default:       return true;
       }
     })();
-    return matchSearch && matchMetodo && matchFecha;
+    const matchProducto = !hayFiltroProducto || v.items.some(itemMatches);
+    return matchSearch && matchMetodo && matchFecha && matchProducto;
   });
 
   // Totales del período filtrado
-  const totalVentas    = filtered.filter(v => v.estado === 'completada').reduce((s, v) => s + v.total, 0);
-  const totalGanancias = filtered.filter(v => v.estado === 'completada').reduce((s, v) => s + v.gananciaTotal, 0);
+  const totalVentas    = filtered.filter(v => v.estado === 'completada').reduce((s, v) => s + totalesVenta(v).total, 0);
+  const totalGanancias = filtered.filter(v => v.estado === 'completada').reduce((s, v) => s + totalesVenta(v).ganancia, 0);
 
   const confirmarAnulacion = async () => {
     if (!anulando || !user) return;
@@ -178,8 +209,26 @@ export default function HistorialVentasPage() {
           <Input type="date" value={filtroFecha}
             onChange={e => setFiltroFecha(e.target.value)} className="w-full sm:w-44" />
         )}
-        {(search || filtroMetodo !== 'todos' || periodo !== 'todos') && (
-          <button onClick={() => { setSearch(''); setFiltroMetodo('todos'); setFiltroFecha(''); setPeriodo('todos'); }}
+        <Select value={filtroCategoria} onValueChange={(v) => { setFiltroCategoria(v); setFiltroProducto('todos'); }}>
+          <SelectTrigger className="w-full sm:w-44"><SelectValue /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value="todas">Todas las categorías</SelectItem>
+            {categorias.filter(c => c.activo).map(c => (
+              <SelectItem key={c.id} value={c.id}>{c.nombre}</SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        <Select value={filtroProducto} onValueChange={setFiltroProducto}>
+          <SelectTrigger className="w-full sm:w-52"><SelectValue /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value="todos">Todos los productos</SelectItem>
+            {productosParaSelect.map(p => (
+              <SelectItem key={p.id} value={p.id}>{p.nombre}</SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        {(search || filtroMetodo !== 'todos' || periodo !== 'todos' || hayFiltroProducto) && (
+          <button onClick={() => { setSearch(''); setFiltroMetodo('todos'); setFiltroFecha(''); setPeriodo('todos'); setFiltroCategoria('todas'); setFiltroProducto('todos'); }}
             className="text-xs text-slate-400 hover:text-slate-600 underline self-center">
             Limpiar filtros
           </button>
@@ -217,6 +266,8 @@ export default function HistorialVentasPage() {
               </TableRow>
             ) : filtered.map(v => {
               const fecha = (v.fecha as any)?.toDate?.() ?? new Date(v.fecha);
+              const { total, ganancia } = totalesVenta(v);
+              const itemsCount = hayFiltroProducto ? v.items.filter(itemMatches).length : v.items.length;
               return (
                 <TableRow key={v.id} className={v.estado === 'anulada' ? 'opacity-50' : ''}>
                   <TableCell className="text-sm">
@@ -228,12 +279,12 @@ export default function HistorialVentasPage() {
                     <p className="text-xs text-slate-400">{v.clienteIdentificacion}</p>
                   </TableCell>
                   <TableCell className="text-center hidden sm:table-cell">
-                    <Badge variant="outline">{v.items.length}</Badge>
+                    <Badge variant="outline">{itemsCount}</Badge>
                   </TableCell>
-                  <TableCell className="text-right font-bold">{currency(v.total)}</TableCell>
+                  <TableCell className="text-right font-bold">{currency(total)}</TableCell>
                   <TableCell className="text-right hidden md:table-cell">
-                    <span className={`text-sm font-semibold ${v.gananciaTotal >= 0 ? 'text-green-600' : 'text-red-600'}`}>
-                      {currency(v.gananciaTotal)}
+                    <span className={`text-sm font-semibold ${ganancia >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                      {currency(ganancia)}
                     </span>
                   </TableCell>
                   <TableCell className="text-center hidden sm:table-cell">

@@ -35,9 +35,10 @@ import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from '@/components/ui/table';
 
-import { Entrada, Producto, Proveedor, Bodega } from '@/types';
+import { Entrada, Producto, Categoria, Proveedor, Bodega } from '@/types';
 import { subscribeToEntradas, createEntrada, anularEntrada } from '@/lib/firebase/entradas';
 import { subscribeToProductos }   from '@/lib/firebase/productos';
+import { subscribeToCategorias }  from '@/lib/firebase/categorias';
 import { subscribeToProveedores } from '@/lib/firebase/proveedores';
 import { subscribeToBodegas }     from '@/lib/firebase/bodegas';
 import { useAuth } from '@/context/AuthContext';
@@ -68,6 +69,7 @@ export default function EntradasPage() {
 
   const [entradas,       setEntradas]       = useState<Entrada[]>([]);
   const [productos,      setProductos]      = useState<Producto[]>([]);
+  const [categorias,     setCategorias]     = useState<Categoria[]>([]);
   const [proveedores,    setProveedores]    = useState<Proveedor[]>([]);
   const [bodegas,        setBodegas]        = useState<Bodega[]>([]);
   const [loading,        setLoading]        = useState(true);
@@ -78,6 +80,8 @@ export default function EntradasPage() {
   const [search,         setSearch]         = useState('');
   const [busquedaProd,   setBusquedaProd]   = useState('');
   const [quickProveedor, setQuickProveedor] = useState(false);
+  const [filtroCategoria, setFiltroCategoria] = useState('todas');
+  const [filtroProducto,  setFiltroProducto]  = useState('todos');
 
   const { register, handleSubmit, reset, watch, setValue, control, formState: { errors } } =
     useForm<EntradaForm>({
@@ -97,7 +101,8 @@ export default function EntradasPage() {
     const u2 = subscribeToProductos(setProductos);
     const u3 = subscribeToProveedores(setProveedores);
     const u4 = subscribeToBodegas(setBodegas);
-    return () => { u1(); u2(); u3(); u4(); };
+    const u5 = subscribeToCategorias(setCategorias);
+    return () => { u1(); u2(); u3(); u4(); u5(); };
   }, []);
 
   const productosFiltrados = productos.filter(
@@ -186,7 +191,20 @@ export default function EntradasPage() {
     finally { setAnulando(null); }
   };
 
-  const filtered       = entradas.filter((e) => e.proveedorNombre.toLowerCase().includes(search.toLowerCase()));
+  const productosPorId = new Map(productos.map(p => [p.id, p]));
+  const productosParaSelect = filtroCategoria === 'todas'
+    ? productos : productos.filter(p => p.categoriaId === filtroCategoria);
+  const hayFiltroProducto = filtroCategoria !== 'todas' || filtroProducto !== 'todos';
+
+  const filtered = entradas.filter((e) => {
+    const matchSearch = e.proveedorNombre.toLowerCase().includes(search.toLowerCase());
+    const matchProducto = !hayFiltroProducto || e.items.some(i =>
+      filtroProducto !== 'todos'
+        ? i.productoId === filtroProducto
+        : productosPorId.get(i.productoId)?.categoriaId === filtroCategoria
+    );
+    return matchSearch && matchProducto;
+  });
   const entradaDetalle = entradas.find((e) => e.id === detailId);
 
   return (
@@ -197,9 +215,33 @@ export default function EntradasPage() {
         action={<Button onClick={openCreate}><Plus className="mr-2 h-4 w-4" /> Nueva Entrada</Button>}
       />
 
-      <div className="mb-4">
+      <div className="mb-4 flex flex-wrap gap-3">
         <Input placeholder="Buscar por proveedor..." value={search}
           onChange={(e) => setSearch(e.target.value)} className="max-w-sm" />
+        <Select value={filtroCategoria} onValueChange={(v) => { setFiltroCategoria(v); setFiltroProducto('todos'); }}>
+          <SelectTrigger className="w-full sm:w-44"><SelectValue /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value="todas">Todas las categorías</SelectItem>
+            {categorias.filter(c => c.activo).map(c => (
+              <SelectItem key={c.id} value={c.id}>{c.nombre}</SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        <Select value={filtroProducto} onValueChange={setFiltroProducto}>
+          <SelectTrigger className="w-full sm:w-52"><SelectValue /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value="todos">Todos los productos</SelectItem>
+            {productosParaSelect.map(p => (
+              <SelectItem key={p.id} value={p.id}>{p.nombre}</SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        {hayFiltroProducto && (
+          <button onClick={() => { setFiltroCategoria('todas'); setFiltroProducto('todos'); }}
+            className="text-xs text-slate-400 hover:text-slate-600 underline self-center">
+            Limpiar filtro
+          </button>
+        )}
       </div>
 
       <div className="bg-white rounded-xl border overflow-hidden">

@@ -10,6 +10,7 @@ import { es } from 'date-fns/locale';
 import {
   Plus, FileCheck, Upload, ChevronDown, CreditCard,
   FileSearch, AlertTriangle, CheckCircle2, Clock, Download, Files, Mail, Ban, Banknote,
+  FileSpreadsheet, UserPlus, XCircle,
 } from 'lucide-react';
 
 import PageHeader   from '@/components/shared/PageHeader';
@@ -92,6 +93,76 @@ function formatFecha(fecha: any) {
   return format(d, 'dd/MM/yyyy', { locale: es });
 }
 
+// ── Importación del reporte "Comprobantes Recibidos" (TXT/TSV) del SRI ──
+interface FilaRecibidoTxt {
+  rucEmisor: string;
+  razonSocialEmisor: string;
+  tipoComprobante: string;
+  serieComprobante: string;
+  claveAcceso: string;
+  fechaEmision: string;
+  valorSinImpuestos: number;
+  iva: number;
+  importeTotal: number;
+  estado: 'nueva' | 'duplicada' | 'no_soportado';
+  proveedorNuevo: boolean;
+}
+
+function parseRecibidosTxt(
+  texto: string,
+  clavesExistentes: Set<string>,
+  rucsExistentes: Set<string>
+): FilaRecibidoTxt[] {
+  const lineas = texto.split(/\r?\n/).filter(l => l.trim().length > 0);
+  if (lineas.length < 2) return [];
+
+  const headers = lineas[0].split('\t').map(h => h.trim().toUpperCase());
+  const idx = (col: string) => headers.indexOf(col);
+  const iRuc = idx('RUC_EMISOR'), iRazon = idx('RAZON_SOCIAL_EMISOR'),
+    iTipo = idx('TIPO_COMPROBANTE'), iSerie = idx('SERIE_COMPROBANTE'),
+    iClave = idx('CLAVE_ACCESO'), iFecha = idx('FECHA_EMISION'),
+    iBase = idx('VALOR_SIN_IMPUESTOS'), iIva = idx('IVA'), iTotal = idx('IMPORTE_TOTAL');
+
+  if (iRuc < 0 || iClave < 0 || iTotal < 0) return [];
+
+  const clavesVistas = new Set(clavesExistentes);
+  const rucsVistos = new Set(rucsExistentes);
+  const filas: FilaRecibidoTxt[] = [];
+
+  for (let i = 1; i < lineas.length; i++) {
+    const cols = lineas[i].split('\t').map(c => c.trim());
+    const claveAcceso = cols[iClave] ?? '';
+    const rucEmisor = cols[iRuc] ?? '';
+    const tipoComprobante = cols[iTipo] ?? '';
+    if (!rucEmisor || !claveAcceso) continue;
+
+    const esFactura = tipoComprobante.trim().toLowerCase() === 'factura';
+    const yaExiste = clavesVistas.has(claveAcceso);
+    const estado: FilaRecibidoTxt['estado'] = yaExiste
+      ? 'duplicada' : !esFactura
+      ? 'no_soportado' : 'nueva';
+
+    if (estado === 'nueva') clavesVistas.add(claveAcceso);
+    const proveedorNuevo = estado === 'nueva' && !rucsVistos.has(rucEmisor);
+    if (proveedorNuevo) rucsVistos.add(rucEmisor);
+
+    filas.push({
+      rucEmisor,
+      razonSocialEmisor: cols[iRazon] ?? '',
+      tipoComprobante,
+      serieComprobante: cols[iSerie] ?? '',
+      claveAcceso,
+      fechaEmision: cols[iFecha] ?? '',
+      valorSinImpuestos: parseFloat(cols[iBase]) || 0,
+      iva: parseFloat(cols[iIva]) || 0,
+      importeTotal: parseFloat(cols[iTotal]) || 0,
+      estado,
+      proveedorNuevo,
+    });
+  }
+  return filas;
+}
+
 export default function FacturasProveedorPage() {
   const { user } = useAuth();
 
@@ -109,6 +180,13 @@ export default function FacturasProveedorPage() {
   const [bulkImporting, setBulkImporting] = useState(false);
   const xmlRef  = useRef<HTMLInputElement>(null);
   const bulkRef = useRef<HTMLInputElement>(null);
+
+  // Importación TXT "Comprobantes Recibidos" del SRI
+  const [txtDialogOpen, setTxtDialogOpen] = useState(false);
+  const [txtFilas,      setTxtFilas]      = useState<FilaRecibidoTxt[]>([]);
+  const [txtImporting,  setTxtImporting]  = useState(false);
+  const [txtProgreso,   setTxtProgreso]   = useState(0);
+  const txtRef = useRef<HTMLInputElement>(null);
 
   // Pago bancario por archivo TXT
   const [pagoBancoOpen, setPagoBancoOpen] = useState(false);
@@ -403,6 +481,76 @@ export default function FacturasProveedorPage() {
     if (bulkRef.current) bulkRef.current.value = '';
   };
 
+  // ── Importar el reporte "Comprobantes Recibidos" (TXT) descargado del SRI ──
+  const handleTxtUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      const texto = ev.target?.result as string;
+      const clavesExistentes = new Set(facturas.map(f => f.claveAcceso).filter(Boolean) as string[]);
+      const rucsExistentes   = new Set(proveedores.map(p => p.ruc));
+      const filas = parseRecibidosTxt(texto, clavesExistentes, rucsExistentes);
+      if (filas.length === 0) {
+        toast.error('No se reconoció el formato. Verifica que sea el TXT de "Comprobantes Recibidos" del SRI.');
+        return;
+      }
+      setTxtFilas(filas);
+      setTxtDialogOpen(true);
+    };
+    reader.readAsText(file);
+    if (txtRef.current) txtRef.current.value = '';
+  };
+
+  const confirmarImportTxt = async () => {
+    if (!user) return;
+    const pendientes = txtFilas.filter(f => f.estado === 'nueva');
+    if (pendientes.length === 0) { setTxtDialogOpen(false); return; }
+
+    setTxtImporting(true);
+    setTxtProgreso(0);
+    let ok = 0, err = 0, proveedoresCreados = 0;
+
+    for (let i = 0; i < pendientes.length; i++) {
+      const f = pendientes[i];
+      try {
+        const yaExistia = proveedores.some(p => p.ruc === f.rucEmisor);
+        const prov = await getOrCreateProveedorPorRuc(f.rucEmisor, f.razonSocialEmisor);
+        if (!yaExistia) proveedoresCreados++;
+
+        const fechaEmision = parseFecha(f.fechaEmision);
+        const subtotal12 = f.iva > 0 ? f.valorSinImpuestos : 0;
+        const subtotal0  = f.iva > 0 ? 0 : f.valorSinImpuestos;
+
+        const facturaId = await createFacturaProveedor({
+          proveedorId: prov.id, proveedorNombre: f.razonSocialEmisor, proveedorRuc: f.rucEmisor,
+          numeroFactura: f.serieComprobante, claveAcceso: f.claveAcceso, fechaEmision,
+          subtotal12, subtotal0, iva: f.iva, total: f.importeTotal, saldoPendiente: f.importeTotal,
+          estado: 'pendiente', pagos: [],
+          notas: 'Importado desde reporte de Comprobantes Recibidos del SRI',
+          usuarioId: user.uid, usuarioNombre: user.nombre, createdAt: new Date(),
+        });
+        await crearAsientoCompraFactura({
+          facturaId, fecha: fechaEmision, proveedorNombre: f.razonSocialEmisor,
+          subtotal: f.valorSinImpuestos, iva: f.iva, total: f.importeTotal,
+          usuarioId: user.uid, usuarioNombre: user.nombre,
+        });
+        ok++;
+      } catch {
+        err++;
+      }
+      setTxtProgreso(i + 1);
+    }
+
+    toast.success(
+      `Importadas: ${ok}${err ? ` · Con error: ${err}` : ''}` +
+      `${proveedoresCreados ? ` · Proveedores nuevos creados: ${proveedoresCreados}` : ''}`
+    );
+    setTxtImporting(false);
+    setTxtDialogOpen(false);
+    setTxtFilas([]);
+  };
+
   // ── Traer facturas directamente del CORREO (IMAP) sin entrar al SRI ──
   const handleImportarCorreo = async () => {
     if (!user) return;
@@ -571,6 +719,9 @@ export default function FacturasProveedorPage() {
               <Mail className="mr-2 h-4 w-4" />
               {bulkImporting ? 'Buscando…' : 'Buscar en mi correo'}
             </Button>
+            <Button variant="outline" onClick={() => txtRef.current?.click()}>
+              <FileSpreadsheet className="mr-2 h-4 w-4" /> Importar TXT (Recibidos SRI)
+            </Button>
             <Button variant="outline" onClick={descargarTodosXML}>
               <Download className="mr-2 h-4 w-4" /> Descargar todos (ZIP)
             </Button>
@@ -582,6 +733,7 @@ export default function FacturasProveedorPage() {
             </Button>
             <input ref={xmlRef} type="file" accept=".xml" className="hidden" onChange={handleXMLUpload} />
             <input ref={bulkRef} type="file" accept=".xml" multiple className="hidden" onChange={handleBulkUpload} />
+            <input ref={txtRef} type="file" accept=".txt,.tsv" className="hidden" onChange={handleTxtUpload} />
           </div>
         }
       />
@@ -1001,6 +1153,148 @@ export default function FacturasProveedorPage() {
             </Button>
             <Button onClick={confirmarImportXML} disabled={saving}>
               {saving ? 'Importando...' : 'Confirmar importación'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* ─── DIALOG IMPORTAR TXT "COMPROBANTES RECIBIDOS" SRI ─── */}
+      <Dialog open={txtDialogOpen} onOpenChange={(open) => { if (!txtImporting) { setTxtDialogOpen(open); if (!open) setTxtFilas([]); } }}>
+        <DialogContent className="sm:max-w-3xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <FileSpreadsheet className="h-5 w-5 text-slate-700" />
+              Importar Comprobantes Recibidos (SRI)
+            </DialogTitle>
+          </DialogHeader>
+
+          {(() => {
+            const nuevas       = txtFilas.filter(f => f.estado === 'nueva');
+            const duplicadas   = txtFilas.filter(f => f.estado === 'duplicada');
+            const noSoportadas = txtFilas.filter(f => f.estado === 'no_soportado');
+            const proveedoresNuevos = nuevas.filter(f => f.proveedorNuevo).length;
+            const totalImporte = nuevas.reduce((s, f) => s + f.importeTotal, 0);
+            const pctProgreso  = nuevas.length > 0 ? Math.round((txtProgreso / nuevas.length) * 100) : 0;
+
+            return (
+              <div className="space-y-4 py-1">
+                {/* Resumen */}
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                  <div className="bg-slate-50 rounded-xl p-3 border">
+                    <p className="text-xs text-slate-400">Filas leídas</p>
+                    <p className="text-xl font-bold text-slate-800">{txtFilas.length}</p>
+                  </div>
+                  <div className="bg-green-50 rounded-xl p-3 border border-green-100">
+                    <p className="text-xs text-green-700">Se importarán</p>
+                    <p className="text-xl font-bold text-green-700">{nuevas.length}</p>
+                  </div>
+                  <div className="bg-amber-50 rounded-xl p-3 border border-amber-100">
+                    <p className="text-xs text-amber-700">Ya registradas</p>
+                    <p className="text-xl font-bold text-amber-700">{duplicadas.length}</p>
+                  </div>
+                  <div className="bg-blue-50 rounded-xl p-3 border border-blue-100">
+                    <p className="text-xs text-blue-700 flex items-center gap-1"><UserPlus className="h-3 w-3" /> Proveedores nuevos</p>
+                    <p className="text-xl font-bold text-blue-700">{proveedoresNuevos}</p>
+                  </div>
+                </div>
+
+                <div className="flex items-center justify-between text-sm bg-slate-50 rounded-lg px-3 py-2 border">
+                  <span className="text-slate-500">Total a importar</span>
+                  <span className="font-bold text-slate-800">{currency(totalImporte)}</span>
+                </div>
+
+                {noSoportadas.length > 0 && (
+                  <div className="bg-slate-50 border rounded-lg p-3 text-xs text-slate-500 flex items-start gap-2">
+                    <AlertTriangle className="h-3.5 w-3.5 shrink-0 mt-0.5 text-amber-500" />
+                    <span>
+                      {noSoportadas.length} fila(s) no son de tipo "Factura" (notas de crédito/débito, retenciones, etc.)
+                      y no se importan desde aquí — cárgalas por XML en sus respectivas secciones.
+                    </span>
+                  </div>
+                )}
+
+                {/* Tabla previa */}
+                <div className="border rounded-lg overflow-hidden">
+                  <div className="max-h-72 overflow-y-auto">
+                    <Table>
+                      <TableHeader className="sticky top-0 bg-white">
+                        <TableRow className="bg-slate-50">
+                          <TableHead className="w-24">Estado</TableHead>
+                          <TableHead>Proveedor</TableHead>
+                          <TableHead>Comprobante</TableHead>
+                          <TableHead>Fecha</TableHead>
+                          <TableHead className="text-right">Total</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {txtFilas.slice(0, 150).map((f, i) => (
+                          <TableRow key={`${f.claveAcceso}-${i}`}>
+                            <TableCell>
+                              {f.estado === 'nueva' && (
+                                <span className="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full font-medium bg-green-50 text-green-700">
+                                  <CheckCircle2 className="h-3 w-3" /> Nueva
+                                </span>
+                              )}
+                              {f.estado === 'duplicada' && (
+                                <span className="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full font-medium bg-amber-50 text-amber-700">
+                                  <Clock className="h-3 w-3" /> Duplicada
+                                </span>
+                              )}
+                              {f.estado === 'no_soportado' && (
+                                <span className="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full font-medium bg-slate-100 text-slate-500">
+                                  <XCircle className="h-3 w-3" /> No soportada
+                                </span>
+                              )}
+                            </TableCell>
+                            <TableCell>
+                              <p className="text-sm font-medium">
+                                {f.razonSocialEmisor}
+                                {f.proveedorNuevo && (
+                                  <span className="ml-1.5 inline-flex items-center gap-0.5 text-[10px] px-1.5 py-0.5 rounded-full bg-blue-50 text-blue-600 align-middle">
+                                    <UserPlus className="h-2.5 w-2.5" /> nuevo
+                                  </span>
+                                )}
+                              </p>
+                              <p className="text-xs text-slate-400">{f.rucEmisor}</p>
+                            </TableCell>
+                            <TableCell className="font-mono text-xs text-slate-500">{f.serieComprobante}</TableCell>
+                            <TableCell className="text-sm text-slate-500">{f.fechaEmision}</TableCell>
+                            <TableCell className="text-right font-semibold text-sm">{currency(f.importeTotal)}</TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  </div>
+                  {txtFilas.length > 150 && (
+                    <p className="text-xs text-slate-400 text-center py-2 border-t bg-slate-50">
+                      +{txtFilas.length - 150} fila(s) más (se procesan igual al confirmar)
+                    </p>
+                  )}
+                </div>
+
+                {txtImporting && (
+                  <div className="space-y-1.5">
+                    <div className="flex justify-between text-xs text-slate-500">
+                      <span>Importando {txtProgreso} de {nuevas.length}…</span>
+                      <span>{pctProgreso}%</span>
+                    </div>
+                    <div className="h-2 bg-slate-100 rounded-full overflow-hidden">
+                      <div className="h-full bg-slate-900 transition-all duration-200" style={{ width: `${pctProgreso}%` }} />
+                    </div>
+                  </div>
+                )}
+              </div>
+            );
+          })()}
+
+          <DialogFooter>
+            <Button variant="outline" disabled={txtImporting}
+              onClick={() => { setTxtDialogOpen(false); setTxtFilas([]); }}>
+              Cancelar
+            </Button>
+            <Button onClick={confirmarImportTxt}
+              disabled={txtImporting || txtFilas.filter(f => f.estado === 'nueva').length === 0}>
+              {txtImporting ? 'Importando…' : `Importar ${txtFilas.filter(f => f.estado === 'nueva').length} factura(s)`}
             </Button>
           </DialogFooter>
         </DialogContent>

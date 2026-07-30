@@ -40,6 +40,14 @@ const TIPO_ID_MAP: Record<string, string> = {
 
 function currency(v: number) { return `$${v.toFixed(2)}`; }
 
+// El XSD del ATS solo acepta letras, números, espacios, & y guion en razonSocial/nombres
+function sanitizeATSText(s: string) {
+  return (s ?? '')
+    .replace(/[.,;:()"'`´~^ªº°#%$!¡¿?/\\]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
 function formatFecha(fecha: any) {
   const d = fecha?.toDate?.() ?? new Date(fecha);
   const dd = String(d.getDate()).padStart(2,'0');
@@ -155,11 +163,11 @@ export default function ATSPage() {
       if (!config) { toast.error('Configura el SRI primero'); return; }
 
       const doc = create({ version:'1.0', encoding:'UTF-8' })
-        .ele('iva', { id:'informacionATS' });
+        .ele('iva');
 
-      doc.ele('TipoIDInformante').txt('04');
+      doc.ele('TipoIDInformante').txt('R');
       doc.ele('IdInformante').txt(config.ruc);
-      doc.ele('razonSocial').txt(config.razonSocial);
+      doc.ele('razonSocial').txt(sanitizeATSText(config.razonSocial));
       doc.ele('Anio').txt(anio);
       doc.ele('Mes').txt(mes.padStart(2,'0'));
       doc.ele('numEstabRuc').txt(config.establecimiento.padStart(3,'0'));

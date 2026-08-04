@@ -122,6 +122,18 @@ export default function NotasCreditoPage() {
     }));
   };
 
+  const updatePrecio = (idx: number, val: number) => {
+    setItemsNC(prev => prev.map((it, i) => {
+      if (i !== idx) return it;
+      const precio = Math.max(0, val);
+      return { ...it, precioUnitario: precio, subtotal: it.cantidadNC * precio };
+    }));
+  };
+
+  const updateTieneIVA = (idx: number, val: boolean) => {
+    setItemsNC(prev => prev.map((it, i) => (i !== idx ? it : { ...it, tieneIVA: val })));
+  };
+
   const totales = useMemo(() => {
     const subtotal = itemsNC.reduce((s, i) => s + i.subtotal, 0);
     const iva      = itemsNC.filter(i => i.tieneIVA).reduce((s, i) => s + i.subtotal * 0.15, 0);
@@ -237,6 +249,31 @@ export default function NotasCreditoPage() {
         total:                  totales.total,
       });
 
+      // Crear el registro en Firestore ANTES de llamar al SRI (estado: pendiente),
+      // para que quede constancia aunque la llamada falle a medio camino.
+      const ncData: Omit<NotaCredito, 'id' | 'createdAt'> = {
+        comprobanteOrigenId:     compSel,
+        numeroComprobanteOrigen: numDocOrigen,
+        fechaEmisionOrigen:      fechaOrigen,
+        clienteId:               '',
+        clienteNombre:           comp.clienteNombre,
+        clienteIdentificacion:   comp.clienteIdentificacion,
+        tipo:                    'nota_credito',
+        secuencial:              numeroNC,
+        claveAcceso,
+        estado:                  'pendiente',
+        motivo,
+        descripcionMotivo:       descripMotivo,
+        fechaEmision,
+        items:                   itemsXML,
+        subtotal:                totales.subtotal,
+        iva:                     totales.iva,
+        total:                   totales.total,
+        usuarioId:               user.uid,
+        usuarioNombre:           user.nombre ?? user.email ?? 'Usuario',
+      };
+      const ncId = await createNotaCredito(ncData);
+
       // Enviar al SRI
       const resp = await fetch('/api/sri/procesar', {
         method: 'POST',
@@ -251,56 +288,52 @@ export default function NotasCreditoPage() {
       });
       const result = await resp.json();
 
+      // Error HTTP (400/500: validación, firma, envío) — mostrar el motivo real
+      if (!resp.ok) {
+        const etapa       = result.etapa ?? 'desconocida';
+        const detalle      = result.error ?? `Error HTTP ${resp.status}`;
+        const msgCompleto  = `[${etapa.toUpperCase()}] ${detalle}`;
+        await updateNotaCredito(ncId, { estado: 'rechazada', mensajesSRI: [msgCompleto] });
+        toast.error(msgCompleto, { duration: 8000 });
+        return;
+      }
+
       const estado: NotaCredito['estado'] =
         result.estado === 'AUTORIZADO' ? 'autorizada' :
         result.estado === 'DEVUELTA'   ? 'rechazada'  : 'pendiente';
+      const mensajesSRI: string[] = (result.mensajes ?? []).map((m: any) =>
+        typeof m === 'string' ? m : `[${m.identificador ?? '?'}] ${m.mensaje ?? ''} ${m.informacionAdicional ?? ''}`
+      );
 
-      const ncData: Omit<NotaCredito, 'id' | 'createdAt'> = {
-        comprobanteOrigenId:     compSel,
-        numeroComprobanteOrigen: numDocOrigen,
-        fechaEmisionOrigen:      fechaOrigen,
-        clienteId:               '',
-        clienteNombre:           comp.clienteNombre,
-        clienteIdentificacion:   comp.clienteIdentificacion,
-        tipo:                    'nota_credito',
-        secuencial:              numeroNC,
-        claveAcceso,
+      await updateNotaCredito(ncId, {
         estado,
-        numeroAutorizacion:      result.numeroAutorizacion,
-        fechaAutorizacion:       result.fechaAutorizacion ? new Date(result.fechaAutorizacion) : undefined,
-        motivo,
-        descripcionMotivo:       descripMotivo,
-        fechaEmision,
-        items:                   itemsXML,
-        subtotal:                totales.subtotal,
-        iva:                     totales.iva,
-        total:                   totales.total,
-        xmlUrl:                  result.xmlFirmadoB64,
-        usuarioId:               user.uid,
-        usuarioNombre:           user.nombre ?? user.email ?? 'Usuario',
-      };
+        numeroAutorizacion: result.numeroAutorizacion,
+        fechaAutorizacion:  result.fechaAutorizacion ? new Date(result.fechaAutorizacion) : undefined,
+        xmlUrl:             result.xmlFirmadoB64,
+        mensajesSRI,
+      });
 
-      const ncId = await createNotaCredito(ncData);
-
-      // Asiento contable (background)
-      crearAsientoNotaCredito({
-        notaCreditoId: ncId,
-        fecha:         fechaEmision,
-        clienteNombre: comp.clienteNombre,
-        tieneIVA:      subtotal15 > 0,
-        subtotal:      totales.subtotal,
-        iva:           totales.iva,
-        total:         totales.total,
-        usuarioId:     user.uid,
-        usuarioNombre: user.nombre ?? user.email ?? 'Usuario',
-      }).catch(() => {});
+      // Asiento contable (background) — solo si el SRI la autorizó
+      if (estado === 'autorizada') {
+        crearAsientoNotaCredito({
+          notaCreditoId: ncId,
+          fecha:         fechaEmision,
+          clienteNombre: comp.clienteNombre,
+          tieneIVA:      subtotal15 > 0,
+          subtotal:      totales.subtotal,
+          iva:           totales.iva,
+          total:         totales.total,
+          usuarioId:     user.uid,
+          usuarioNombre: user.nombre ?? user.email ?? 'Usuario',
+        }).catch(() => {});
+      }
 
       if (estado === 'autorizada') {
         toast.success(`Nota de Crédito ${numeroNC} autorizada por el SRI`);
       } else if (estado === 'rechazada') {
-        toast.warning(`SRI rechazó la NC: ${result.mensajes?.join(', ') ?? ''}`);
+        toast.warning(`SRI rechazó la NC: ${mensajesSRI.join(', ') || 'sin detalle'}`, { duration: 8000 });
       } else {
-        toast.info(`NC guardada como pendiente — ${result.mensajes?.join(', ') ?? ''}`);
+        toast.info(`NC guardada como pendiente — ${mensajesSRI.join(', ') || 'sin detalle'}`);
       }
 
       setDialogOpen(false);
@@ -483,14 +516,21 @@ export default function NotasCreditoPage() {
               <div className="text-sm text-slate-400 py-4 text-center">Cargando ítems de la factura...</div>
             ) : itemsNC.length > 0 && (
               <div>
-                <Label className="mb-2 block">Ítems a incluir en la NC</Label>
+                <div className="flex items-center justify-between mb-2">
+                  <Label className="block">Ítems a incluir en la NC</Label>
+                  <p className="text-[11px] text-slate-400">
+                    Ajusta cantidad, precio unitario e IVA para que el valor de la NC sea el que necesitas — no tiene que ser el total de la factura.
+                  </p>
+                </div>
                 <div className="border rounded-lg overflow-hidden">
                   <table className="w-full text-xs">
                     <thead className="bg-slate-50">
                       <tr>
                         <th className="text-left px-3 py-2 font-medium text-slate-500">Producto</th>
                         <th className="text-center px-2 py-2 font-medium text-slate-500 w-20">Cant. orig.</th>
-                        <th className="text-center px-2 py-2 font-medium text-slate-500 w-24">Cant. NC</th>
+                        <th className="text-center px-2 py-2 font-medium text-slate-500 w-20">Cant. NC</th>
+                        <th className="text-right px-2 py-2 font-medium text-slate-500 w-24">Precio unit.</th>
+                        <th className="text-center px-2 py-2 font-medium text-slate-500 w-14">IVA</th>
                         <th className="text-right px-3 py-2 font-medium text-slate-500 w-24">Subtotal</th>
                       </tr>
                     </thead>
@@ -499,7 +539,7 @@ export default function NotasCreditoPage() {
                         <tr key={idx} className="border-t">
                           <td className="px-3 py-2">
                             <p className="font-medium">{it.nombre}</p>
-                            <p className="text-slate-400">{it.sku} · {currency(it.precioUnitario)}/u</p>
+                            <p className="text-slate-400">{it.sku}</p>
                           </td>
                           <td className="text-center px-2 py-2 text-slate-400">{it.cantidadOrig}</td>
                           <td className="px-2 py-2">
@@ -507,7 +547,26 @@ export default function NotasCreditoPage() {
                               type="number" min="0" max={it.cantidadOrig} step="1"
                               value={it.cantidadNC}
                               onChange={e => updateCantidad(idx, Number(e.target.value))}
-                              className="h-7 text-center text-xs w-20 mx-auto"
+                              className="h-7 text-center text-xs w-16 mx-auto"
+                            />
+                          </td>
+                          <td className="px-2 py-2">
+                            <div className="relative w-24 mx-auto">
+                              <span className="absolute left-2 top-1/2 -translate-y-1/2 text-slate-400">$</span>
+                              <Input
+                                type="number" min="0" step="0.01"
+                                value={it.precioUnitario}
+                                onChange={e => updatePrecio(idx, Number(e.target.value))}
+                                className="h-7 text-right text-xs pl-4"
+                              />
+                            </div>
+                          </td>
+                          <td className="text-center px-2 py-2">
+                            <input
+                              type="checkbox"
+                              checked={it.tieneIVA}
+                              onChange={e => updateTieneIVA(idx, e.target.checked)}
+                              title="Esta línea grava IVA 15%"
                             />
                           </td>
                           <td className="text-right px-3 py-2 font-semibold">

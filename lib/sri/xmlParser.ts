@@ -4,6 +4,10 @@ import { FacturaSRIData } from '@/types';
 const parser = new XMLParser({
   ignoreAttributes: false,
   parseAttributeValue: true,
+  // Desactivado: por defecto fast-xml-parser convierte a Number cualquier texto
+  // "numérico", lo que corrompe claveAcceso (49 dígitos -> notación científica),
+  // RUC/estab/ptoEmi/secuencial con ceros a la izquierda, etc.
+  parseTagValue: false,
   trimValues: true,
 });
 
@@ -22,20 +26,9 @@ export function detectarTipoComprobante(xmlString: string): TipoComprobanteXML {
 
 export function parsearFacturaXML(xmlString: string): FacturaSRIData | null {
   try {
-    const parsed = parser.parse(xmlString);
-
     // El XML del SRI tiene esta estructura:
     // <factura> o dentro de <autorizacion><comprobante>
-    let facturaNode = parsed?.factura;
-
-    // Si viene con sobre de autorización
-    if (!facturaNode && parsed?.autorizacion?.comprobante) {
-      const inner = parsed.autorizacion.comprobante;
-      const innerParsed = parser.parse(
-        typeof inner === 'string' ? inner : JSON.stringify(inner)
-      );
-      facturaNode = innerParsed?.factura;
-    }
+    const facturaNode = getNode(xmlString, 'factura');
 
     if (!facturaNode) return null;
 
@@ -236,11 +229,10 @@ export function parsearRetencionXML(xmlString: string): RetencionRecibidaData | 
   } catch { return null; }
 }
 
-// Extrae el IVA de los impuestos del XML
+// Extrae el IVA de los impuestos del XML (con o sin sobre de autorización)
 export function extraerIVAdeXML(xmlString: string): number {
   try {
-    const parsed = parser.parse(xmlString);
-    const facturaNode = parsed?.factura;
+    const facturaNode = getNode(xmlString, 'factura');
     if (!facturaNode) return 0;
 
     const totalImpuestos = facturaNode.infoFactura?.totalConImpuestos?.totalImpuesto;

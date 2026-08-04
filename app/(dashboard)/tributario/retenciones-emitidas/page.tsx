@@ -166,23 +166,6 @@ export default function RetencionesEmitidasPage() {
         lineas:                  lineasXML,
       });
 
-      const resp = await fetch('/api/sri/procesar', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          xml,
-          p12Base64: configSRI.certificadoP12,
-          password:  configSRI.certificadoPassword,
-          claveAcceso,
-          ambiente:  configSRI.ambiente,
-        }),
-      });
-      const result = await resp.json();
-
-      const estado: RetencionEmitida['estado'] =
-        result.estado === 'AUTORIZADO' ? 'autorizado' :
-        result.estado === 'DEVUELTA'   ? 'rechazado'  : 'pendiente';
-
       const retFuente = lineasXML
         .filter(l => l.tipo === 'fuente_ir')
         .reduce((s, l) => s + l.valorRetenido, 0);
@@ -200,6 +183,8 @@ export default function RetencionesEmitidasPage() {
         valorRetenido: l.valorRetenido,
       }));
 
+      // Crear el registro en Firestore ANTES de llamar al SRI (estado: pendiente),
+      // para que quede constancia aunque la llamada falle a medio camino.
       const retencionId = await createRetencionEmitida({
         facturaProveedorId:     facturaSel,
         numeroFacturaProveedor: factura.numeroFactura,
@@ -209,36 +194,73 @@ export default function RetencionesEmitidasPage() {
         fechaFactura:           fechaFactura,
         secuencial:             numeroRet,
         claveAcceso,
+        estado:                 'pendiente',
+        fechaEmision,
+        ejercicioFiscal:        periodoFiscal,
+        lineas:                 lineasGuardar,
+        totalRetenido,
+        usuarioId:              user.uid,
+        usuarioNombre:          user.nombre ?? user.email ?? 'Usuario',
+      });
+
+      const resp = await fetch('/api/sri/procesar', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          xml,
+          p12Base64: configSRI.certificadoP12,
+          password:  configSRI.certificadoPassword,
+          claveAcceso,
+          ambiente:  configSRI.ambiente,
+        }),
+      });
+      const result = await resp.json();
+
+      // Error HTTP (400/500: validación, firma, envío) — mostrar el motivo real
+      if (!resp.ok) {
+        const etapa      = result.etapa ?? 'desconocida';
+        const detalle     = result.error ?? `Error HTTP ${resp.status}`;
+        const msgCompleto = `[${etapa.toUpperCase()}] ${detalle}`;
+        await updateRetencionEmitida(retencionId, { estado: 'rechazado', mensajesSRI: [msgCompleto] });
+        toast.error(msgCompleto, { duration: 8000 });
+        return;
+      }
+
+      const estado: RetencionEmitida['estado'] =
+        result.estado === 'AUTORIZADO' ? 'autorizado' :
+        result.estado === 'DEVUELTA'   ? 'rechazado'  : 'pendiente';
+      const mensajesSRI: string[] = (result.mensajes ?? []).map((m: any) =>
+        typeof m === 'string' ? m : `[${m.identificador ?? '?'}] ${m.mensaje ?? ''} ${m.informacionAdicional ?? ''}`
+      );
+
+      await updateRetencionEmitida(retencionId, {
         estado,
         numeroAutorizacion: result.numeroAutorizacion,
         fechaAutorizacion:  result.fechaAutorizacion ? new Date(result.fechaAutorizacion) : undefined,
-        fechaEmision,
-        ejercicioFiscal:    periodoFiscal,
-        lineas:             lineasGuardar,
-        totalRetenido,
-        xmlUrl:       result.xmlAutorizado ?? result.xmlFirmadoB64,
-        usuarioId:    user.uid,
-        usuarioNombre:user.nombre ?? user.email ?? 'Usuario',
+        xmlUrl:             result.xmlAutorizado ?? result.xmlFirmadoB64,
+        mensajesSRI,
       });
 
-      // Asiento contable
-      await crearAsientoRetencionEmitida({
-        retencionId,
-        fecha:           fechaEmision,
-        proveedorNombre: factura.proveedorNombre,
-        totalRetenido,
-        retFuente,
-        retIVA:          retIVAVal,
-        usuarioId:       user.uid,
-        usuarioNombre:   user.nombre ?? user.email ?? 'Usuario',
-      });
+      // Asiento contable — solo si el SRI la autorizó
+      if (estado === 'autorizado') {
+        await crearAsientoRetencionEmitida({
+          retencionId,
+          fecha:           fechaEmision,
+          proveedorNombre: factura.proveedorNombre,
+          totalRetenido,
+          retFuente,
+          retIVA:          retIVAVal,
+          usuarioId:       user.uid,
+          usuarioNombre:   user.nombre ?? user.email ?? 'Usuario',
+        });
+      }
 
       if (estado === 'autorizado') {
         toast.success(`Retención ${numeroRet} autorizada por SRI`);
       } else if (estado === 'rechazado') {
-        toast.warning(`SRI rechazó: ${result.mensajes?.join(', ') ?? ''}`);
+        toast.warning(`SRI rechazó: ${mensajesSRI.join(', ') || 'sin detalle'}`, { duration: 8000 });
       } else {
-        toast.info('Retención guardada — ' + (result.mensajes?.join(', ') ?? ''));
+        toast.info('Retención guardada — ' + (mensajesSRI.join(', ') || 'sin detalle'));
       }
 
       setDialogOpen(false);

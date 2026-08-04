@@ -604,6 +604,7 @@ export interface NotaCredito {
   total:                number;
   xmlUrl?:              string;
   rideUrl?:             string;
+  mensajesSRI?:         string[];
   usuarioId:            string;
   usuarioNombre:        string;
   createdAt:            Date;
@@ -638,6 +639,7 @@ export interface NotaDebito {
   iva:                  number;
   total:                number;
   xmlUrl?:              string;
+  mensajesSRI?:         string[];
   usuarioId:            string;
   usuarioNombre:        string;
   createdAt:            Date;
@@ -675,6 +677,7 @@ export interface RetencionEmitida {
   lineas:               LineaRetencion[];
   totalRetenido:        number;
   xmlUrl?:              string;
+  mensajesSRI?:         string[];
   usuarioId:            string;
   usuarioNombre:        string;
   createdAt:            Date;

@@ -137,6 +137,28 @@ export default function NotasDebitoPage() {
         total:       totalND + iva,
       });
 
+      // Crear el registro en Firestore ANTES de llamar al SRI (estado: pendiente),
+      // para que quede constancia aunque la llamada falle a medio camino.
+      const ndId = await createNotaDebito({
+        comprobanteOrigenId:     compSel,
+        numeroComprobanteOrigen: numDocOrigen,
+        fechaEmisionOrigen:      fechaOrigen,
+        clienteId:               '',
+        clienteNombre:           comp.clienteNombre,
+        clienteIdentificacion:   comp.clienteIdentificacion,
+        tipo:                    'nota_debito',
+        secuencial:              numeroND,
+        claveAcceso,
+        estado:                  'pendiente',
+        fechaEmision,
+        razones:                 razonesNum,
+        subtotal:                totalND,
+        iva,
+        total:                   totalND + iva,
+        usuarioId:               user.uid,
+        usuarioNombre:           user.nombre ?? user.email ?? 'Usuario',
+      });
+
       const resp = await fetch('/api/sri/procesar', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -150,52 +172,52 @@ export default function NotasDebitoPage() {
       });
       const result = await resp.json();
 
+      // Error HTTP (400/500: validación, firma, envío) — mostrar el motivo real
+      if (!resp.ok) {
+        const etapa      = result.etapa ?? 'desconocida';
+        const detalle     = result.error ?? `Error HTTP ${resp.status}`;
+        const msgCompleto = `[${etapa.toUpperCase()}] ${detalle}`;
+        await updateNotaDebito(ndId, { estado: 'rechazada', mensajesSRI: [msgCompleto] });
+        toast.error(msgCompleto, { duration: 8000 });
+        return;
+      }
+
       const estado: NotaDebito['estado'] =
         result.estado === 'AUTORIZADO' ? 'autorizada' :
         result.estado === 'DEVUELTA'   ? 'rechazada'  : 'pendiente';
+      const mensajesSRI: string[] = (result.mensajes ?? []).map((m: any) =>
+        typeof m === 'string' ? m : `[${m.identificador ?? '?'}] ${m.mensaje ?? ''} ${m.informacionAdicional ?? ''}`
+      );
 
-      const ndId = await createNotaDebito({
-        comprobanteOrigenId:     compSel,
-        numeroComprobanteOrigen: numDocOrigen,
-        fechaEmisionOrigen:      fechaOrigen,
-        clienteId:               '',
-        clienteNombre:           comp.clienteNombre,
-        clienteIdentificacion:   comp.clienteIdentificacion,
-        tipo:                    'nota_debito',
-        secuencial:              numeroND,
-        claveAcceso,
+      await updateNotaDebito(ndId, {
         estado,
         numeroAutorizacion: result.numeroAutorizacion,
         fechaAutorizacion:  result.fechaAutorizacion ? new Date(result.fechaAutorizacion) : undefined,
-        fechaEmision,
-        razones:            razonesNum,
-        subtotal:           totalND,
-        iva,
-        total:              totalND + iva,
         xmlUrl:             result.xmlAutorizado ?? result.xmlFirmadoB64,
-        usuarioId:          user.uid,
-        usuarioNombre:      user.nombre ?? user.email ?? 'Usuario',
+        mensajesSRI,
       });
 
-      // Asiento contable (background)
-      crearAsientoNotaDebito({
-        notaDebitoId:  ndId,
-        fecha:         fechaEmision,
-        clienteNombre: comp.clienteNombre,
-        tieneIVA:      iva > 0,
-        subtotal:      totalND,
-        iva,
-        total:         totalND + iva,
-        usuarioId:     user.uid,
-        usuarioNombre: user.nombre ?? user.email ?? 'Usuario',
-      }).catch(() => {});
+      // Asiento contable (background) — solo si el SRI la autorizó
+      if (estado === 'autorizada') {
+        crearAsientoNotaDebito({
+          notaDebitoId:  ndId,
+          fecha:         fechaEmision,
+          clienteNombre: comp.clienteNombre,
+          tieneIVA:      iva > 0,
+          subtotal:      totalND,
+          iva,
+          total:         totalND + iva,
+          usuarioId:     user.uid,
+          usuarioNombre: user.nombre ?? user.email ?? 'Usuario',
+        }).catch(() => {});
+      }
 
       if (estado === 'autorizada') {
         toast.success(`Nota de Débito ${numeroND} autorizada por el SRI`);
       } else if (estado === 'rechazada') {
-        toast.warning(`SRI rechazó la ND: ${result.mensajes?.join(', ') ?? ''}`);
+        toast.warning(`SRI rechazó la ND: ${mensajesSRI.join(', ') || 'sin detalle'}`, { duration: 8000 });
       } else {
-        toast.info(`ND guardada como pendiente — ${result.mensajes?.join(', ') ?? ''}`);
+        toast.info(`ND guardada como pendiente — ${mensajesSRI.join(', ') || 'sin detalle'}`);
       }
 
       setDialogOpen(false);

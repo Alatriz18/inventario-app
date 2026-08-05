@@ -108,7 +108,7 @@ export function generarXMLNotaCredito(d: DatosNotaCredito): string {
   const dets = doc.ele('detalles');
   for (const item of d.items) {
     const det = dets.ele('detalle');
-    det.ele('codigoPrincipal').txt(item.codigoPrincipal);
+    det.ele('codigoInterno').txt(item.codigoPrincipal);
     det.ele('descripcion').txt(item.descripcion);
     det.ele('cantidad').txt(item.cantidad.toFixed(6));
     det.ele('precioUnitario').txt(item.precioUnitario.toFixed(6));

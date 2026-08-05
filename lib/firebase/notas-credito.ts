@@ -42,7 +42,10 @@ export async function updateNotaCredito(
   id:   string,
   data: Partial<Omit<NotaCredito, 'id' | 'createdAt'>>
 ): Promise<void> {
-  await updateDoc(doc(db, COL, id), data as Record<string, unknown>);
+  const clean = Object.fromEntries(
+    Object.entries(data).filter(([, v]) => v !== undefined)
+  );
+  await updateDoc(doc(db, COL, id), clean as Record<string, unknown>);
 }
 
 export async function autorizarNotaCredito(

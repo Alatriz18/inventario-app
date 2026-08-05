@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useMemo } from 'react';
 import { format } from 'date-fns';
-import { Plus, Send, FileX, ChevronDown, ChevronUp, Download, Ban } from 'lucide-react';
+import { Plus, Send, FileX, ChevronDown, ChevronUp, Download, Ban, RefreshCw } from 'lucide-react';
 import { toast } from 'sonner';
 
 import PageHeader  from '@/components/shared/PageHeader';
@@ -26,6 +26,7 @@ import { getVentaById }                                 from '@/lib/firebase/ven
 import { getConfigSRI, incrementarSecuencial }          from '@/lib/firebase/config-sri';
 import { generarClaveAcceso }                           from '@/lib/sri/clave-acceso';
 import { generarXMLNotaCredito }                        from '@/lib/sri/generador-nota-credito';
+import { autorizarComprobante }                         from '@/lib/sri/webservice';
 import { crearAsientoNotaCredito, crearAsientoReversion } from '@/lib/contabilidad/motor-asientos';
 import { descargarRIDE }                                from '@/lib/sri/ride-pdf';
 import { buildRIDENotaCredito }                         from '@/lib/sri/ride-builders';
@@ -63,6 +64,8 @@ export default function NotasCreditoPage() {
   const [comprobantes, setComprobantes] = useState<Comprobante[]>([]);
   const [loading,      setLoading]      = useState(true);
   const [expandedId,   setExpandedId]   = useState<string | null>(null);
+  const [consultando,  setConsultando]  = useState<string | null>(null);
+  const [reenviando,   setReenviando]   = useState<string | null>(null);
 
   // Dialog crear
   const [dialogOpen,    setDialogOpen]    = useState(false);
@@ -153,6 +156,148 @@ export default function NotasCreditoPage() {
       await updateNotaCredito(n.id, { estado: 'anulada' });
       toast.success(rev.ok ? 'NC anulada y asiento revertido' : `NC anulada (${rev.advertencia ?? 'sin asiento'})`);
     } catch (e: any) { toast.error(e?.message ?? 'Error al anular'); }
+  };
+
+  const consultarAutorizacionNC = async (nc: NotaCredito) => {
+    if (!user) return;
+    setConsultando(nc.id);
+    try {
+      const config = await getConfigSRI();
+      if (!config) throw new Error('Sin configuración SRI');
+      const result = await autorizarComprobante(nc.claveAcceso, config.ambiente);
+      if (result.estado === 'AUTORIZADO') {
+        await updateNotaCredito(nc.id, {
+          estado:             'autorizada',
+          numeroAutorizacion: result.numeroAutorizacion,
+          fechaAutorizacion:  result.fechaAutorizacion ? new Date(result.fechaAutorizacion) : undefined,
+        });
+        crearAsientoNotaCredito({
+          notaCreditoId: nc.id,
+          fecha:         (nc.fechaEmision as any)?.toDate?.() ?? new Date(nc.fechaEmision),
+          clienteNombre: nc.clienteNombre,
+          tieneIVA:      nc.iva > 0,
+          subtotal:      nc.subtotal,
+          iva:           nc.iva,
+          total:         nc.total,
+          usuarioId:     user.uid,
+          usuarioNombre: user.nombre ?? user.email ?? 'Usuario',
+        }).catch(() => {});
+        toast.success('Nota de Crédito autorizada');
+      } else if (result.estado === 'NO AUTORIZADO') {
+        await updateNotaCredito(nc.id, { estado: 'rechazada', mensajesSRI: result.mensajes });
+        toast.error(`SRI rechazó la NC: ${result.mensajes.join(', ') || 'sin detalle'}`);
+      } else {
+        toast.info(`Estado SRI: ${result.estado} — ${result.mensajes.join(', ') || 'aún en proceso'}`);
+      }
+    } catch (err: any) {
+      toast.error(err.message ?? 'Error al consultar autorización');
+    } finally {
+      setConsultando(null);
+    }
+  };
+
+  const reenviarNC = async (nc: NotaCredito) => {
+    if (!user) return;
+    setReenviando(nc.id);
+    try {
+      const configSRI = await getConfigSRI();
+      if (!configSRI) throw new Error('Configure primero los datos SRI');
+
+      const secuencialNum = parseInt(nc.secuencial.split('-').pop() ?? '0', 10);
+      const fechaEmision   = (nc.fechaEmision as any)?.toDate?.() ?? new Date(nc.fechaEmision);
+      const fechaOrigen    = (nc.fechaEmisionOrigen as any)?.toDate?.() ?? new Date(nc.fechaEmisionOrigen);
+
+      const subtotal15 = nc.items.filter(i => i.tieneIVA).reduce((s, i) => s + i.precioTotalSinImpuesto, 0);
+      const subtotal0  = nc.items.filter(i => !i.tieneIVA).reduce((s, i) => s + i.precioTotalSinImpuesto, 0);
+      const tipoIdComprador = nc.clienteIdentificacion === '9999999999999' ? '07' :
+                              nc.clienteIdentificacion.length === 13 ? '04' : '05';
+
+      const xml = generarXMLNotaCredito({
+        claveAcceso:            nc.claveAcceso,
+        secuencial:             secuencialNum,
+        fechaEmision,
+        ambiente:               configSRI.ambiente,
+        ruc:                    configSRI.ruc,
+        razonSocial:            configSRI.razonSocial,
+        establecimiento:        configSRI.establecimiento,
+        puntoEmision:           configSRI.puntoEmision,
+        direccionMatriz:        configSRI.direccionMatriz,
+        obligadoContabilidad:   configSRI.obligadoContabilidad,
+        contribuyenteEspecial:  configSRI.contribuyenteEspecial,
+        codDocModificado:       '01',
+        numDocModificado:       nc.numeroComprobanteOrigen,
+        fechaEmisionDocSustento:fechaOrigen,
+        tipoIdComprador,
+        identificacion:         nc.clienteIdentificacion,
+        razonSocialComprador:   nc.clienteNombre,
+        motivo:                 nc.descripcionMotivo,
+        items:                  nc.items,
+        subtotal15,
+        subtotal0,
+        totalDescuento:         0,
+        iva:                    nc.iva,
+        total:                  nc.total,
+      });
+
+      const resp = await fetch('/api/sri/procesar', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          xml,
+          p12Base64:   configSRI.certificadoP12,
+          password:    configSRI.certificadoPassword,
+          claveAcceso: nc.claveAcceso,
+          ambiente:    configSRI.ambiente,
+        }),
+      });
+      const result = await resp.json();
+
+      if (!resp.ok) {
+        const etapa      = result.etapa ?? 'desconocida';
+        const detalle     = result.error ?? `Error HTTP ${resp.status}`;
+        const msgCompleto = `[${etapa.toUpperCase()}] ${detalle}`;
+        await updateNotaCredito(nc.id, { estado: 'rechazada', mensajesSRI: [msgCompleto] });
+        toast.error(msgCompleto, { duration: 8000 });
+        return;
+      }
+
+      const estado: NotaCredito['estado'] =
+        result.estado === 'AUTORIZADO' ? 'autorizada' :
+        result.estado === 'DEVUELTA'   ? 'rechazada'  : 'pendiente';
+      const mensajesSRI: string[] = (result.mensajes ?? []).map((m: any) =>
+        typeof m === 'string' ? m : `[${m.identificador ?? '?'}] ${m.mensaje ?? ''} ${m.informacionAdicional ?? ''}`
+      );
+
+      await updateNotaCredito(nc.id, {
+        estado,
+        numeroAutorizacion: result.numeroAutorizacion,
+        fechaAutorizacion:  result.fechaAutorizacion ? new Date(result.fechaAutorizacion) : undefined,
+        mensajesSRI,
+      });
+
+      if (estado === 'autorizada') {
+        crearAsientoNotaCredito({
+          notaCreditoId: nc.id,
+          fecha:         fechaEmision,
+          clienteNombre: nc.clienteNombre,
+          tieneIVA:      subtotal15 > 0,
+          subtotal:      nc.subtotal,
+          iva:           nc.iva,
+          total:         nc.total,
+          usuarioId:     user.uid,
+          usuarioNombre: user.nombre ?? user.email ?? 'Usuario',
+        }).catch(() => {});
+        toast.success(`Nota de Crédito ${nc.secuencial} autorizada por el SRI`);
+      } else if (estado === 'rechazada') {
+        toast.warning(`SRI rechazó la NC: ${mensajesSRI.join(', ') || 'sin detalle'}`, { duration: 8000 });
+      } else {
+        toast.info(`NC guardada como pendiente — ${mensajesSRI.join(', ') || 'sin detalle'}`);
+      }
+    } catch (e: any) {
+      toast.error(e.message ?? 'Error al reenviar la nota de crédito');
+    } finally {
+      setReenviando(null);
+    }
   };
 
   const descargarRide = async (nc: NotaCredito) => {
@@ -418,6 +563,12 @@ export default function NotasCreditoPage() {
                         {n.numeroAutorizacion && (
                           <p><strong>N° autorización:</strong> <span className="font-mono">{n.numeroAutorizacion}</span></p>
                         )}
+                        {!!n.mensajesSRI?.length && (
+                          <div className="bg-red-50 border border-red-200 rounded-lg px-3 py-2 text-red-700">
+                            <p className="font-semibold mb-0.5">Mensaje del SRI:</p>
+                            {n.mensajesSRI.map((m, i) => <p key={i}>{m}</p>)}
+                          </div>
+                        )}
                         <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3 mt-2">
                           <div className="bg-white rounded-lg p-2 border">
                             <p className="text-slate-400">Subtotal</p>
@@ -433,6 +584,22 @@ export default function NotasCreditoPage() {
                           </div>
                         </div>
                         <div className="flex gap-2 mt-1">
+                          {n.estado === 'pendiente' && (
+                            <Button variant="outline" size="sm"
+                              disabled={consultando === n.id}
+                              onClick={(e) => { e.stopPropagation(); consultarAutorizacionNC(n); }}>
+                              <RefreshCw className={`mr-2 h-3.5 w-3.5 ${consultando === n.id ? 'animate-spin' : ''}`} />
+                              {consultando === n.id ? 'Consultando…' : 'Consultar autorización SRI'}
+                            </Button>
+                          )}
+                          {(n.estado === 'rechazada' || n.estado === 'pendiente') && (
+                            <Button variant="outline" size="sm" className="text-blue-600 hover:text-blue-700"
+                              disabled={reenviando === n.id}
+                              onClick={(e) => { e.stopPropagation(); reenviarNC(n); }}>
+                              <Send className={`mr-2 h-3.5 w-3.5 ${reenviando === n.id ? 'animate-pulse' : ''}`} />
+                              {reenviando === n.id ? 'Reenviando…' : 'Reenviar al SRI'}
+                            </Button>
+                          )}
                           <Button variant="outline" size="sm"
                             onClick={(e) => { e.stopPropagation(); descargarRide(n); }}>
                             <Download className="mr-2 h-3.5 w-3.5" /> Descargar RIDE (PDF)

@@ -106,7 +106,14 @@ const NAV: NavItem[] = [
   },
   { label: 'Activos Fijos',         href: '/activos-fijos',         icon: Layers,   modulo: 'activos_fijos' },
   { label: 'Conciliación Bancaria', href: '/conciliacion-bancaria', icon: Building2,modulo: 'conciliacion_bancaria' },
-  { label: 'Reportes',              href: '/reportes',              icon: BarChart3,modulo: 'reportes' },
+  {
+    label: 'Reportes', icon: BarChart3,
+    children: [
+      { label: 'Resumen General',      href: '/reportes',                     icon: BarChart3,      modulo: 'reportes' },
+      { label: 'Facturas Ingresadas',  href: '/reportes/facturas-ingresadas', icon: FileCheck,      modulo: 'reportes' },
+      { label: 'Facturas Emitidas',    href: '/reportes/facturas-emitidas',   icon: FileText,       modulo: 'reportes' },
+    ],
+  },
   { label: 'Usuarios',     href: '/usuarios',     icon: UserCog, modulo: 'usuarios' },
   { label: 'Configuración',href: '/configuracion',icon: Settings,modulo: 'configuracion' },
 ];

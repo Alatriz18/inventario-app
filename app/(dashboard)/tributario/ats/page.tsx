@@ -182,7 +182,7 @@ export default function ATSPage() {
         const ret = retPorFactura.get(f.id) ?? { retFuente: 0, retIVA: 0 };
 
         // Retenciones de renta (fuente_ir) emitidas sobre esta factura, agrupadas
-        // por concepto (codRetAir) — el SRI exige un registro por cada concepto.
+        // por concepto (codRetAir).
         const retDoc = retenciones.find(r => r.facturaProveedorId === f.id);
         const lineasRenta = retDoc?.lineas.filter(l => l.tipo === 'fuente_ir') ?? [];
         const gruposRenta = new Map<string, { codigo: string; porcentaje: number; base: number; valor: number }>();
@@ -190,54 +190,65 @@ export default function ATSPage() {
           const prev = gruposRenta.get(l.codigo) ?? { codigo: l.codigo, porcentaje: l.porcentaje, base: 0, valor: 0 };
           gruposRenta.set(l.codigo, { ...prev, base: prev.base + l.baseImponible, valor: prev.valor + l.valorRetenido });
         });
-        const conceptosRenta = gruposRenta.size > 0 ? Array.from(gruposRenta.values()) : [null];
-        const retDocParts = retDoc?.secuencial.split('-') ?? [];
+        const conceptosRenta = Array.from(gruposRenta.values());
 
-        conceptosRenta.forEach((c, idx) => {
-          const det = comprasNode.ele('detalleCompras');
-          det.ele('codSustento').txt('01');
-          det.ele('tpIdProv').txt('04');
-          det.ele('idProv').txt(f.proveedorRuc);
-          det.ele('tipoComprobante').txt('01');
-          det.ele('parteRel').txt('NO');
-          det.ele('fechaRegistro').txt(formatFecha(fechaEmi));
-          det.ele('establecimiento').txt((numParts[0] ?? '001').padStart(3,'0'));
-          det.ele('puntoEmision').txt((numParts[1] ?? '001').padStart(3,'0'));
-          det.ele('secuencial').txt((numParts[2] ?? '000000001').padStart(9,'0'));
-          det.ele('fechaEmision').txt(formatFecha(fechaEmi));
-          det.ele('autorizacion').txt(f.claveAcceso ?? f.numeroFactura);
-          // Los montos de la compra van solo en el primer registro; si hay más de
-          // un concepto de retención de renta, los siguientes registros del mismo
-          // comprobante llevan las bases en 0 para no duplicar el valor ante el SRI.
-          det.ele('baseNoGraIva').txt('0.00');
-          det.ele('baseImponible').txt(idx === 0 ? f.subtotal0.toFixed(2) : '0.00');
-          det.ele('baseImpGrav').txt(idx === 0 ? f.subtotal12.toFixed(2) : '0.00');
-          det.ele('baseImpExe').txt('0.00');
-          det.ele('montoIce').txt('0.00');
-          det.ele('montoIva').txt(idx === 0 ? f.iva.toFixed(2) : '0.00');
-          // Retenciones de IVA emitidas sobre esta factura (10/20/30/50/70/100%)
-          det.ele('valRetBien10').txt('0.00');
-          det.ele('valRetServ20').txt('0.00');
-          det.ele('valorRetBienes').txt('0.00');
-          det.ele('valRetServ50').txt('0.00');
-          det.ele('valorRetServicios').txt('0.00');
-          det.ele('valRetServ100').txt(idx === 0 ? ret.retIVA.toFixed(2) : '0.00');
-          det.ele('pagoLocExt').txt('01');
-          det.ele('formaPago').txt('01');
-          if (c) {
-            det.ele('codRetAir').txt(c.codigo);
-            det.ele('baseImpAir').txt(c.base.toFixed(2));
-            det.ele('porcentajeAir').txt(String(c.porcentaje));
-            det.ele('valRetAir').txt(c.valor.toFixed(2));
-          }
-          if (retDoc) {
-            det.ele('estabRetencion1').txt((retDocParts[0] ?? '001').padStart(3,'0'));
-            det.ele('ptoEmiRetencion1').txt((retDocParts[1] ?? '001').padStart(3,'0'));
-            det.ele('secRetencion1').txt((retDocParts[2] ?? '000000001').padStart(9,'0'));
-            det.ele('autRetencion1').txt(retDoc.claveAcceso ?? retDocParts.join(''));
-            det.ele('fechaEmiRet1').txt(formatFecha(retDoc.fechaEmision));
-          }
-        });
+        const det = comprasNode.ele('detalleCompras');
+        det.ele('codSustento').txt('01');
+        det.ele('tpIdProv').txt('01');
+        det.ele('idProv').txt(f.proveedorRuc);
+        det.ele('tipoComprobante').txt('01');
+        det.ele('parteRel').txt('NO');
+        det.ele('fechaRegistro').txt(formatFecha(fechaEmi));
+        det.ele('establecimiento').txt((numParts[0] ?? '001').padStart(3,'0'));
+        det.ele('puntoEmision').txt((numParts[1] ?? '001').padStart(3,'0'));
+        det.ele('secuencial').txt((numParts[2] ?? '000000001').padStart(9,'0'));
+        det.ele('fechaEmision').txt(formatFecha(fechaEmi));
+        det.ele('autorizacion').txt(f.claveAcceso ?? f.numeroFactura);
+        det.ele('baseNoGraIva').txt('0.00');
+        det.ele('baseImponible').txt(f.subtotal0.toFixed(2));
+        det.ele('baseImpGrav').txt(f.subtotal12.toFixed(2));
+        det.ele('baseImpExe').txt('0.00');
+        det.ele('montoIce').txt('0.00');
+        det.ele('montoIva').txt(f.iva.toFixed(2));
+        // Retenciones de IVA emitidas sobre esta factura (10/20/30/50/70/100%)
+        det.ele('valRetBien10').txt('0.00');
+        det.ele('valRetServ20').txt('0.00');
+        det.ele('valorRetBienes').txt('0.00');
+        det.ele('valRetServ50').txt('0.00');
+        det.ele('valorRetServicios').txt('0.00');
+        det.ele('valRetServ100').txt(ret.retIVA.toFixed(2));
+        det.ele('valorRetencionNc').txt('0.00');
+        det.ele('totbasesImpReemb').txt('0.00');
+
+        const pagoExt = det.ele('pagoExterior');
+        pagoExt.ele('pagoLocExt').txt('01');
+        pagoExt.ele('paisEfecPago').txt('NA');
+        pagoExt.ele('aplicConvDobTrib').txt('NA');
+        pagoExt.ele('pagExtSujRetNorLeg').txt('NA');
+
+        // Forma de pago: obligatoria solo si la transacción supera el umbral del SRI
+        if (f.subtotal0 + f.subtotal12 + f.iva > 1000) {
+          det.ele('formasDePago').ele('formaPago').txt('20');
+        }
+
+        // El bloque air es obligatorio siempre; si no hubo retención de renta se
+        // reporta con el código 332 (otras compras no sujetas a retención) en 0.
+        const airNode = det.ele('air');
+        if (conceptosRenta.length > 0) {
+          conceptosRenta.forEach(c => {
+            const da = airNode.ele('detalleAir');
+            da.ele('codRetAir').txt(c.codigo);
+            da.ele('baseImpAir').txt(c.base.toFixed(2));
+            da.ele('porcentajeAir').txt(String(c.porcentaje));
+            da.ele('valRetAir').txt(c.valor.toFixed(2));
+          });
+        } else {
+          const da = airNode.ele('detalleAir');
+          da.ele('codRetAir').txt('332');
+          da.ele('baseImpAir').txt('0.00');
+          da.ele('porcentajeAir').txt('0.00');
+          da.ele('valRetAir').txt('0.00');
+        }
       });
 
       // Ventas agrupadas por cliente y tipo de comprobante
@@ -267,24 +278,26 @@ export default function ATSPage() {
         const det = ventasNode.ele('detalleVentas');
         det.ele('tpIdCliente').txt(g.tpId);
         det.ele('idCliente').txt(g.idCliente);
-        det.ele('parteRel').txt('NO');
+        det.ele('parteRelVtas').txt('NO');
         det.ele('tipoComprobante').txt(g.tipoComp);
-        det.ele('tipoEmision').txt('E');
+        det.ele('tipoEmision').txt('F');
         det.ele('numeroComprobantes').txt(String(g.num));
         det.ele('baseNoGraIva').txt('0.00');
         det.ele('baseImponible').txt(g.base0.toFixed(2));
         det.ele('baseImpGrav').txt(g.base15.toFixed(2));
-        det.ele('baseImpExe').txt('0.00');
         det.ele('montoIva').txt(g.iva.toFixed(2));
         det.ele('montoIce').txt('0.00');
         det.ele('valorRetIva').txt('0.00');
         det.ele('valorRetRenta').txt('0.00');
-        det.ele('formaPago').txt('01');
-        // Campos obligatorios por establecimiento (numEstabRuc = 1 en config actual)
-        det.ele('codEstab').txt(config.establecimiento.padStart(3,'0'));
-        det.ele('ventasEstab').txt((g.base0 + g.base15).toFixed(2));
-        det.ele('ivaComp').txt('0.00');
+        det.ele('formasDePago').ele('formaPago').txt('20');
       });
+
+      // Total de ventas por establecimiento (bloque separado, no va dentro de detalleVentas)
+      const ventasEstabNode = doc.ele('ventasEstablecimiento');
+      const ventaEst = ventasEstabNode.ele('ventaEst');
+      ventaEst.ele('codEstab').txt(config.establecimiento.padStart(3,'0'));
+      ventaEst.ele('ventasEstab').txt(resumen.totalVentas.toFixed(2));
+      ventaEst.ele('ivaComp').txt('0.00');
 
       // Comprobantes anulados del período
       if (anuladosMes.length > 0) {

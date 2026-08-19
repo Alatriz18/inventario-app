@@ -181,7 +181,7 @@ export default function ATSPage() {
         det.ele('codSustento').txt('01');
         det.ele('tpIdProv').txt('04');
         det.ele('idProv').txt(f.proveedorRuc);
-        det.ele('tipoComp').txt('01');
+        det.ele('tipoComprobante').txt('01');
         det.ele('parteRel').txt('NO');
         const fechaEmi = f.fechaEmision?.toDate?.() ?? new Date(f.fechaEmision);
         det.ele('fechaRegistro').txt(formatFecha(fechaEmi));
@@ -235,7 +235,7 @@ export default function ATSPage() {
         det.ele('idCliente').txt(g.idCliente);
         det.ele('parteRelVtas').txt('NO');
         det.ele('tipoComprobante').txt(g.tipoComp);
-        det.ele('tipoEm').txt('E');
+        det.ele('tipoEmision').txt('E');
         det.ele('numeroComprobantes').txt(String(g.num));
         det.ele('baseNoGraIva').txt('0.00');
         det.ele('baseImponible').txt(g.base0.toFixed(2));

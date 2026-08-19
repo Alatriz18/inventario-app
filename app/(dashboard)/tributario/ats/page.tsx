@@ -205,7 +205,6 @@ export default function ATSPage() {
         det.ele('valRetServ50').txt('0.00');
         det.ele('valorRetServicios').txt('0.00');
         det.ele('valRetServ100').txt(ret.retIVA.toFixed(2));
-        det.ele('pagoLocExt').txt('01');
         det.ele('formaPago').txt('01');
       });
 

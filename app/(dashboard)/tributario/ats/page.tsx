@@ -194,15 +194,18 @@ export default function ATSPage() {
         det.ele('baseNoGraIva').txt('0.00');
         det.ele('baseImponible').txt(f.subtotal0.toFixed(2));
         det.ele('baseImpGrav').txt(f.subtotal12.toFixed(2));
-        det.ele('montoIva').txt(f.iva.toFixed(2));
+        det.ele('baseImpExe').txt('0.00');
         det.ele('montoIce').txt('0.00');
-        // Retenciones emitidas sobre esta factura (renta en la fuente e IVA)
+        det.ele('montoIva').txt(f.iva.toFixed(2));
+        // Retenciones de IVA emitidas sobre esta factura (10/20/30/50/70/100%)
         const ret = retPorFactura.get(f.id) ?? { retFuente: 0, retIVA: 0 };
-        det.ele('valorRetBien10').txt('0.00');
-        det.ele('valorRetServ20').txt(ret.retFuente.toFixed(2));
-        det.ele('valorRetServ50').txt('0.00');
-        det.ele('valorRetIva100').txt(ret.retIVA.toFixed(2));
-        det.ele('valorRetIva70').txt('0.00');
+        det.ele('valRetBien10').txt('0.00');
+        det.ele('valRetServ20').txt('0.00');
+        det.ele('valorRetBienes').txt('0.00');
+        det.ele('valRetServ50').txt('0.00');
+        det.ele('valorRetServicios').txt('0.00');
+        det.ele('valRetServ100').txt(ret.retIVA.toFixed(2));
+        det.ele('pagoLocExt').txt('01');
         det.ele('formaPago').txt('01');
       });
 
@@ -233,7 +236,7 @@ export default function ATSPage() {
         const det = ventasNode.ele('detalleVentas');
         det.ele('tpIdCliente').txt(g.tpId);
         det.ele('idCliente').txt(g.idCliente);
-        det.ele('parteRelVtas').txt('NO');
+        det.ele('parteRel').txt('NO');
         det.ele('tipoComprobante').txt(g.tipoComp);
         det.ele('tipoEmision').txt('E');
         det.ele('numeroComprobantes').txt(String(g.num));

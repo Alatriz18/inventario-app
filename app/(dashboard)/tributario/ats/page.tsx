@@ -248,6 +248,11 @@ export default function ATSPage() {
         det.ele('montoIce').txt('0.00');
         det.ele('valorRetIva').txt('0.00');
         det.ele('valorRetRenta').txt('0.00');
+        det.ele('formaPago').txt('01');
+        // Campos obligatorios por establecimiento (numEstabRuc = 1 en config actual)
+        det.ele('codEstab').txt(config.establecimiento.padStart(3,'0'));
+        det.ele('ventasEstab').txt((g.base0 + g.base15).toFixed(2));
+        det.ele('ivaComp').txt('0.00');
       });
 
       // Comprobantes anulados del período

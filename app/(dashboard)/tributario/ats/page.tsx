@@ -240,11 +240,11 @@ export default function ATSPage() {
         det.ele('baseNoGraIva').txt('0.00');
         det.ele('baseImponible').txt(g.base0.toFixed(2));
         det.ele('baseImpGrav').txt(g.base15.toFixed(2));
+        det.ele('baseImpExe').txt('0.00');
         det.ele('montoIva').txt(g.iva.toFixed(2));
         det.ele('montoIce').txt('0.00');
-        det.ele('valorRetBien').txt('0.00');
-        det.ele('valorRetServ').txt('0.00');
         det.ele('valorRetIva').txt('0.00');
+        det.ele('valorRetRenta').txt('0.00');
       });
 
       // Comprobantes anulados del período

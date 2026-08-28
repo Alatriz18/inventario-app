@@ -323,9 +323,10 @@ export default function FacturasProveedorPage() {
     try {
       const existentes = new Set(facturas.map(f => f.claveAcceso).filter(Boolean) as string[]);
       const r = await procesarXmlRecibido(xmlPreview.xmlRaw, existentes);
-      if (r === 'ok')       toast.success('Factura importada — proveedor y asiento de compra generados');
-      else if (r === 'dup') toast.warning('Esta factura ya estaba registrada (clave de acceso duplicada)');
-      else                  toast.error('No se pudo importar la factura');
+      if (r === 'ok')                 toast.success('Factura importada — proveedor y asiento de compra generados');
+      else if (r === 'ok_sin_asiento')toast.warning('Factura importada, pero el asiento contable NO se pudo generar. Revísala en Libro Diario.', { duration: 10000 });
+      else if (r === 'dup')           toast.warning('Esta factura ya estaba registrada (clave de acceso duplicada)');
+      else                            toast.error('No se pudo importar la factura');
       setXmlDialog(false);
       setXmlPreview(null);
     } catch {
@@ -348,7 +349,7 @@ export default function FacturasProveedorPage() {
   const procesarXmlRecibido = async (
     xml: string,
     existentes: Set<string>
-  ): Promise<'ok' | 'dup' | 'err' | 'omitido'> => {
+  ): Promise<'ok' | 'ok_sin_asiento' | 'dup' | 'err' | 'omitido'> => {
     if (!user) return 'err';
     const tipo = detectarTipoComprobante(xml);
 
@@ -374,12 +375,12 @@ export default function FacturasProveedorPage() {
           estado: 'pendiente', pagos: [], xmlData: data, xmlRaw: xml,
           usuarioId: user.uid, usuarioNombre: user.nombre, createdAt: new Date(),
         });
-        await crearAsientoCompraFactura({
+        const asientoId = await crearAsientoCompraFactura({
           facturaId, fecha: fechaEmision, proveedorNombre: it.razonSocial,
           subtotal, iva, total, usuarioId: user.uid, usuarioNombre: user.nombre,
         });
         if (clave) existentes.add(clave);
-        return 'ok';
+        return asientoId ? 'ok' : 'ok_sin_asiento';
       }
 
       // ── NOTA DE CRÉDITO recibida → reversa de compra ──
@@ -467,16 +468,23 @@ export default function FacturasProveedorPage() {
     const files = Array.from(e.target.files ?? []);
     if (!files.length || !user) return;
     setBulkImporting(true);
-    let ok = 0, dup = 0, err = 0, omit = 0;
+    let ok = 0, dup = 0, err = 0, omit = 0, sinAsiento = 0;
     const existentes = new Set(facturas.map(f => f.claveAcceso).filter(Boolean) as string[]);
     for (const file of files) {
       const r = await procesarXmlRecibido(await file.text(), existentes);
-      if (r === 'ok') ok++; else if (r === 'dup') dup++; else if (r === 'omitido') omit++; else err++;
+      if (r === 'ok') ok++;
+      else if (r === 'ok_sin_asiento') { ok++; sinAsiento++; }
+      else if (r === 'dup') dup++;
+      else if (r === 'omitido') omit++;
+      else err++;
     }
     toast.success(
       `Importadas: ${ok} · Duplicadas: ${dup}` +
       `${omit ? ` · Omitidas (NC/ND/retención): ${omit}` : ''}${err ? ` · Con error: ${err}` : ''}`
     );
+    if (sinAsiento > 0) {
+      toast.warning(`${sinAsiento} factura(s) se importaron pero NO generaron asiento contable. Revísalas en Libro Diario.`, { duration: 12000 });
+    }
     setBulkImporting(false);
     if (bulkRef.current) bulkRef.current.value = '';
   };
@@ -510,6 +518,7 @@ export default function FacturasProveedorPage() {
     setTxtImporting(true);
     setTxtProgreso(0);
     let ok = 0, err = 0, proveedoresCreados = 0;
+    const facturasSinAsiento: string[] = [];
 
     for (let i = 0; i < pendientes.length; i++) {
       const f = pendientes[i];
@@ -530,11 +539,12 @@ export default function FacturasProveedorPage() {
           notas: 'Importado desde reporte de Comprobantes Recibidos del SRI',
           usuarioId: user.uid, usuarioNombre: user.nombre, createdAt: new Date(),
         });
-        await crearAsientoCompraFactura({
+        const asientoId = await crearAsientoCompraFactura({
           facturaId, fecha: fechaEmision, proveedorNombre: f.razonSocialEmisor,
           subtotal: f.valorSinImpuestos, iva: f.iva, total: f.importeTotal,
           usuarioId: user.uid, usuarioNombre: user.nombre,
         });
+        if (!asientoId) facturasSinAsiento.push(`${f.razonSocialEmisor} (${f.serieComprobante})`);
         ok++;
       } catch {
         err++;
@@ -546,6 +556,14 @@ export default function FacturasProveedorPage() {
       `Importadas: ${ok}${err ? ` · Con error: ${err}` : ''}` +
       `${proveedoresCreados ? ` · Proveedores nuevos creados: ${proveedoresCreados}` : ''}`
     );
+    if (facturasSinAsiento.length > 0) {
+      toast.warning(
+        `${facturasSinAsiento.length} factura(s) se importaron pero NO generaron asiento contable: ` +
+        `${facturasSinAsiento.slice(0, 5).join(', ')}${facturasSinAsiento.length > 5 ? '…' : ''}. ` +
+        `Revísalas en Contabilidad → Libro Diario, o edítalas para forzar el recálculo del asiento.`,
+        { duration: 15000 }
+      );
+    }
     setTxtImporting(false);
     setTxtDialogOpen(false);
     setTxtFilas([]);
@@ -574,16 +592,23 @@ export default function FacturasProveedorPage() {
         toast.info('No se encontraron XML de facturas en el correo (últimos 30 días)');
         return;
       }
-      let ok = 0, dup = 0, err = 0, omit = 0;
+      let ok = 0, dup = 0, err = 0, omit = 0, sinAsiento = 0;
       const existentes = new Set(facturas.map(f => f.claveAcceso).filter(Boolean) as string[]);
       for (const item of xmls) {
         const r = await procesarXmlRecibido(item.xml, existentes);
-        if (r === 'ok') ok++; else if (r === 'dup') dup++; else if (r === 'omitido') omit++; else err++;
+        if (r === 'ok') ok++;
+        else if (r === 'ok_sin_asiento') { ok++; sinAsiento++; }
+        else if (r === 'dup') dup++;
+        else if (r === 'omitido') omit++;
+        else err++;
       }
       toast.success(
         `Desde correo — Importadas: ${ok} · Duplicadas: ${dup}` +
         `${omit ? ` · Omitidas: ${omit}` : ''}${err ? ` · Con error: ${err}` : ''}`
       );
+      if (sinAsiento > 0) {
+        toast.warning(`${sinAsiento} factura(s) se importaron pero NO generaron asiento contable. Revísalas en Libro Diario.`, { duration: 12000 });
+      }
     } catch (e: any) {
       toast.error(e.message ?? 'Error al importar desde el correo');
     } finally {

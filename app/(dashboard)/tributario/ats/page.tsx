@@ -226,8 +226,9 @@ export default function ATSPage() {
         pagoExt.ele('aplicConvDobTrib').txt('NA');
         pagoExt.ele('pagExtSujRetNorLeg').txt('NA');
 
-        // Forma de pago: obligatoria solo si la transacción supera el umbral del SRI
-        if (f.subtotal0 + f.subtotal12 + f.iva > 1000) {
+        // Forma de pago: obligatoria si la sumatoria de bases imponibles + IVA/ICE
+        // supera USD 500 (vigente desde el 20/12/2023; antes el umbral era USD 1000).
+        if (f.subtotal0 + f.subtotal12 + f.iva > 500) {
           det.ele('formasDePago').ele('formaPago').txt('20');
         }
 

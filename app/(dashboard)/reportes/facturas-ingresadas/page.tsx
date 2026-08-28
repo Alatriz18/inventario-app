@@ -196,14 +196,14 @@ export default function ReporteFacturasIngresadasPage() {
             </Button>
           ))}
         </div>
-        <div className="flex items-end gap-2 ml-auto">
+        <div className="flex items-end gap-2 flex-wrap sm:ml-auto">
           <div>
             <label className="text-xs text-slate-500 block mb-1">Desde</label>
-            <Input type="date" value={dateFrom} onChange={e => { setDateFrom(e.target.value); setPreset(''); }} className="h-9" />
+            <Input type="date" value={dateFrom} onChange={e => { setDateFrom(e.target.value); setPreset(''); }} className="h-9 min-w-[150px]" />
           </div>
           <div>
             <label className="text-xs text-slate-500 block mb-1">Hasta</label>
-            <Input type="date" value={dateTo} onChange={e => { setDateTo(e.target.value); setPreset(''); }} className="h-9" />
+            <Input type="date" value={dateTo} onChange={e => { setDateTo(e.target.value); setPreset(''); }} className="h-9 min-w-[150px]" />
           </div>
         </div>
       </div>

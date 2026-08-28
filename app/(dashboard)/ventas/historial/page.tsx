@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { format, startOfDay, startOfWeek, startOfMonth } from 'date-fns';
+import { format, startOfWeek, startOfMonth } from 'date-fns';
 import { es } from 'date-fns/locale';
 import { Receipt, XCircle, ChevronDown, TrendingUp, Printer, Wrench } from 'lucide-react';
 
@@ -54,8 +54,9 @@ export default function HistorialVentasPage() {
   const [loading,   setLoading]   = useState(true);
   const [search,    setSearch]    = useState('');
   const [filtroMetodo, setFiltroMetodo] = useState('todos');
-  const [filtroFecha,  setFiltroFecha]  = useState('');
-  const [periodo,      setPeriodo]      = useState<'todos' | 'hoy' | 'semana' | 'mes' | 'fecha'>('todos');
+  const [dateFrom,     setDateFrom]     = useState('');
+  const [dateTo,       setDateTo]       = useState('');
+  const [preset,       setPreset]       = useState<'todos' | 'hoy' | 'semana' | 'mes'>('todos');
   const [filtroCategoria, setFiltroCategoria] = useState('todas');
   const [filtroProducto,  setFiltroProducto]  = useState('todos');
   const [detailId,    setDetailId]    = useState<string | null>(null);
@@ -71,6 +72,16 @@ export default function HistorialVentasPage() {
     const u3 = subscribeToCategorias(setCategorias);
     return () => { u1(); u2(); u3(); };
   }, []);
+
+  const applyPreset = (p: 'todos' | 'hoy' | 'semana' | 'mes') => {
+    setPreset(p);
+    const hoy = new Date();
+    const hoyStr = format(hoy, 'yyyy-MM-dd');
+    if (p === 'todos')       { setDateFrom(''); setDateTo(''); }
+    else if (p === 'hoy')    { setDateFrom(hoyStr); setDateTo(hoyStr); }
+    else if (p === 'semana') { setDateFrom(format(startOfWeek(hoy, { weekStartsOn: 1 }), 'yyyy-MM-dd')); setDateTo(hoyStr); }
+    else if (p === 'mes')    { setDateFrom(format(startOfMonth(hoy), 'yyyy-MM-dd')); setDateTo(hoyStr); }
+  };
 
   const productosPorId = new Map(productos.map(p => [p.id, p]));
   const productosParaSelect = filtroCategoria === 'todas'
@@ -99,15 +110,11 @@ export default function HistorialVentasPage() {
       v.clienteIdentificacion.includes(search);
     const matchMetodo = filtroMetodo === 'todos' || v.metodoPago === filtroMetodo;
     const matchFecha  = (() => {
-      const f = (v.fecha as any)?.toDate?.() ?? new Date(v.fecha);
-      const ahora = new Date();
-      switch (periodo) {
-        case 'hoy':    return f >= startOfDay(ahora);
-        case 'semana': return f >= startOfWeek(ahora, { weekStartsOn: 1 });
-        case 'mes':    return f >= startOfMonth(ahora);
-        case 'fecha':  return !filtroFecha || format(f, 'yyyy-MM-dd') === filtroFecha;
-        default:       return true;
-      }
+      if (!dateFrom && !dateTo) return true;
+      const f = format((v.fecha as any)?.toDate?.() ?? new Date(v.fecha), 'yyyy-MM-dd');
+      if (dateFrom && f < dateFrom) return false;
+      if (dateTo   && f > dateTo)   return false;
+      return true;
     })();
     const matchProducto = !hayFiltroProducto || v.items.some(itemMatches);
     return matchSearch && matchMetodo && matchFecha && matchProducto;
@@ -179,7 +186,7 @@ export default function HistorialVentasPage() {
       </div>
 
       {/* Filtros */}
-      <div className="flex flex-wrap gap-3 mb-4">
+      <div className="flex flex-wrap gap-3 mb-3">
         <Input placeholder="Buscar por cliente..."
           value={search} onChange={e => setSearch(e.target.value)} className="flex-1 min-w-[160px] max-w-xs" />
         <Select onValueChange={setFiltroMetodo} defaultValue="todos">
@@ -193,22 +200,6 @@ export default function HistorialVentasPage() {
             <SelectItem value="transferencia">Transferencia</SelectItem>
           </SelectContent>
         </Select>
-        <Select value={periodo} onValueChange={(v) => setPeriodo(v as typeof periodo)}>
-          <SelectTrigger className="w-full sm:w-40">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="todos">Todo el período</SelectItem>
-            <SelectItem value="hoy">Hoy</SelectItem>
-            <SelectItem value="semana">Esta semana</SelectItem>
-            <SelectItem value="mes">Este mes</SelectItem>
-            <SelectItem value="fecha">Fecha específica</SelectItem>
-          </SelectContent>
-        </Select>
-        {periodo === 'fecha' && (
-          <Input type="date" value={filtroFecha}
-            onChange={e => setFiltroFecha(e.target.value)} className="w-full sm:w-44" />
-        )}
         <Select value={filtroCategoria} onValueChange={(v) => { setFiltroCategoria(v); setFiltroProducto('todos'); }}>
           <SelectTrigger className="w-full sm:w-44"><SelectValue /></SelectTrigger>
           <SelectContent>
@@ -227,8 +218,44 @@ export default function HistorialVentasPage() {
             ))}
           </SelectContent>
         </Select>
-        {(search || filtroMetodo !== 'todos' || periodo !== 'todos' || hayFiltroProducto) && (
-          <button onClick={() => { setSearch(''); setFiltroMetodo('todos'); setFiltroFecha(''); setPeriodo('todos'); setFiltroCategoria('todas'); setFiltroProducto('todos'); }}
+      </div>
+
+      {/* Rango de fechas */}
+      <div className="bg-white rounded-xl border p-3 mb-4 flex flex-wrap items-end gap-3">
+        <div className="flex gap-1.5 flex-wrap">
+          {([
+            { value: 'todos',  label: 'Todo el período' },
+            { value: 'hoy',    label: 'Hoy' },
+            { value: 'semana', label: 'Esta semana' },
+            { value: 'mes',    label: 'Este mes' },
+          ] as const).map(p => (
+            <Button key={p.value} type="button" size="sm"
+              variant={preset === p.value ? 'default' : 'outline'}
+              onClick={() => applyPreset(p.value)}>
+              {p.label}
+            </Button>
+          ))}
+        </div>
+        <div className="flex items-end gap-2 flex-wrap">
+          <div>
+            <label className="text-xs text-slate-500 block mb-1">Desde</label>
+            <Input type="date" value={dateFrom}
+              onChange={e => { setDateFrom(e.target.value); setPreset('todos'); }}
+              className="h-9 w-full min-w-[150px]" />
+          </div>
+          <div>
+            <label className="text-xs text-slate-500 block mb-1">Hasta</label>
+            <Input type="date" value={dateTo}
+              onChange={e => { setDateTo(e.target.value); setPreset('todos'); }}
+              className="h-9 w-full min-w-[150px]" />
+          </div>
+        </div>
+        {(search || filtroMetodo !== 'todos' || dateFrom || dateTo || hayFiltroProducto) && (
+          <button
+            onClick={() => {
+              setSearch(''); setFiltroMetodo('todos'); setDateFrom(''); setDateTo('');
+              setPreset('todos'); setFiltroCategoria('todas'); setFiltroProducto('todos');
+            }}
             className="text-xs text-slate-400 hover:text-slate-600 underline self-center">
             Limpiar filtros
           </button>

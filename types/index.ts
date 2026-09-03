@@ -184,6 +184,7 @@ export interface Venta {
   esCxC?: boolean;       // true si es venta a crédito
   diasCredito?: number;  // días de crédito pactados
   cxcId?: string;        // ID del documento en cuentas_cobrar
+  afectaInventario?: boolean; // false = venta histórica (anterior al inventario actual): no descuenta stock ni genera kardex/costo de venta
 }
 
 // ─── COMPROBANTES ──────────────────────────────────────────────────────────

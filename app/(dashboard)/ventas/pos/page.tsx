@@ -77,6 +77,7 @@ export default function POSPage() {
   const [showClientes,   setShowClientes]   = useState(false);
   const [quickCliente,   setQuickCliente]   = useState(false); // ← dentro del componente
   const [fechaVenta,     setFechaVenta]     = useState(new Date().toISOString().split('T')[0]);
+  const [ventaHistorica, setVentaHistorica] = useState(false);
   const [activeTab,      setActiveTab]      = useState<'productos' | 'cobro'>('productos');
 
   useEffect(() => {
@@ -96,7 +97,7 @@ export default function POSPage() {
   // ─── Buscar productos ─────────────────────────────────────────────────────
   const productosFiltrados = search.length >= 1
     ? productos.filter(p =>
-        p.activo && p.stockActual > 0 && (
+        p.activo && (ventaHistorica || p.stockActual > 0) && (
           p.nombre.toLowerCase().includes(search.toLowerCase()) ||
           p.sku.toLowerCase().includes(search.toLowerCase())
         )
@@ -120,7 +121,7 @@ export default function POSPage() {
         const updated = [...prev];
         const item    = updated[idx];
         const newQty  = item.cantidad + 1;
-        if (newQty > prod.stockActual) {
+        if (!ventaHistorica && newQty > prod.stockActual) {
           toast.error(`Stock máximo: ${prod.stockActual}`);
           return prev;
         }
@@ -155,7 +156,7 @@ export default function POSPage() {
       const prod    = productos.find(p => p.id === item.productoId);
       const newQty  = Math.round((item.cantidad + delta) * 100) / 100;
       if (newQty <= 0) return prev;
-      if (prod && newQty > prod.stockActual) {
+      if (!ventaHistorica && prod && newQty > prod.stockActual) {
         toast.error(`Stock máximo: ${prod.stockActual}`);
         return prev;
       }
@@ -232,6 +233,7 @@ export default function POSPage() {
       const fechaSeleccionada = fechaVenta === hoy
         ? new Date()
         : new Date(fechaVenta + 'T12:00:00');
+      const esHistorica = ventaHistorica && fechaVenta !== hoy;
       const ventaId = await createVenta(
         {
           fecha:                 fechaSeleccionada,
@@ -247,6 +249,7 @@ export default function POSPage() {
           estado:                'completada',
           esCxC:                 metodoPago === 'credito',
           ...(metodoPago === 'credito' ? { diasCredito } : {}),
+          afectaInventario:      !esHistorica,
           usuarioId:             user.uid,
           usuarioNombre:         user.nombre,
         },
@@ -257,7 +260,10 @@ export default function POSPage() {
       setSuccessId(ventaId);
 
       // ── Motor contable automático ──
-      const costoVenta = cart.reduce(
+      // En ventas históricas (anteriores al inventario actual) no se genera
+      // costo de venta ni se afecta la cuenta de Inventario — el stock físico
+      // ya refleja esas ventas de antes, solo se registra el ingreso e IVA.
+      const costoVenta = esHistorica ? 0 : cart.reduce(
         (s, item) => s + item.precioCompraRef * item.cantidad, 0
       );
       const baseTotal = total / 1.15;
@@ -581,9 +587,23 @@ export default function POSPage() {
             className="text-center"
           />
           {fechaVenta !== new Date().toISOString().split('T')[0] && (
-            <p className="text-xs text-amber-600 font-medium">
-              Registrando con fecha anterior: {new Date(fechaVenta + 'T12:00:00').toLocaleDateString('es-EC')}
-            </p>
+            <>
+              <p className="text-xs text-amber-600 font-medium">
+                Registrando con fecha anterior: {new Date(fechaVenta + 'T12:00:00').toLocaleDateString('es-EC')}
+              </p>
+              <label className="flex items-start gap-2 pt-1 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={ventaHistorica}
+                  onChange={e => setVentaHistorica(e.target.checked)}
+                  className="mt-0.5"
+                />
+                <span className="text-xs text-slate-600">
+                  Venta anterior al uso del sistema — <strong>no descontar del inventario actual</strong> ni
+                  registrar costo/salida en el kardex (el stock de hoy ya refleja esta venta).
+                </span>
+              </label>
+            </>
           )}
         </div>
 

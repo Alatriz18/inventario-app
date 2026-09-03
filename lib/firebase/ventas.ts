@@ -22,28 +22,34 @@ export async function createVenta(
   usuarioId: string,
   usuarioNombre: string
 ): Promise<string> {
+  const afectaInventario = venta.afectaInventario !== false;
+
   return await runTransaction(db, async (tx) => {
 
-    // 1. Validar stock
+    // 1. Validar stock (solo si esta venta debe descontar inventario)
     const stockPrevio = new Map<string, number>();
-    for (const item of venta.items) {
-      const prodRef  = doc(db, 'productos', item.productoId);
-      const prodSnap = await tx.get(prodRef);
-      if (!prodSnap.exists()) throw new Error(`Producto "${item.nombre}" no encontrado`);
-      const stock = prodSnap.data().stockActual ?? 0;
-      if (stock < item.cantidad) {
-        throw new Error(`Stock insuficiente para "${item.nombre}" (disponible: ${stock})`);
+    if (afectaInventario) {
+      for (const item of venta.items) {
+        const prodRef  = doc(db, 'productos', item.productoId);
+        const prodSnap = await tx.get(prodRef);
+        if (!prodSnap.exists()) throw new Error(`Producto "${item.nombre}" no encontrado`);
+        const stock = prodSnap.data().stockActual ?? 0;
+        if (stock < item.cantidad) {
+          throw new Error(`Stock insuficiente para "${item.nombre}" (disponible: ${stock})`);
+        }
+        stockPrevio.set(item.productoId, stock);
       }
-      stockPrevio.set(item.productoId, stock);
     }
 
     // 2. Reducir stock
-    for (const item of venta.items) {
-      const anterior = stockPrevio.get(item.productoId) ?? 0;
-      tx.update(doc(db, 'productos', item.productoId), {
-        stockActual: anterior - item.cantidad,
-        updatedAt:   serverTimestamp(),
-      });
+    if (afectaInventario) {
+      for (const item of venta.items) {
+        const anterior = stockPrevio.get(item.productoId) ?? 0;
+        tx.update(doc(db, 'productos', item.productoId), {
+          stockActual: anterior - item.cantidad,
+          updatedAt:   serverTimestamp(),
+        });
+      }
     }
 
     // 3. Crear venta
@@ -60,6 +66,7 @@ export async function createVenta(
       gananciaTotal:         venta.gananciaTotal,
       metodoPago:            venta.metodoPago,
       estado:                'completada',
+      afectaInventario,
       usuarioId,
       usuarioNombre,
       createdAt:             serverTimestamp(),
@@ -96,8 +103,8 @@ export async function createVenta(
 
     tx.set(ventaRef, ventaData);
 
-    // 4. Movimientos
-    for (const item of venta.items) {
+    // 4. Movimientos (kardex) — se omiten en ventas históricas que no afectan inventario
+    if (afectaInventario) for (const item of venta.items) {
       const anterior = stockPrevio.get(item.productoId) ?? 0;
       tx.set(doc(collection(db, 'movimientos')), {
         tipo:           'salida',

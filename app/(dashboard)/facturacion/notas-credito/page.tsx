@@ -76,6 +76,20 @@ export default function NotasCreditoPage() {
   const [loadingVenta,  setLoadingVenta]  = useState(false);
   const [saving,        setSaving]        = useState(false);
 
+  // Registro histórico: NC ya emitida y autorizada por el SRI en el pasado,
+  // que solo se quiere dejar asentada en el sistema (sin volver a enviarla al SRI).
+  const [esHistoricaNC,       setEsHistoricaNC]       = useState(false);
+  const [histCliente,         setHistCliente]         = useState('');
+  const [histClienteIdent,    setHistClienteIdent]    = useState('');
+  const [histNumFacturaOrigen,setHistNumFacturaOrigen]= useState('');
+  const [histFechaOrigen,     setHistFechaOrigen]     = useState('');
+  const [histFechaEmision,    setHistFechaEmision]    = useState('');
+  const [histSecuencial,      setHistSecuencial]      = useState('');
+  const [histClaveAcceso,     setHistClaveAcceso]     = useState('');
+  const [histNumAutorizacion, setHistNumAutorizacion] = useState('');
+  const [histSubtotal,        setHistSubtotal]        = useState(0);
+  const [histIva,             setHistIva]             = useState(0);
+
   useEffect(() => {
     const u1 = subscribeToNotasCredito(d => { setNotas(d); setLoading(false); });
     const u2 = subscribeToComprobantes(setComprobantes);
@@ -315,6 +329,84 @@ export default function NotasCreditoPage() {
     setMotivo('devolucion');
     setDescripMotivo('');
     setItemsNC([]);
+    setEsHistoricaNC(false);
+    setHistCliente('');
+    setHistClienteIdent('');
+    setHistNumFacturaOrigen('');
+    setHistFechaOrigen('');
+    setHistFechaEmision('');
+    setHistSecuencial('');
+    setHistClaveAcceso('');
+    setHistNumAutorizacion('');
+    setHistSubtotal(0);
+    setHistIva(0);
+  };
+
+  // NC ya autorizada por el SRI en el pasado — solo se registra en el sistema,
+  // no se genera XML ni se envía al webservice del SRI.
+  const handleRegistrarHistorica = async () => {
+    if (!user) return;
+    if (!histCliente.trim() || !histClienteIdent.trim()) { toast.error('Ingresa el cliente'); return; }
+    if (!histFechaEmision) { toast.error('Ingresa la fecha de emisión de la NC'); return; }
+    if (!histSecuencial.trim()) { toast.error('Ingresa el número de la NC'); return; }
+    if (!descripMotivo.trim()) { toast.error('Ingresa la descripción del motivo'); return; }
+    const total = histSubtotal + histIva;
+    if (total <= 0) { toast.error('El monto de la NC no puede ser $0.00'); return; }
+
+    setSaving(true);
+    try {
+      const fechaEmision = new Date(histFechaEmision + 'T12:00:00');
+      const fechaOrigen  = histFechaOrigen ? new Date(histFechaOrigen + 'T12:00:00') : fechaEmision;
+
+      const ncData: Omit<NotaCredito, 'id' | 'createdAt'> = {
+        comprobanteOrigenId:     '',
+        numeroComprobanteOrigen: histNumFacturaOrigen.trim(),
+        fechaEmisionOrigen:      fechaOrigen,
+        clienteId:               '',
+        clienteNombre:           histCliente.trim(),
+        clienteIdentificacion:   histClienteIdent.trim(),
+        tipo:                    'nota_credito',
+        secuencial:              histSecuencial.trim(),
+        claveAcceso:             histClaveAcceso.trim(),
+        numeroAutorizacion:      histNumAutorizacion.trim() || undefined,
+        fechaAutorizacion:       fechaEmision,
+        estado:                  'autorizada',
+        motivo,
+        descripcionMotivo:       descripMotivo,
+        fechaEmision,
+        items:                   [],
+        subtotal:                histSubtotal,
+        iva:                     histIva,
+        total,
+        usuarioId:               user.uid,
+        usuarioNombre:           user.nombre ?? user.email ?? 'Usuario',
+      };
+      const ncId = await createNotaCredito(ncData);
+
+      const asientoId = await crearAsientoNotaCredito({
+        notaCreditoId: ncId,
+        fecha:         fechaEmision,
+        clienteNombre: histCliente.trim(),
+        tieneIVA:      histIva > 0,
+        subtotal:      histSubtotal,
+        iva:           histIva,
+        total,
+        usuarioId:     user.uid,
+        usuarioNombre: user.nombre ?? user.email ?? 'Usuario',
+      });
+
+      if (!asientoId) {
+        toast.warning('La NC quedó registrada, pero el asiento contable NO se pudo generar. Revísala en Contabilidad → Libro Diario.', { duration: 12000 });
+      } else {
+        toast.success(`NC ${histSecuencial} registrada en el sistema`);
+      }
+      setDialogOpen(false);
+      resetDialog();
+    } catch (e: any) {
+      toast.error(e.message ?? 'Error al registrar la NC');
+    } finally {
+      setSaving(false);
+    }
   };
 
   const handleEmitir = async () => {
@@ -626,35 +718,94 @@ export default function NotasCreditoPage() {
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
         <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle>Emitir Nota de Crédito</DialogTitle>
+            <DialogTitle>{esHistoricaNC ? 'Registrar Nota de Crédito ya emitida' : 'Emitir Nota de Crédito'}</DialogTitle>
           </DialogHeader>
           <div className="space-y-4">
 
-            {/* Factura origen */}
-            <div>
-              <Label>Factura origen (autorizada) *</Label>
-              <Select value={compSel} onValueChange={handleSelectComp}>
-                <SelectTrigger className="mt-1">
-                  <SelectValue placeholder="Seleccionar factura…" />
-                </SelectTrigger>
-                <SelectContent>
-                  {compAutorizados.map(c => (
-                    <SelectItem key={c.id} value={c.id}>
-                      {c.serie}-{c.secuencial} — {c.clienteNombre} —{' '}
-                      {format((c.fechaEmision as any)?.toDate?.() ?? new Date(c.fechaEmision), 'dd/MM/yyyy')}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
+            <label className="flex items-start gap-2 bg-slate-50 border rounded-lg px-3 py-2 cursor-pointer">
+              <input type="checkbox" checked={esHistoricaNC}
+                onChange={e => { setEsHistoricaNC(e.target.checked); setCompSel(''); setItemsNC([]); }}
+                className="mt-0.5" />
+              <span className="text-xs text-slate-600">
+                📂 <strong>Ya fue emitida y autorizada por el SRI</strong> (de antes de usar el sistema) —
+                solo quiero registrarla en contabilidad, sin volver a enviarla al SRI.
+              </span>
+            </label>
 
-            {/* Info cliente */}
-            {compSelObj && (
-              <div className="bg-blue-50 rounded-lg px-3 py-2 text-xs text-blue-700 flex gap-4">
-                <span><strong>Cliente:</strong> {compSelObj.clienteNombre}</span>
-                <span><strong>ID:</strong> {compSelObj.clienteIdentificacion}</span>
-                <span><strong>Total factura:</strong> {currency(compSelObj.total)}</span>
-              </div>
+            {esHistoricaNC ? (
+              <>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div>
+                    <Label>Cliente *</Label>
+                    <Input value={histCliente} onChange={e => setHistCliente(e.target.value)}
+                      placeholder="Nombre del cliente" className="mt-1" />
+                  </div>
+                  <div>
+                    <Label>Identificación *</Label>
+                    <Input value={histClienteIdent} onChange={e => setHistClienteIdent(e.target.value)}
+                      placeholder="RUC / cédula" className="mt-1" />
+                  </div>
+                  <div>
+                    <Label>N° factura origen</Label>
+                    <Input value={histNumFacturaOrigen} onChange={e => setHistNumFacturaOrigen(e.target.value)}
+                      placeholder="001-001-000000123" className="mt-1" />
+                  </div>
+                  <div>
+                    <Label>Fecha factura origen</Label>
+                    <Input type="date" value={histFechaOrigen} onChange={e => setHistFechaOrigen(e.target.value)}
+                      max={new Date().toISOString().split('T')[0]} className="mt-1" />
+                  </div>
+                  <div>
+                    <Label>Fecha de emisión de la NC *</Label>
+                    <Input type="date" value={histFechaEmision} onChange={e => setHistFechaEmision(e.target.value)}
+                      max={new Date().toISOString().split('T')[0]} className="mt-1" />
+                  </div>
+                  <div>
+                    <Label>N° de la NC *</Label>
+                    <Input value={histSecuencial} onChange={e => setHistSecuencial(e.target.value)}
+                      placeholder="001-020-000000005" className="mt-1" />
+                  </div>
+                  <div>
+                    <Label>Clave de acceso (opcional)</Label>
+                    <Input value={histClaveAcceso} onChange={e => setHistClaveAcceso(e.target.value)}
+                      placeholder="49 dígitos" className="mt-1 font-mono text-xs" />
+                  </div>
+                  <div>
+                    <Label>N° de autorización (opcional)</Label>
+                    <Input value={histNumAutorizacion} onChange={e => setHistNumAutorizacion(e.target.value)}
+                      className="mt-1 font-mono text-xs" />
+                  </div>
+                </div>
+              </>
+            ) : (
+              <>
+                {/* Factura origen */}
+                <div>
+                  <Label>Factura origen (autorizada) *</Label>
+                  <Select value={compSel} onValueChange={handleSelectComp}>
+                    <SelectTrigger className="mt-1">
+                      <SelectValue placeholder="Seleccionar factura…" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {compAutorizados.map(c => (
+                        <SelectItem key={c.id} value={c.id}>
+                          {c.serie}-{c.secuencial} — {c.clienteNombre} —{' '}
+                          {format((c.fechaEmision as any)?.toDate?.() ?? new Date(c.fechaEmision), 'dd/MM/yyyy')}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                {/* Info cliente */}
+                {compSelObj && (
+                  <div className="bg-blue-50 rounded-lg px-3 py-2 text-xs text-blue-700 flex gap-4">
+                    <span><strong>Cliente:</strong> {compSelObj.clienteNombre}</span>
+                    <span><strong>ID:</strong> {compSelObj.clienteIdentificacion}</span>
+                    <span><strong>Total factura:</strong> {currency(compSelObj.total)}</span>
+                  </div>
+                )}
+              </>
             )}
 
             {/* Motivo */}
@@ -678,8 +829,30 @@ export default function NotasCreditoPage() {
               </div>
             </div>
 
+            {/* Montos (registro histórico) */}
+            {esHistoricaNC && (
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <Label>Subtotal sin IVA *</Label>
+                  <Input type="number" min="0" step="0.01" value={histSubtotal}
+                    onChange={e => {
+                      const v = Number(e.target.value) || 0;
+                      setHistSubtotal(v);
+                      setHistIva(parseFloat((v * 0.15).toFixed(2)));
+                    }}
+                    className="mt-1" />
+                </div>
+                <div>
+                  <Label>IVA</Label>
+                  <Input type="number" min="0" step="0.01" value={histIva}
+                    onChange={e => setHistIva(Number(e.target.value) || 0)}
+                    className="mt-1" />
+                </div>
+              </div>
+            )}
+
             {/* Ítems */}
-            {loadingVenta ? (
+            {esHistoricaNC ? null : loadingVenta ? (
               <div className="text-sm text-slate-400 py-4 text-center">Cargando ítems de la factura...</div>
             ) : itemsNC.length > 0 && (
               <div>
@@ -748,7 +921,14 @@ export default function NotasCreditoPage() {
             )}
 
             {/* Totales */}
-            {itemsNC.length > 0 && (
+            {esHistoricaNC ? (
+              <div className="bg-slate-50 rounded-lg p-3 space-y-1 text-sm">
+                <div className="flex justify-between font-bold text-base">
+                  <span>Total NC</span>
+                  <span className="text-red-600">{currency(histSubtotal + histIva)}</span>
+                </div>
+              </div>
+            ) : itemsNC.length > 0 && (
               <div className="bg-slate-50 rounded-lg p-3 space-y-1 text-sm">
                 <div className="flex justify-between text-slate-500">
                   <span>Subtotal sin IVA</span>
@@ -768,10 +948,17 @@ export default function NotasCreditoPage() {
 
           <DialogFooter>
             <Button variant="outline" onClick={() => setDialogOpen(false)}>Cancelar</Button>
-            <Button onClick={handleEmitir} disabled={saving || totales.total <= 0}>
-              <Send className="mr-2 h-4 w-4" />
-              {saving ? 'Enviando…' : 'Emitir y enviar al SRI'}
-            </Button>
+            {esHistoricaNC ? (
+              <Button onClick={handleRegistrarHistorica} disabled={saving || (histSubtotal + histIva) <= 0}>
+                <Send className="mr-2 h-4 w-4" />
+                {saving ? 'Registrando…' : 'Registrar NC'}
+              </Button>
+            ) : (
+              <Button onClick={handleEmitir} disabled={saving || totales.total <= 0}>
+                <Send className="mr-2 h-4 w-4" />
+                {saving ? 'Enviando…' : 'Emitir y enviar al SRI'}
+              </Button>
+            )}
           </DialogFooter>
         </DialogContent>
       </Dialog>

@@ -25,7 +25,8 @@ import { crearAsientoVenta } from '@/lib/contabilidad/motor-asientos';
 import { Producto, Cliente, MetodoPago, ItemVenta } from '@/types';
 import { subscribeToProductos } from '@/lib/firebase/productos';
 import { subscribeToClientes }  from '@/lib/firebase/clientes';
-import { createVenta, getVentaById } from '@/lib/firebase/ventas';
+import { createVenta, getVentaById, vincularComprobante } from '@/lib/firebase/ventas';
+import { createComprobante }    from '@/lib/firebase/comprobantes';
 import { getConfigSRI }         from '@/lib/firebase/config-sri';
 import { descargarTicket }      from '@/lib/pdf/ticket-venta';
 import { tieneAccesoAccion }    from '@/lib/permisos';
@@ -79,6 +80,10 @@ export default function POSPage() {
   const [quickCliente,   setQuickCliente]   = useState(false); // ← dentro del componente
   const [fechaVenta,     setFechaVenta]     = useState(new Date().toISOString().split('T')[0]);
   const [ventaHistorica, setVentaHistorica] = useState(false);
+  const [histTipoComp,   setHistTipoComp]   = useState<'factura' | 'nota_venta'>('factura');
+  const [histNumComp,    setHistNumComp]    = useState('');
+  const [histClaveAcceso,setHistClaveAcceso]= useState('');
+  const [histNumAutorizacion, setHistNumAutorizacion] = useState('');
   const [activeTab,      setActiveTab]      = useState<'productos' | 'cobro'>('productos');
 
   useEffect(() => {
@@ -271,6 +276,40 @@ export default function POSPage() {
       const baseTotal = total / 1.15;
       const ivaTotal  = total - baseTotal;
 
+      // Si la venta histórica ya tenía comprobante electrónico autorizado,
+      // se registra también para que aparezca en Reportes → Facturas Emitidas.
+      if (esHistorica && histNumComp.trim()) {
+        try {
+          const parts = histNumComp.trim().split('-');
+          const serie = parts.length >= 3 ? `${parts[0]}-${parts[1]}` : (parts[0] ?? '');
+          const secuencial = parts.length >= 3 ? parts[2] : (parts[1] ?? histNumComp.trim());
+          const comprobanteId = await createComprobante({
+            tipo:                  histTipoComp,
+            ventaId,
+            claveAcceso:            histClaveAcceso.trim(),
+            secuencial,
+            serie,
+            fechaEmision:           fechaSeleccionada,
+            clienteNombre:          cliente.nombre,
+            clienteIdentificacion:  cliente.identificacion,
+            subtotal:               parseFloat(baseTotal.toFixed(2)),
+            iva:                    parseFloat(ivaTotal.toFixed(2)),
+            total,
+            estado:                 'autorizado',
+            numeroAutorizacion:     histNumAutorizacion.trim() || undefined,
+            fechaAutorizacion:      fechaSeleccionada.toISOString(),
+            emailEnviado:           false,
+            mensajesSRI:            [],
+            usuarioId:              user.uid,
+            usuarioNombre:          user.nombre,
+            createdAt:              new Date(),
+          });
+          await vincularComprobante(ventaId, comprobanteId);
+        } catch {
+          toast.warning('La venta se registró, pero no se pudo guardar el comprobante ingresado.');
+        }
+      }
+
       crearAsientoVenta({
         ventaId,
         fecha:         fechaSeleccionada,
@@ -304,6 +343,9 @@ export default function POSPage() {
       setDescuento(0);
       setMontoPagado('');
       setMetodoPago('deposito');
+      setHistNumComp('');
+      setHistClaveAcceso('');
+      setHistNumAutorizacion('');
     } catch (err: any) {
       toast.error(err.message ?? 'Error al registrar la venta');
     } finally {
@@ -605,6 +647,28 @@ export default function POSPage() {
                   inventario ni kardex, y al guardar no pregunta por comprobante SRI.
                 </span>
               </label>
+
+              {ventaHistorica && (
+                <div className="space-y-2 pl-6 pt-1 border-t mt-2">
+                  <p className="text-[11px] text-slate-400">
+                    ¿Ya tenías esta venta facturada electrónicamente? Ingresa sus datos para que aparezca
+                    autorizada en Reportes → Facturas Emitidas. Si no, déjalo en blanco.
+                  </p>
+                  <Select value={histTipoComp} onValueChange={(v: any) => setHistTipoComp(v)}>
+                    <SelectTrigger className="h-8 text-xs"><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="factura">Factura</SelectItem>
+                      <SelectItem value="nota_venta">Nota de Venta</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  <Input value={histNumComp} onChange={e => setHistNumComp(e.target.value)}
+                    placeholder="N° comprobante — 001-001-000000123" className="h-8 text-xs" />
+                  <Input value={histClaveAcceso} onChange={e => setHistClaveAcceso(e.target.value)}
+                    placeholder="Clave de acceso (opcional, 49 dígitos)" className="h-8 text-xs font-mono" />
+                  <Input value={histNumAutorizacion} onChange={e => setHistNumAutorizacion(e.target.value)}
+                    placeholder="N° de autorización (opcional)" className="h-8 text-xs font-mono" />
+                </div>
+              )}
             </>
           )}
         </div>

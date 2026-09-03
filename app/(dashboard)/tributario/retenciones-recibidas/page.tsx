@@ -151,6 +151,8 @@ export default function RetencionesRecibidasPage() {
         await import('@/lib/firebase/retenciones-recibidas').then(m =>
           m.updateRetencionRecibida(id, { asientoId })
         );
+      } else {
+        toast.warning('La retención quedó registrada, pero el asiento contable NO se pudo generar. Revísala en Contabilidad → Libro Diario.', { duration: 12000 });
       }
 
       toast.success('Retención recibida registrada');

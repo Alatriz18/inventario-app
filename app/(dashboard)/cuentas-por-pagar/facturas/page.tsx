@@ -397,13 +397,13 @@ export default function FacturasProveedorPage() {
           subtotal: d.subtotal, iva: d.iva, total: d.total,
           xmlRaw: xml, usuarioId: user.uid, usuarioNombre: user.nombre,
         });
-        await crearAsientoNotaCreditoRecibida({
+        const asientoNcId = await crearAsientoNotaCreditoRecibida({
           docId, fecha: parseFecha(d.fechaEmision), proveedorNombre: d.razonSocial,
           subtotal: d.subtotal, iva: d.iva, total: d.total,
           usuarioId: user.uid, usuarioNombre: user.nombre,
         });
         if (d.claveAcceso) existentes.add(d.claveAcceso);
-        return 'ok';
+        return asientoNcId ? 'ok' : 'ok_sin_asiento';
       }
 
       // ── NOTA DE DÉBITO recibida → aumenta CxP ──
@@ -420,13 +420,13 @@ export default function FacturasProveedorPage() {
           subtotal: d.subtotal, iva: d.iva, total: d.total,
           xmlRaw: xml, usuarioId: user.uid, usuarioNombre: user.nombre,
         });
-        await crearAsientoNotaDebitoRecibida({
+        const asientoNdId = await crearAsientoNotaDebitoRecibida({
           docId, fecha: parseFecha(d.fechaEmision), proveedorNombre: d.razonSocial,
           subtotal: d.subtotal, iva: d.iva, total: d.total,
           usuarioId: user.uid, usuarioNombre: user.nombre,
         });
         if (d.claveAcceso) existentes.add(d.claveAcceso);
-        return 'ok';
+        return asientoNdId ? 'ok' : 'ok_sin_asiento';
       }
 
       // ── RETENCIÓN recibida (un cliente nos retuvo) ──
@@ -447,13 +447,13 @@ export default function FacturasProveedorPage() {
           totalRetenido: d.totalRetenido, retFuente: d.retFuente, retIVA: d.retIVA,
           usuarioId: user.uid, usuarioNombre: user.nombre,
         });
-        await crearAsientoRetencionRecibida({
+        const asientoRetId = await crearAsientoRetencionRecibida({
           retencionId: retId, fecha: parseFecha(d.fechaEmision), clienteNombre: d.razonSocial,
           retFuente: d.retFuente, retIVA: d.retIVA, totalRetenido: d.totalRetenido,
           usuarioId: user.uid, usuarioNombre: user.nombre,
         });
         if (d.claveAcceso) existentes.add(d.claveAcceso);
-        return 'ok';
+        return asientoRetId ? 'ok' : 'ok_sin_asiento';
       }
 
       return 'omitido'; // liquidación / desconocido

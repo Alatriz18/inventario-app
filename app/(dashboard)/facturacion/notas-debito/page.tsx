@@ -49,6 +49,17 @@ export default function NotasDebitoPage() {
   ]);
   const [saving,       setSaving]       = useState(false);
 
+  // Registro histórico: ND ya emitida y autorizada por el SRI en el pasado.
+  const [esHistoricaND,       setEsHistoricaND]       = useState(false);
+  const [histCliente,         setHistCliente]         = useState('');
+  const [histClienteIdent,    setHistClienteIdent]    = useState('');
+  const [histNumFacturaOrigen,setHistNumFacturaOrigen]= useState('');
+  const [histFechaOrigen,     setHistFechaOrigen]     = useState('');
+  const [histFechaEmision,    setHistFechaEmision]    = useState('');
+  const [histSecuencial,      setHistSecuencial]      = useState('');
+  const [histClaveAcceso,     setHistClaveAcceso]     = useState('');
+  const [histNumAutorizacion, setHistNumAutorizacion] = useState('');
+
   useEffect(() => {
     const u1 = subscribeToNotasDebito(d => { setNotas(d); setLoading(false); });
     const u2 = subscribeToComprobantes(setComprobantes);
@@ -230,6 +241,86 @@ export default function NotasDebitoPage() {
     }
   };
 
+  const resetHistorico = () => {
+    setEsHistoricaND(false);
+    setHistCliente(''); setHistClienteIdent(''); setHistNumFacturaOrigen('');
+    setHistFechaOrigen(''); setHistFechaEmision(''); setHistSecuencial('');
+    setHistClaveAcceso(''); setHistNumAutorizacion('');
+  };
+
+  // ND ya autorizada por el SRI en el pasado — solo se registra en el sistema.
+  const handleRegistrarHistorica = async () => {
+    if (!user) return;
+    if (!histCliente.trim() || !histClienteIdent.trim()) { toast.error('Ingresa el cliente'); return; }
+    if (!histFechaEmision) { toast.error('Ingresa la fecha de emisión de la ND'); return; }
+    if (!histSecuencial.trim()) { toast.error('Ingresa el número de la ND'); return; }
+    if (razones.some(r => !r.descripcion || !r.valor)) {
+      toast.error('Completa todas las razones con descripción y valor');
+      return;
+    }
+    const iva = totalND * 0.15;
+    const total = totalND + iva;
+    if (total <= 0) { toast.error('El monto de la ND no puede ser $0.00'); return; }
+
+    setSaving(true);
+    try {
+      const fechaEmision = new Date(histFechaEmision + 'T12:00:00');
+      const fechaOrigen  = histFechaOrigen ? new Date(histFechaOrigen + 'T12:00:00') : fechaEmision;
+      const razonesNum: RazonNotaDebito[] = razones.map(r => ({
+        descripcion: r.descripcion,
+        valor:       parseFloat(r.valor) || 0,
+      }));
+
+      const ndId = await createNotaDebito({
+        comprobanteOrigenId:     '',
+        numeroComprobanteOrigen: histNumFacturaOrigen.trim(),
+        fechaEmisionOrigen:      fechaOrigen,
+        clienteId:               '',
+        clienteNombre:           histCliente.trim(),
+        clienteIdentificacion:   histClienteIdent.trim(),
+        tipo:                    'nota_debito',
+        secuencial:              histSecuencial.trim(),
+        claveAcceso:             histClaveAcceso.trim(),
+        numeroAutorizacion:      histNumAutorizacion.trim() || undefined,
+        fechaAutorizacion:       fechaEmision,
+        estado:                  'autorizada',
+        fechaEmision,
+        razones:                 razonesNum,
+        subtotal:                totalND,
+        iva,
+        total,
+        usuarioId:               user.uid,
+        usuarioNombre:           user.nombre ?? user.email ?? 'Usuario',
+      });
+
+      const asientoId = await crearAsientoNotaDebito({
+        notaDebitoId:  ndId,
+        fecha:         fechaEmision,
+        clienteNombre: histCliente.trim(),
+        tieneIVA:      iva > 0,
+        subtotal:      totalND,
+        iva,
+        total,
+        usuarioId:     user.uid,
+        usuarioNombre: user.nombre ?? user.email ?? 'Usuario',
+      });
+
+      if (!asientoId) {
+        toast.warning('La ND quedó registrada, pero el asiento contable NO se pudo generar. Revísala en Contabilidad → Libro Diario.', { duration: 12000 });
+      } else {
+        toast.success(`ND ${histSecuencial} registrada en el sistema`);
+      }
+      setDialogOpen(false);
+      setCompSel('');
+      setRazones([{ descripcion: '', valor: '' }]);
+      resetHistorico();
+    } catch (e: any) {
+      toast.error(e.message ?? 'Error al registrar la ND');
+    } finally {
+      setSaving(false);
+    }
+  };
+
   const anularND = async (n: NotaDebito) => {
     if (!user) return;
     if (n.estado === 'anulada') { toast.info('La ND ya está anulada'); return; }
@@ -332,24 +423,79 @@ export default function NotasDebitoPage() {
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
         <DialogContent className="max-w-lg">
           <DialogHeader>
-            <DialogTitle>Emitir Nota de Débito</DialogTitle>
+            <DialogTitle>{esHistoricaND ? 'Registrar Nota de Débito ya emitida' : 'Emitir Nota de Débito'}</DialogTitle>
           </DialogHeader>
           <div className="space-y-4">
-            <div>
-              <Label>Comprobante origen *</Label>
-              <Select value={compSel} onValueChange={setCompSel}>
-                <SelectTrigger className="mt-1">
-                  <SelectValue placeholder="Seleccionar factura…" />
-                </SelectTrigger>
-                <SelectContent>
-                  {compAutorizados.map(c => (
-                    <SelectItem key={c.id} value={c.id}>
-                      {c.secuencial} — {format((c.fechaEmision as any)?.toDate?.() ?? new Date(c.fechaEmision), 'dd/MM/yyyy')}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
+            <label className="flex items-start gap-2 bg-slate-50 border rounded-lg px-3 py-2 cursor-pointer">
+              <input type="checkbox" checked={esHistoricaND}
+                onChange={e => { setEsHistoricaND(e.target.checked); setCompSel(''); }}
+                className="mt-0.5" />
+              <span className="text-xs text-slate-600">
+                📂 <strong>Ya fue emitida y autorizada por el SRI</strong> (de antes de usar el sistema) —
+                solo quiero registrarla en contabilidad, sin volver a enviarla al SRI.
+              </span>
+            </label>
+
+            {esHistoricaND ? (
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <Label>Cliente *</Label>
+                  <Input value={histCliente} onChange={e => setHistCliente(e.target.value)}
+                    placeholder="Nombre del cliente" className="mt-1" />
+                </div>
+                <div>
+                  <Label>Identificación *</Label>
+                  <Input value={histClienteIdent} onChange={e => setHistClienteIdent(e.target.value)}
+                    placeholder="RUC / cédula" className="mt-1" />
+                </div>
+                <div>
+                  <Label>N° factura origen</Label>
+                  <Input value={histNumFacturaOrigen} onChange={e => setHistNumFacturaOrigen(e.target.value)}
+                    placeholder="001-001-000000123" className="mt-1" />
+                </div>
+                <div>
+                  <Label>Fecha factura origen</Label>
+                  <Input type="date" value={histFechaOrigen} onChange={e => setHistFechaOrigen(e.target.value)}
+                    max={new Date().toISOString().split('T')[0]} className="mt-1" />
+                </div>
+                <div>
+                  <Label>Fecha de emisión de la ND *</Label>
+                  <Input type="date" value={histFechaEmision} onChange={e => setHistFechaEmision(e.target.value)}
+                    max={new Date().toISOString().split('T')[0]} className="mt-1" />
+                </div>
+                <div>
+                  <Label>N° de la ND *</Label>
+                  <Input value={histSecuencial} onChange={e => setHistSecuencial(e.target.value)}
+                    placeholder="001-020-000000005" className="mt-1" />
+                </div>
+                <div>
+                  <Label>Clave de acceso (opcional)</Label>
+                  <Input value={histClaveAcceso} onChange={e => setHistClaveAcceso(e.target.value)}
+                    placeholder="49 dígitos" className="mt-1 font-mono text-xs" />
+                </div>
+                <div>
+                  <Label>N° de autorización (opcional)</Label>
+                  <Input value={histNumAutorizacion} onChange={e => setHistNumAutorizacion(e.target.value)}
+                    className="mt-1 font-mono text-xs" />
+                </div>
+              </div>
+            ) : (
+              <div>
+                <Label>Comprobante origen *</Label>
+                <Select value={compSel} onValueChange={setCompSel}>
+                  <SelectTrigger className="mt-1">
+                    <SelectValue placeholder="Seleccionar factura…" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {compAutorizados.map(c => (
+                      <SelectItem key={c.id} value={c.id}>
+                        {c.secuencial} — {format((c.fechaEmision as any)?.toDate?.() ?? new Date(c.fechaEmision), 'dd/MM/yyyy')}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
 
             <div className="space-y-2">
               <div className="flex items-center justify-between">
@@ -386,10 +532,17 @@ export default function NotasDebitoPage() {
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setDialogOpen(false)}>Cancelar</Button>
-            <Button onClick={handleEmitir} disabled={saving}>
-              <Send className="mr-2 h-4 w-4" />
-              {saving ? 'Enviando…' : 'Emitir y enviar al SRI'}
-            </Button>
+            {esHistoricaND ? (
+              <Button onClick={handleRegistrarHistorica} disabled={saving}>
+                <Send className="mr-2 h-4 w-4" />
+                {saving ? 'Registrando…' : 'Registrar ND'}
+              </Button>
+            ) : (
+              <Button onClick={handleEmitir} disabled={saving}>
+                <Send className="mr-2 h-4 w-4" />
+                {saving ? 'Enviando…' : 'Emitir y enviar al SRI'}
+              </Button>
+            )}
           </DialogFooter>
         </DialogContent>
       </Dialog>

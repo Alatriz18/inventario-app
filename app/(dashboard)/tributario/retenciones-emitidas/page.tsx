@@ -58,6 +58,17 @@ export default function RetencionesEmitidasPage() {
   const [lineas,       setLineas]       = useState<LineaForm[]>([{ tipo: 'fuente_ir', codigoId: '', baseImponible: '' }]);
   const [saving,       setSaving]       = useState(false);
 
+  // Registro histórico: retención ya emitida y autorizada por el SRI en el pasado.
+  const [esHistoricaRet,      setEsHistoricaRet]      = useState(false);
+  const [histProveedor,       setHistProveedor]       = useState('');
+  const [histProveedorRuc,    setHistProveedorRuc]    = useState('');
+  const [histNumFactura,      setHistNumFactura]      = useState('');
+  const [histFechaFactura,    setHistFechaFactura]    = useState('');
+  const [histFechaEmision,    setHistFechaEmision]    = useState('');
+  const [histSecuencial,      setHistSecuencial]      = useState('');
+  const [histClaveAcceso,     setHistClaveAcceso]     = useState('');
+  const [histNumAutorizacion, setHistNumAutorizacion] = useState('');
+
   useEffect(() => {
     const u1 = subscribeToRetencionesEmitidas(d => { setRetenciones(d); setLoading(false); });
     const u2 = subscribeToFacturasProveedor(setFacturas);
@@ -243,7 +254,7 @@ export default function RetencionesEmitidasPage() {
 
       // Asiento contable — solo si el SRI la autorizó
       if (estado === 'autorizado') {
-        await crearAsientoRetencionEmitida({
+        const asientoId = await crearAsientoRetencionEmitida({
           retencionId,
           fecha:           fechaEmision,
           proveedorNombre: factura.proveedorNombre,
@@ -253,6 +264,9 @@ export default function RetencionesEmitidasPage() {
           usuarioId:       user.uid,
           usuarioNombre:   user.nombre ?? user.email ?? 'Usuario',
         });
+        if (!asientoId) {
+          toast.warning('La retención se registró, pero el asiento contable NO se pudo generar. Revísala en Contabilidad → Libro Diario.', { duration: 12000 });
+        }
       }
 
       if (estado === 'autorizado') {
@@ -268,6 +282,94 @@ export default function RetencionesEmitidasPage() {
       setLineas([{ tipo: 'fuente_ir', codigoId: '', baseImponible: '' }]);
     } catch (e: any) {
       toast.error(e.message ?? 'Error al emitir retención');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const resetHistorico = () => {
+    setEsHistoricaRet(false);
+    setHistProveedor(''); setHistProveedorRuc(''); setHistNumFactura('');
+    setHistFechaFactura(''); setHistFechaEmision(''); setHistSecuencial('');
+    setHistClaveAcceso(''); setHistNumAutorizacion('');
+  };
+
+  // Retención ya autorizada por el SRI en el pasado — solo se registra en el sistema.
+  const handleRegistrarHistorica = async () => {
+    if (!user) return;
+    if (!histProveedor.trim() || !histProveedorRuc.trim()) { toast.error('Ingresa el proveedor'); return; }
+    if (!histFechaEmision) { toast.error('Ingresa la fecha de emisión de la retención'); return; }
+    if (!histSecuencial.trim()) { toast.error('Ingresa el número de la retención'); return; }
+    if (lineas.some(l => !l.codigoId || !l.baseImponible)) {
+      toast.error('Completa todas las líneas de retención');
+      return;
+    }
+    if (totalRetenido <= 0) { toast.error('El monto retenido no puede ser $0.00'); return; }
+
+    setSaving(true);
+    try {
+      const fechaEmision  = new Date(histFechaEmision + 'T12:00:00');
+      const fechaFactura  = histFechaFactura ? new Date(histFechaFactura + 'T12:00:00') : fechaEmision;
+      const periodoFiscal = `${String(fechaEmision.getMonth()+1).padStart(2,'0')}/${fechaEmision.getFullYear()}`;
+
+      const lineasGuardar = lineas.map(l => {
+        const cfg  = configRet.find(c => c.id === l.codigoId)!;
+        const base = parseFloat(l.baseImponible) || 0;
+        return {
+          id:            `ret-${Date.now()}-${Math.random().toString(36).slice(2,6)}`,
+          tipo:          cfg.tipo,
+          codigo:        cfg.codigo,
+          descripcion:   cfg.descripcion,
+          porcentaje:    cfg.porcentaje,
+          baseImponible: base,
+          valorRetenido: parseFloat((base * cfg.porcentaje / 100).toFixed(2)),
+        };
+      });
+      const retFuente = lineasGuardar.filter(l => l.tipo === 'fuente_ir').reduce((s, l) => s + l.valorRetenido, 0);
+      const retIVAVal  = lineasGuardar.filter(l => l.tipo === 'iva').reduce((s, l) => s + l.valorRetenido, 0);
+
+      const retencionId = await createRetencionEmitida({
+        facturaProveedorId:     '',
+        numeroFacturaProveedor: histNumFactura.trim(),
+        proveedorId:            '',
+        proveedorNombre:        histProveedor.trim(),
+        proveedorRuc:           histProveedorRuc.trim(),
+        fechaFactura,
+        secuencial:             histSecuencial.trim(),
+        claveAcceso:            histClaveAcceso.trim(),
+        numeroAutorizacion:     histNumAutorizacion.trim() || undefined,
+        fechaAutorizacion:      fechaEmision,
+        estado:                 'autorizado',
+        fechaEmision,
+        ejercicioFiscal:        periodoFiscal,
+        lineas:                 lineasGuardar,
+        totalRetenido,
+        usuarioId:              user.uid,
+        usuarioNombre:          user.nombre ?? user.email ?? 'Usuario',
+      });
+
+      const asientoId = await crearAsientoRetencionEmitida({
+        retencionId,
+        fecha:           fechaEmision,
+        proveedorNombre: histProveedor.trim(),
+        totalRetenido,
+        retFuente,
+        retIVA:          retIVAVal,
+        usuarioId:       user.uid,
+        usuarioNombre:   user.nombre ?? user.email ?? 'Usuario',
+      });
+
+      if (!asientoId) {
+        toast.warning('La retención quedó registrada, pero el asiento contable NO se pudo generar. Revísala en Contabilidad → Libro Diario.', { duration: 12000 });
+      } else {
+        toast.success(`Retención ${histSecuencial} registrada en el sistema`);
+      }
+      setDialogOpen(false);
+      setFacturaSel('');
+      setLineas([{ tipo: 'fuente_ir', codigoId: '', baseImponible: '' }]);
+      resetHistorico();
+    } catch (e: any) {
+      toast.error(e.message ?? 'Error al registrar la retención');
     } finally {
       setSaving(false);
     }
@@ -378,30 +480,85 @@ export default function RetencionesEmitidasPage() {
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
         <DialogContent className="max-w-lg">
           <DialogHeader>
-            <DialogTitle>Emitir Comprobante de Retención</DialogTitle>
+            <DialogTitle>{esHistoricaRet ? 'Registrar retención ya emitida' : 'Emitir Comprobante de Retención'}</DialogTitle>
           </DialogHeader>
           <div className="space-y-4">
-            <div>
-              <Label>Factura del proveedor *</Label>
-              <Select value={facturaSel} onValueChange={setFacturaSel}>
-                <SelectTrigger className="mt-1">
-                  <SelectValue placeholder="Seleccionar factura…" />
-                </SelectTrigger>
-                <SelectContent>
-                  {facturasDisponibles.map(f => (
-                    <SelectItem key={f.id} value={f.id}>
-                      {f.numeroFactura} — {f.proveedorNombre} — {currency(f.total)}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-              {facturaSelObj && (
-                <p className="text-xs text-slate-400 mt-1">
-                  Subtotal sin IVA: {currency(facturaSelObj.subtotal12 + facturaSelObj.subtotal0)}
-                  &nbsp;|&nbsp;IVA: {currency(facturaSelObj.iva)}
-                </p>
-              )}
-            </div>
+            <label className="flex items-start gap-2 bg-slate-50 border rounded-lg px-3 py-2 cursor-pointer">
+              <input type="checkbox" checked={esHistoricaRet}
+                onChange={e => { setEsHistoricaRet(e.target.checked); setFacturaSel(''); }}
+                className="mt-0.5" />
+              <span className="text-xs text-slate-600">
+                📂 <strong>Ya fue emitida y autorizada por el SRI</strong> (de antes de usar el sistema) —
+                solo quiero registrarla en contabilidad, sin volver a enviarla al SRI.
+              </span>
+            </label>
+
+            {esHistoricaRet ? (
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <Label>Proveedor *</Label>
+                  <Input value={histProveedor} onChange={e => setHistProveedor(e.target.value)}
+                    placeholder="Nombre del proveedor" className="mt-1" />
+                </div>
+                <div>
+                  <Label>RUC proveedor *</Label>
+                  <Input value={histProveedorRuc} onChange={e => setHistProveedorRuc(e.target.value)}
+                    className="mt-1" />
+                </div>
+                <div>
+                  <Label>N° factura del proveedor</Label>
+                  <Input value={histNumFactura} onChange={e => setHistNumFactura(e.target.value)}
+                    placeholder="001-001-000000123" className="mt-1" />
+                </div>
+                <div>
+                  <Label>Fecha factura del proveedor</Label>
+                  <Input type="date" value={histFechaFactura} onChange={e => setHistFechaFactura(e.target.value)}
+                    max={new Date().toISOString().split('T')[0]} className="mt-1" />
+                </div>
+                <div>
+                  <Label>Fecha de emisión de la retención *</Label>
+                  <Input type="date" value={histFechaEmision} onChange={e => setHistFechaEmision(e.target.value)}
+                    max={new Date().toISOString().split('T')[0]} className="mt-1" />
+                </div>
+                <div>
+                  <Label>N° de la retención *</Label>
+                  <Input value={histSecuencial} onChange={e => setHistSecuencial(e.target.value)}
+                    placeholder="001-020-000000005" className="mt-1" />
+                </div>
+                <div>
+                  <Label>Clave de acceso (opcional)</Label>
+                  <Input value={histClaveAcceso} onChange={e => setHistClaveAcceso(e.target.value)}
+                    placeholder="49 dígitos" className="mt-1 font-mono text-xs" />
+                </div>
+                <div>
+                  <Label>N° de autorización (opcional)</Label>
+                  <Input value={histNumAutorizacion} onChange={e => setHistNumAutorizacion(e.target.value)}
+                    className="mt-1 font-mono text-xs" />
+                </div>
+              </div>
+            ) : (
+              <div>
+                <Label>Factura del proveedor *</Label>
+                <Select value={facturaSel} onValueChange={setFacturaSel}>
+                  <SelectTrigger className="mt-1">
+                    <SelectValue placeholder="Seleccionar factura…" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {facturasDisponibles.map(f => (
+                      <SelectItem key={f.id} value={f.id}>
+                        {f.numeroFactura} — {f.proveedorNombre} — {currency(f.total)}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                {facturaSelObj && (
+                  <p className="text-xs text-slate-400 mt-1">
+                    Subtotal sin IVA: {currency(facturaSelObj.subtotal12 + facturaSelObj.subtotal0)}
+                    &nbsp;|&nbsp;IVA: {currency(facturaSelObj.iva)}
+                  </p>
+                )}
+              </div>
+            )}
 
             <div className="space-y-2">
               <div className="flex items-center justify-between">
@@ -468,10 +625,17 @@ export default function RetencionesEmitidasPage() {
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setDialogOpen(false)}>Cancelar</Button>
-            <Button onClick={handleEmitir} disabled={saving}>
-              <Send className="mr-2 h-4 w-4" />
-              {saving ? 'Enviando…' : 'Emitir y enviar al SRI'}
-            </Button>
+            {esHistoricaRet ? (
+              <Button onClick={handleRegistrarHistorica} disabled={saving}>
+                <Send className="mr-2 h-4 w-4" />
+                {saving ? 'Registrando…' : 'Registrar retención'}
+              </Button>
+            ) : (
+              <Button onClick={handleEmitir} disabled={saving}>
+                <Send className="mr-2 h-4 w-4" />
+                {saving ? 'Enviando…' : 'Emitir y enviar al SRI'}
+              </Button>
+            )}
           </DialogFooter>
         </DialogContent>
       </Dialog>

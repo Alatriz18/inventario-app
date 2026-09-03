@@ -72,6 +72,7 @@ export default function POSPage() {
   const [diasCredito,    setDiasCredito]    = useState(30);
   const [saving,         setSaving]         = useState(false);
   const [successId,      setSuccessId]      = useState<string | null>(null);
+  const [successEsHistorica, setSuccessEsHistorica] = useState(false);
   const [esCxC,          setEsCxC]          = useState(false);
   const [searchCliente,  setSearchCliente]  = useState('');
   const [showClientes,   setShowClientes]   = useState(false);
@@ -258,6 +259,7 @@ export default function POSPage() {
       );
 
       setSuccessId(ventaId);
+      setSuccessEsHistorica(esHistorica);
 
       // ── Motor contable automático ──
       // En ventas históricas (anteriores al inventario actual) no se genera
@@ -599,8 +601,8 @@ export default function POSPage() {
                   className="mt-0.5"
                 />
                 <span className="text-xs text-slate-600">
-                  Venta anterior al uso del sistema — <strong>no descontar del inventario actual</strong> ni
-                  registrar costo/salida en el kardex (el stock de hoy ya refleja esta venta).
+                  🗂️ <strong>Carga de venta antigua</strong> — solo queda en libros contables: no descuenta
+                  inventario ni kardex, y al guardar no pregunta por comprobante SRI.
                 </span>
               </label>
             </>
@@ -729,55 +731,63 @@ export default function POSPage() {
             </div>
 
             <div className="w-full space-y-2">
-              {/* Ticket para impresora Zebra */}
-              <Button
-                variant="outline"
-                className="w-full h-10 text-sm font-semibold gap-2"
-                onClick={async () => {
-                  if (!successId) return;
-                  try {
-                    const [ventaData, config] = await Promise.all([
-                      getVentaById(successId),
-                      getConfigSRI(),
-                    ]);
-                    if (!ventaData) { toast.error('Venta no encontrada'); return; }
-                    descargarTicket({
-                      nombreNegocio: config?.nombreComercial || config?.razonSocial || 'Mi Negocio',
-                      ruc:           config?.ruc || '',
-                      direccion:     config?.direccionMatriz || '',
-                      venta:         ventaData,
-                    });
-                    toast.success('Ticket descargado');
-                  } catch { toast.error('Error al generar ticket'); }
-                }}
-              >
-                <Printer className="h-4 w-4" />
-                Imprimir Ticket (Zebra)
-              </Button>
+              {successEsHistorica ? (
+                <p className="text-xs text-slate-400 text-center">
+                  Venta antigua registrada solo en contabilidad — no requiere ticket ni comprobante SRI.
+                </p>
+              ) : (
+                <>
+                  {/* Ticket para impresora Zebra */}
+                  <Button
+                    variant="outline"
+                    className="w-full h-10 text-sm font-semibold gap-2"
+                    onClick={async () => {
+                      if (!successId) return;
+                      try {
+                        const [ventaData, config] = await Promise.all([
+                          getVentaById(successId),
+                          getConfigSRI(),
+                        ]);
+                        if (!ventaData) { toast.error('Venta no encontrada'); return; }
+                        descargarTicket({
+                          nombreNegocio: config?.nombreComercial || config?.razonSocial || 'Mi Negocio',
+                          ruc:           config?.ruc || '',
+                          direccion:     config?.direccionMatriz || '',
+                          venta:         ventaData,
+                        });
+                        toast.success('Ticket descargado');
+                      } catch { toast.error('Error al generar ticket'); }
+                    }}
+                  >
+                    <Printer className="h-4 w-4" />
+                    Imprimir Ticket (Zebra)
+                  </Button>
 
-              <p className="text-xs text-slate-400 text-center font-medium">¿Emitir comprobante SRI?</p>
-              <div className="grid grid-cols-2 gap-2">
-                <Button
-                  variant="outline"
-                  className="text-xs h-9"
-                  onClick={() => {
-                    router.push(`/facturacion/emitir?ventaId=${successId}&tipo=factura`);
-                    setSuccessId(null);
-                  }}
-                >
-                  📄 Factura
-                </Button>
-                <Button
-                  variant="outline"
-                  className="text-xs h-9"
-                  onClick={() => {
-                    router.push(`/facturacion/emitir?ventaId=${successId}&tipo=nota_venta`);
-                    setSuccessId(null);
-                  }}
-                >
-                  🧾 Nota de Venta
-                </Button>
-              </div>
+                  <p className="text-xs text-slate-400 text-center font-medium">¿Emitir comprobante SRI?</p>
+                  <div className="grid grid-cols-2 gap-2">
+                    <Button
+                      variant="outline"
+                      className="text-xs h-9"
+                      onClick={() => {
+                        router.push(`/facturacion/emitir?ventaId=${successId}&tipo=factura`);
+                        setSuccessId(null);
+                      }}
+                    >
+                      📄 Factura
+                    </Button>
+                    <Button
+                      variant="outline"
+                      className="text-xs h-9"
+                      onClick={() => {
+                        router.push(`/facturacion/emitir?ventaId=${successId}&tipo=nota_venta`);
+                        setSuccessId(null);
+                      }}
+                    >
+                      🧾 Nota de Venta
+                    </Button>
+                  </div>
+                </>
+              )}
               <Button className="w-full" onClick={() => setSuccessId(null)}>
                 Nueva Venta
               </Button>

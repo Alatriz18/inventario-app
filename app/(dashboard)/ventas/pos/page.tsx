@@ -256,7 +256,7 @@ export default function POSPage() {
 
       setSuccessId(ventaId);
 
-      // ── Motor contable automático (background, no bloquea) ──
+      // ── Motor contable automático ──
       const costoVenta = cart.reduce(
         (s, item) => s + item.precioCompraRef * item.cantidad, 0
       );
@@ -275,7 +275,19 @@ export default function POSPage() {
         esCxC:         metodoPago === 'credito',
         usuarioId:     user.uid,
         usuarioNombre: user.nombre,
-      }).catch(() => {});
+      }).then(asientoId => {
+        if (!asientoId) {
+          toast.warning(
+            'La venta se registró, pero el asiento contable NO se pudo generar. Revísala en Contabilidad → Libro Diario.',
+            { duration: 12000 }
+          );
+        }
+      }).catch(() => {
+        toast.warning(
+          'La venta se registró, pero el asiento contable NO se pudo generar. Revísala en Contabilidad → Libro Diario.',
+          { duration: 12000 }
+        );
+      });
 
       setEsCxC(metodoPago === 'credito');
       // Reset

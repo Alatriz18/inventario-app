@@ -44,6 +44,7 @@ const NAV: NavItem[] = [
     children: [
       { label: 'Punto de Venta',  href: '/ventas/pos',       icon: ShoppingCart, modulo: 'pos' },
       { label: 'Historial',       href: '/ventas/historial', icon: Receipt,      modulo: 'historial_ventas' },
+      { label: 'Ventas por Lote', href: '/ventas/historico-lote', icon: FileSpreadsheet, modulo: 'ventas_lote' },
       { label: 'Recibos Internos',href: '/ventas/recibo',    icon: FileText,     modulo: 'recibos' },
       { label: 'Clientes',        href: '/clientes',         icon: Users,        modulo: 'clientes' },
     ],

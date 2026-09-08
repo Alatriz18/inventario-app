@@ -14,7 +14,7 @@ export type Modulo =
   | 'productos'       | 'categorias'     | 'bodegas'
   | 'proveedores'     | 'entradas'       | 'despachos'
   | 'movimientos'     | 'kardex'
-  | 'pos'             | 'historial_ventas' | 'recibos'   | 'clientes'
+  | 'pos'             | 'historial_ventas' | 'recibos'   | 'clientes' | 'ventas_lote'
   | 'facturacion_emitir' | 'facturacion_comprobantes'
   | 'notas_credito'   | 'notas_debito'
   | 'config_sri'
@@ -49,7 +49,7 @@ const PERMISOS_MODULO: Record<UserRole, Modulo[]> = {
     'dashboard',
     'productos', 'categorias', 'bodegas', 'proveedores',
     'entradas', 'despachos', 'movimientos', 'kardex',
-    'pos', 'historial_ventas', 'recibos', 'clientes',
+    'pos', 'historial_ventas', 'recibos', 'clientes', 'ventas_lote',
     'facturacion_emitir', 'facturacion_comprobantes',
     'notas_credito', 'notas_debito', 'config_sri',
     'cxc', 'cxc_cartera',
@@ -83,7 +83,7 @@ const PERMISOS_MODULO: Record<UserRole, Modulo[]> = {
   contador: [
     'dashboard',
     'productos',
-    'historial_ventas',
+    'historial_ventas', 'ventas_lote',
     'facturacion_comprobantes',
     'notas_credito', 'notas_debito',
     'cxc', 'cxc_cartera',
@@ -166,6 +166,7 @@ const RUTA_MODULO: Record<string, Modulo> = {
   '/ventas/pos':                          'pos',
   '/ventas/historial':                    'historial_ventas',
   '/ventas/recibo':                       'recibos',
+  '/ventas/historico-lote':               'ventas_lote',
   '/clientes':                            'clientes',
   '/facturacion/emitir':                  'facturacion_emitir',
   '/facturacion/comprobantes':            'facturacion_comprobantes',

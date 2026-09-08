@@ -200,7 +200,7 @@ export async function anularVenta(
     // manualmente un posible reembolso (el historial de cobros no se borra).
     if (cxcRef && cxcSnap?.exists()) {
       const cxcData = cxcSnap.data();
-      const totalCobrado = (cxcData.cobros ?? []).reduce((s: number, c: any) => s + c.monto, 0);
+      const totalCobrado = (cxcData.cobros ?? []).filter((c: any) => !c.anulado).reduce((s: number, c: any) => s + c.monto, 0);
       if (totalCobrado > 0) {
         advertencia = `Esta venta ya tenía $${totalCobrado.toFixed(2)} cobrado(s) antes de anularse — revisa si corresponde un reembolso al cliente.`;
       }

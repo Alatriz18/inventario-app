@@ -83,6 +83,7 @@ export default function ReporteCobrosPage() {
     for (const cxc of cxcList) {
       if (cxc.estado === 'anulada') continue; // venta/CxC anulada: no cuenta como cobro válido
       for (const c of cxc.cobros ?? []) {
+        if (c.anulado) continue; // cobro anulado individualmente: no cuenta como dinero recibido
         const fecha = toDate(c.fecha);
         if (fecha >= from && fecha <= to) {
           result.push({

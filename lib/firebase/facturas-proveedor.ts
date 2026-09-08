@@ -65,18 +65,20 @@ export async function updateFacturaProveedor(
   await updateDoc(doc(db, COL, id), data);
 }
 
+/** Registra un pago y devuelve su id (para poder vincular luego su asiento contable). */
 export async function registrarPago(
   facturaId: string,
   pago: Omit<PagoFactura, 'id'>
-): Promise<void> {
+): Promise<string> {
+  const pagoId = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
   await runTransaction(db, async (tx) => {
     const ref  = doc(db, COL, facturaId);
     const snap = await tx.get(ref);
     if (!snap.exists()) throw new Error('Factura no encontrada');
 
     const factura = snap.data() as FacturaProveedor;
-    const pagos   = [...(factura.pagos ?? []), { ...pago, id: Date.now().toString() }];
-    const totalPagado  = pagos.reduce((s, p) => s + p.monto, 0);
+    const pagos   = [...(factura.pagos ?? []), { ...pago, id: pagoId }];
+    const totalPagado  = pagos.filter(p => !p.anulado).reduce((s, p) => s + p.monto, 0);
     const saldoPendiente = Math.max(0, factura.total - totalPagado);
 
     let estado: EstadoFacturaProveedor = 'pendiente';
@@ -90,6 +92,51 @@ export async function registrarPago(
 
     tx.update(ref, { pagos, saldoPendiente, estado });
   });
+  return pagoId;
+}
+
+/** Guarda el id del asiento contable generado para un pago específico. */
+export async function vincularAsientoPago(
+  facturaId: string, pagoId: string, asientoId: string
+): Promise<void> {
+  const ref  = doc(db, COL, facturaId);
+  const snap = await getDoc(ref);
+  if (!snap.exists()) return;
+  const factura = snap.data() as FacturaProveedor;
+  const pagos = (factura.pagos ?? []).map(p => p.id === pagoId ? { ...p, asientoId } : p);
+  await updateDoc(ref, { pagos });
+}
+
+/** Anula un pago puntual (no toda la factura): lo marca como anulado y recalcula saldo/estado. */
+export async function anularPago(facturaId: string, pagoId: string): Promise<PagoFactura | null> {
+  let pagoAnulado: PagoFactura | null = null;
+  await runTransaction(db, async (tx) => {
+    const ref  = doc(db, COL, facturaId);
+    const snap = await tx.get(ref);
+    if (!snap.exists()) throw new Error('Factura no encontrada');
+
+    const factura = snap.data() as FacturaProveedor;
+    const pagoExistente = (factura.pagos ?? []).find(p => p.id === pagoId);
+    if (!pagoExistente) throw new Error('Pago no encontrado');
+    if (pagoExistente.anulado) throw new Error('El pago ya estaba anulado');
+    pagoAnulado = pagoExistente;
+
+    const pagos = (factura.pagos ?? []).map(p => p.id === pagoId ? { ...p, anulado: true } : p);
+    const totalPagado    = pagos.filter(p => !p.anulado).reduce((s, p) => s + p.monto, 0);
+    const saldoPendiente = Math.max(0, factura.total - totalPagado);
+
+    let estado: EstadoFacturaProveedor = 'pendiente';
+    if (saldoPendiente === 0 && totalPagado > 0) estado = 'pagada';
+    else if (totalPagado > 0)                    estado = 'parcial';
+    else if (factura.fechaVencimiento) {
+      const venc = (factura.fechaVencimiento as any)?.toDate?.()
+        ?? new Date(factura.fechaVencimiento);
+      if (venc < new Date()) estado = 'vencida';
+    }
+
+    tx.update(ref, { pagos, saldoPendiente, estado });
+  });
+  return pagoAnulado;
 }
 
 // Recalcular estado de facturas vencidas (para ejecutar periódicamente)

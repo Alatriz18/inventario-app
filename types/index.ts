@@ -267,6 +267,8 @@ export interface PagoFactura {
   referencia?: string;
   usuarioId: string;
   usuarioNombre: string;
+  asientoId?: string; // asiento contable propio de este pago (para poder anularlo individualmente)
+  anulado?: boolean;
 }
 
 export interface FacturaProveedor {
@@ -543,6 +545,8 @@ export interface CobroCxC {
   notas?:       string;
   usuarioId:    string;
   usuarioNombre:string;
+  asientoId?:   string; // asiento contable propio de este cobro (para poder anularlo individualmente)
+  anulado?:     boolean;
 }
 
 export interface CuentaCobrar {

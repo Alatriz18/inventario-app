@@ -42,6 +42,8 @@ import {
   createFacturaProveedor,
   updateFacturaProveedor,
   registrarPago,
+  vincularAsientoPago,
+  anularPago,
 } from '@/lib/firebase/facturas-proveedor';
 import { createDocRecibido } from '@/lib/firebase/docs-recibidos';
 import { createRetencionRecibida } from '@/lib/firebase/retenciones-recibidas';
@@ -71,6 +73,7 @@ const facturaSchema = z.object({
 });
 
 const pagoSchema = z.object({
+  fecha:      z.string().min(1, 'Ingresa la fecha del pago'),
   monto:      z.coerce.number().min(0.01, 'El monto debe ser mayor a 0'),
   metodoPago: z.enum(['efectivo', 'tarjeta', 'transferencia']),
   referencia: z.string().optional(),
@@ -197,7 +200,7 @@ export default function FacturasProveedorPage() {
   const facturaForm = useForm<FacturaForm>({ resolver: zodResolver(facturaSchema) as any });
   const pagoForm    = useForm<PagoForm>({
     resolver: zodResolver(pagoSchema) as any,
-    defaultValues: { metodoPago: 'transferencia' },
+    defaultValues: { metodoPago: 'transferencia', fecha: new Date().toISOString().split('T')[0] },
   });
 
   useEffect(() => {
@@ -271,8 +274,9 @@ export default function FacturasProveedorPage() {
     }
     setSaving(true);
     try {
-      await registrarPago(pagoDialog.id, {
-        fecha:         new Date(),
+      const fechaPago = new Date(data.fecha + 'T12:00:00');
+      const pagoId = await registrarPago(pagoDialog.id, {
+        fecha:         fechaPago,
         monto:         data.monto,
         metodoPago:    data.metodoPago,
         ...(data.referencia ? { referencia: data.referencia } : {}),
@@ -280,20 +284,25 @@ export default function FacturasProveedorPage() {
         usuarioNombre: user.nombre,
       });
 
-      toast.success('Pago registrado');
-
-      // ── Motor contable automático (background) ──
-      crearAsientoPago({
+      // ── Motor contable automático ──
+      const asientoId = await crearAsientoPago({
         facturaId:       pagoDialog.id,
-        fecha:           new Date(),
+        pagoId,
+        fecha:           fechaPago,
         proveedorNombre: pagoDialog.proveedorNombre,
         monto:           data.monto,
         usuarioId:       user.uid,
         usuarioNombre:   user.nombre,
-      }).catch(() => {});
+      });
+      if (asientoId) {
+        await vincularAsientoPago(pagoDialog.id, pagoId, asientoId);
+        toast.success('Pago registrado');
+      } else {
+        toast.warning('El pago se registró, pero el asiento contable NO se pudo generar. Revísalo en Contabilidad → Libro Diario.', { duration: 12000 });
+      }
 
       setPagoDialog(null);
-      pagoForm.reset({ metodoPago: 'transferencia' });
+      pagoForm.reset({ metodoPago: 'transferencia', fecha: new Date().toISOString().split('T')[0] });
     } catch (err: any) {
       toast.error(err.message ?? 'Error al registrar pago');
     } finally {
@@ -620,7 +629,10 @@ export default function FacturasProveedorPage() {
   const anularFactura = async (f: FacturaProveedor) => {
     if (!user) return;
     if (f.estado === 'anulada') { toast.info('La factura ya está anulada'); return; }
-    if ((f.pagos?.length ?? 0) > 0) { toast.error('No se puede anular: la factura tiene pagos registrados'); return; }
+    if ((f.pagos?.filter(p => !p.anulado).length ?? 0) > 0) {
+      toast.error('No se puede anular: la factura tiene pagos registrados. Anula primero cada pago desde "Ver detalle" → Historial de pagos.', { duration: 10000 });
+      return;
+    }
     if (!window.confirm(`¿Anular la factura ${f.numeroFactura} de ${f.proveedorNombre}? Se revertirá su asiento de compra.`)) return;
     try {
       // El asiento puede provenir de la importación ('factura_proveedor') o de una entrada ('entrada')
@@ -640,6 +652,29 @@ export default function FacturasProveedorPage() {
       toast.success(rev.ok ? 'Factura anulada y asiento revertido' : `Factura anulada (${rev.advertencia ?? 'sin asiento'})`);
     } catch (e: any) {
       toast.error(e?.message ?? 'Error al anular la factura');
+    }
+  };
+
+  // ── Anular UN pago puntual (abono) sin anular toda la factura ──
+  const handleAnularPago = async (f: FacturaProveedor, pago: FacturaProveedor['pagos'][number]) => {
+    if (!user) return;
+    if (pago.anulado) { toast.info('Este pago ya está anulado'); return; }
+    if (!window.confirm(`¿Anular el pago de ${currency(pago.monto)} del ${formatFecha(pago.fecha)}? El saldo pendiente de la factura aumentará.`)) return;
+    try {
+      await anularPago(f.id, pago.id);
+      if (pago.asientoId) {
+        const rev = await crearAsientoReversion({
+          referenciaId: pago.id, referenciaTipo: 'pago_proveedor',
+          fecha: new Date(), concepto: `Anulación de pago a ${f.proveedorNombre}`,
+          usuarioId: user.uid, usuarioNombre: user.nombre,
+        });
+        toast.success(rev.ok ? 'Pago anulado y asiento revertido' : `Pago anulado (${rev.advertencia ?? 'revisa el asiento manualmente'})`);
+      } else {
+        toast.warning('Pago anulado. Este pago es anterior a esta función — revisa manualmente su asiento en Contabilidad → Libro Diario.', { duration: 10000 });
+      }
+      setDetailDialog(null);
+    } catch (e: any) {
+      toast.error(e?.message ?? 'Error al anular el pago');
     }
   };
 
@@ -682,21 +717,24 @@ export default function FacturasProveedorPage() {
     setProcesandoPago(true);
     const pagos: PagoBancario[] = [];
     let sinDatos = 0;
+    let sinAsiento = 0;
     try {
       for (const f of sel) {
         const prov = proveedores.find(p => p.id === f.proveedorId);
         // 1. Registrar el pago (salda la factura)
-        await registrarPago(f.id, {
+        const pagoId = await registrarPago(f.id, {
           fecha: new Date(), monto: f.saldoPendiente, metodoPago: 'transferencia',
           referencia: `Pago archivo ${BANCOS_PAGO.find(b => b.value === bancoSel)?.label ?? ''}`,
           usuarioId: user.uid, usuarioNombre: user.nombre,
         });
         // 2. Egreso contable (DB CxP / CR Bancos)
-        crearAsientoPago({
-          facturaId: f.id, fecha: new Date(), proveedorNombre: f.proveedorNombre,
+        const asientoId = await crearAsientoPago({
+          facturaId: f.id, pagoId, fecha: new Date(), proveedorNombre: f.proveedorNombre,
           monto: f.saldoPendiente, usaBanco: true,
           usuarioId: user.uid, usuarioNombre: user.nombre,
-        }).catch(() => {});
+        });
+        if (asientoId) await vincularAsientoPago(f.id, pagoId, asientoId);
+        else sinAsiento++;
         // 3. Línea para el archivo del banco
         if (!prov?.numeroCuentaBancaria || !prov?.bancoCodigo) sinDatos++;
         pagos.push({
@@ -717,6 +755,9 @@ export default function FacturasProveedorPage() {
         `${pagos.length} pago(s) registrados, egreso contable creado y archivo generado.` +
         (sinDatos ? ` ⚠ ${sinDatos} sin datos bancarios completos.` : '')
       );
+      if (sinAsiento > 0) {
+        toast.warning(`${sinAsiento} pago(s) se registraron pero NO generaron asiento contable. Revísalos en Libro Diario.`, { duration: 12000 });
+      }
       setPagoBancoOpen(false);
       setSeleccionadas(new Set());
     } catch (e: any) {
@@ -858,7 +899,7 @@ export default function FacturasProveedorPage() {
                         <Button variant="ghost" size="icon" title="Registrar pago"
                           onClick={() => {
                             setPagoDialog(f);
-                            pagoForm.reset({ monto: f.saldoPendiente, metodoPago: 'transferencia' });
+                            pagoForm.reset({ monto: f.saldoPendiente, metodoPago: 'transferencia', fecha: new Date().toISOString().split('T')[0] });
                           }}
                           className="h-8 w-8 text-slate-500 hover:text-green-600">
                           <CreditCard className="h-4 w-4" />
@@ -1013,6 +1054,14 @@ export default function FacturasProveedorPage() {
                 </div>
               </div>
               <div className="space-y-1.5">
+                <Label>Fecha de pago *</Label>
+                <Input type="date" max={new Date().toISOString().split('T')[0]}
+                  {...pagoForm.register('fecha')} />
+                {pagoForm.formState.errors.fecha && (
+                  <p className="text-xs text-red-500">{pagoForm.formState.errors.fecha.message}</p>
+                )}
+              </div>
+              <div className="space-y-1.5">
                 <Label>Monto a pagar *</Label>
                 <div className="relative">
                   <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-sm">$</span>
@@ -1099,14 +1148,23 @@ export default function FacturasProveedorPage() {
                     <p className="text-sm font-semibold text-slate-700 mb-2">Historial de pagos</p>
                     <div className="space-y-2">
                       {detailDialog.pagos.map((p, i) => (
-                        <div key={i} className="flex justify-between items-center text-sm py-1.5 border-b last:border-0">
+                        <div key={i} className={`flex justify-between items-center text-sm py-1.5 border-b last:border-0 ${p.anulado ? 'opacity-50' : ''}`}>
                           <div>
-                            <p className="font-medium">{currency(p.monto)}</p>
+                            <p className={`font-medium ${p.anulado ? 'line-through' : ''}`}>{currency(p.monto)}</p>
                             <p className="text-xs text-slate-400">
                               {p.metodoPago} {p.referencia ? `— ${p.referencia}` : ''}
+                              {p.anulado ? ' — anulado' : ''}
                             </p>
                           </div>
-                          <p className="text-xs text-slate-400">{formatFecha(p.fecha)}</p>
+                          <div className="flex items-center gap-2">
+                            <p className="text-xs text-slate-400">{formatFecha(p.fecha)}</p>
+                            {!p.anulado && (
+                              <Button variant="ghost" size="icon" className="h-7 w-7 text-slate-400 hover:text-red-600"
+                                title="Anular este pago" onClick={() => handleAnularPago(detailDialog, p)}>
+                                <Ban className="h-3.5 w-3.5" />
+                              </Button>
+                            )}
+                          </div>
                         </div>
                       ))}
                     </div>

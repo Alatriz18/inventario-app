@@ -294,6 +294,7 @@ export async function recalcularAsientoCompra(
 
 interface ParamsPago extends ParamsBase {
   facturaId:       string;
+  pagoId?:         string; // id propio del pago, para poder anular ESTE pago sin afectar otros de la misma factura
   fecha:           Date;
   proveedorNombre: string;
   monto:           number;
@@ -325,8 +326,8 @@ export async function crearAsientoPago(p: ParamsPago): Promise<string | null> {
       fecha:          p.fecha,
       concepto:       `Pago a ${p.proveedorNombre}`,
       tipo:           'pago_proveedor',
-      referenciaId:   p.facturaId,
-      referenciaTipo: 'factura_proveedor',
+      referenciaId:   p.pagoId ?? p.facturaId,
+      referenciaTipo: p.pagoId ? 'pago_proveedor' : 'factura_proveedor',
       lineas,
       totalDebe:      lineas.reduce((s, l) => s + l.debe,  0),
       totalHaber:     lineas.reduce((s, l) => s + l.haber, 0),
@@ -369,6 +370,7 @@ export async function recalcularAsientoPago(
 
 interface ParamsCobro extends ParamsBase {
   cxcId:        string;
+  cobroId?:     string; // id propio del cobro, para poder anular ESTE cobro sin afectar otros de la misma CxC
   fecha:        Date;
   clienteNombre:string;
   monto:        number;
@@ -420,8 +422,8 @@ export async function crearAsientoCobro(p: ParamsCobro): Promise<string | null> 
       fecha:          p.fecha,
       concepto:       `${metodoDesc} cobro cliente ${p.clienteNombre}`,
       tipo:           'cobro_cliente',
-      referenciaId:   p.cxcId,
-      referenciaTipo: 'cxc',
+      referenciaId:   p.cobroId ?? p.cxcId,
+      referenciaTipo: p.cobroId ? 'cobro_cliente' : 'cxc',
       lineas,
       totalDebe:      lineas.reduce((s, l) => s + l.debe,  0),
       totalHaber:     lineas.reduce((s, l) => s + l.haber, 0),

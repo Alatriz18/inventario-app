@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useMemo, useRef } from 'react';
 import { format } from 'date-fns';
-import { Plus, Upload, Check, X, Eye, Building2, Receipt } from 'lucide-react';
+import { Plus, Upload, Check, X, Eye, Building2, Receipt, Ban } from 'lucide-react';
 import { toast } from 'sonner';
 
 import PageHeader  from '@/components/shared/PageHeader';
@@ -25,11 +25,11 @@ import {
   subscribeToCuentasBancarias, createCuentaBancaria,
   subscribeToMovimientosBancarios, importarMovimientosBancarios,
   conciliarMovimiento, ignorarMovimiento, revertirConciliacion,
-  registrarMovimientoBancario,
+  registrarMovimientoBancario, anularMovimientoBancario,
 } from '@/lib/firebase/cuentas-bancarias';
 import { subscribeToAsientos } from '@/lib/firebase/asientos';
 import { subscribeToCuentas }  from '@/lib/firebase/plan-cuentas';
-import { crearAsientoMovimientoBancario } from '@/lib/contabilidad/motor-asientos';
+import { crearAsientoMovimientoBancario, crearAsientoReversion } from '@/lib/contabilidad/motor-asientos';
 import { useAuth } from '@/context/AuthContext';
 
 const currency = (v: number) => `$${v.toFixed(2)}`;
@@ -66,7 +66,7 @@ export default function ConciliacionBancariaPage() {
   const [savingMov, setSavingMov] = useState(false);
   const [formMov, setFormMov] = useState({
     fecha: format(new Date(), 'yyyy-MM-dd'),
-    concepto: '', monto: '',
+    concepto: '', monto: '', referencia: '',
     tipo: 'cargo' as 'cargo' | 'abono',
     cuentaContrapartidaCodigo: '',
   });
@@ -94,11 +94,12 @@ export default function ConciliacionBancariaPage() {
     pendientes: movs.filter(m => m.estado === 'no_conciliado'),
     conciliados:movs.filter(m => m.estado === 'conciliado'),
     ignorados:  movs.filter(m => m.estado === 'ignorado'),
+    anulados:   movs.filter(m => m.estado === 'anulado'),
   }), [movs]);
 
   const saldoCalculado = useMemo(() => {
     if (!cuentaSelObj) return 0;
-    const suma = movs.filter(m => m.estado !== 'ignorado').reduce((s, m) => {
+    const suma = movs.filter(m => m.estado !== 'ignorado' && m.estado !== 'anulado').reduce((s, m) => {
       return m.tipo === 'credito' ? s + m.monto : s - m.monto;
     }, cuentaSelObj.saldoInicial);
     return suma;
@@ -193,6 +194,7 @@ export default function ConciliacionBancariaPage() {
         descripcion: formMov.concepto.trim(),
         tipo:   formMov.tipo === 'cargo' ? 'debito' : 'credito',
         monto,
+        ...(formMov.referencia.trim() ? { referencia: formMov.referencia.trim() } : {}),
         estado: 'no_conciliado',
       });
 
@@ -213,11 +215,35 @@ export default function ConciliacionBancariaPage() {
         toast.warning('El movimiento se registró, pero el asiento contable NO se pudo generar. Revísalo en Contabilidad → Libro Diario.', { duration: 12000 });
       }
       setDlgMov(false);
-      setFormMov({ fecha: format(new Date(), 'yyyy-MM-dd'), concepto: '', monto: '', tipo: 'cargo', cuentaContrapartidaCodigo: '' });
+      setFormMov({ fecha: format(new Date(), 'yyyy-MM-dd'), concepto: '', monto: '', referencia: '', tipo: 'cargo', cuentaContrapartidaCodigo: '' });
     } catch (e: any) {
       toast.error(e.message ?? 'Error al registrar el movimiento');
     } finally {
       setSavingMov(false);
+    }
+  };
+
+  // Anular un movimiento bancario (revierte su asiento si fue creado con "Comisión/Cargo";
+  // si el movimiento se concilió con el asiento de un pago/cobro/venta, no se toca desde aquí).
+  const handleAnularMov = async (mov: MovimientoBancario) => {
+    if (!user) return;
+    if (!window.confirm(`¿Anular el movimiento "${mov.descripcion}" de ${currency(mov.monto)}?`)) return;
+    try {
+      if (mov.asientoId) {
+        const rev = await crearAsientoReversion({
+          referenciaId: mov.id, referenciaTipo: 'movimiento_bancario',
+          fecha: new Date(), concepto: `Anulación: ${mov.descripcion}`,
+          usuarioId: user.uid, usuarioNombre: user.nombre,
+        });
+        if (!rev.ok) {
+          toast.error(`No se pudo anular desde aquí (${rev.advertencia}). Si es un pago, cobro o venta, anúlalo desde esa pantalla — ahí se revierte su asiento correctamente.`, { duration: 12000 });
+          return;
+        }
+      }
+      await anularMovimientoBancario(mov.id);
+      toast.success('Movimiento bancario anulado' + (mov.asientoId ? ' y asiento revertido' : ''));
+    } catch (e: any) {
+      toast.error(e.message ?? 'Error al anular el movimiento');
     }
   };
 
@@ -375,9 +401,12 @@ export default function ConciliacionBancariaPage() {
             <TabsTrigger value="ignorados">
               Ignorados ({movsAgrupados.ignorados.length})
             </TabsTrigger>
+            <TabsTrigger value="anulados">
+              Anulados ({movsAgrupados.anulados.length})
+            </TabsTrigger>
           </TabsList>
 
-          {(['pendientes', 'conciliados', 'ignorados'] as const).map(tab => (
+          {(['pendientes', 'conciliados', 'ignorados', 'anulados'] as const).map(tab => (
             <TabsContent key={tab} value={tab} className="mt-4">
               <div className="bg-white rounded-xl border overflow-hidden">
                 <div className="overflow-x-auto">
@@ -386,6 +415,7 @@ export default function ConciliacionBancariaPage() {
                     <TableRow className="bg-slate-50">
                       <TableHead>Fecha</TableHead>
                       <TableHead>Descripción</TableHead>
+                      <TableHead>Referencia</TableHead>
                       <TableHead className="text-center">Tipo</TableHead>
                       <TableHead className="text-right">Monto</TableHead>
                       <TableHead className="text-right">Saldo</TableHead>
@@ -395,22 +425,23 @@ export default function ConciliacionBancariaPage() {
                   <TableBody>
                     {loading ? (
                       Array.from({ length: 5 }).map((_, i) => (
-                        <TableRow key={i}>{Array.from({ length: 6 }).map((_, j) => (
+                        <TableRow key={i}>{Array.from({ length: 7 }).map((_, j) => (
                           <TableCell key={j}><Skeleton className="h-4 w-full" /></TableCell>
                         ))}</TableRow>
                       ))
                     ) : movsAgrupados[tab].length === 0 ? (
                       <TableRow>
-                        <TableCell colSpan={6} className="text-center py-10 text-slate-400">
+                        <TableCell colSpan={7} className="text-center py-10 text-slate-400">
                           No hay movimientos en esta categoría.
                         </TableCell>
                       </TableRow>
                     ) : movsAgrupados[tab].map(m => (
-                      <TableRow key={m.id}>
+                      <TableRow key={m.id} className={tab === 'anulados' ? 'opacity-50' : ''}>
                         <TableCell className="text-sm text-slate-500">
                           {format((m.fecha as any)?.toDate?.() ?? new Date(m.fecha), 'dd/MM/yyyy')}
                         </TableCell>
-                        <TableCell className="text-sm max-w-64 truncate">{m.descripcion}</TableCell>
+                        <TableCell className={`text-sm max-w-64 truncate ${tab === 'anulados' ? 'line-through' : ''}`}>{m.descripcion}</TableCell>
+                        <TableCell className="text-xs font-mono text-slate-500">{m.referencia ?? '—'}</TableCell>
                         <TableCell className="text-center">
                           <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${
                             m.tipo === 'credito'
@@ -439,6 +470,10 @@ export default function ConciliacionBancariaPage() {
                                 onClick={() => handleIgnorar(m.id)}>
                                 <X className="h-3 w-3" />
                               </Button>
+                              <Button size="sm" variant="ghost" className="h-7 w-7 p-0 text-slate-400 hover:text-red-600"
+                                title="Anular" onClick={() => handleAnularMov(m)}>
+                                <Ban className="h-3.5 w-3.5" />
+                              </Button>
                             </div>
                           )}
                           {tab === 'conciliados' && (
@@ -450,6 +485,10 @@ export default function ConciliacionBancariaPage() {
                                 onClick={() => handleRevertir(m.id)}>
                                 Revertir
                               </Button>
+                              <Button size="sm" variant="ghost" className="h-7 w-7 p-0 text-slate-400 hover:text-red-600"
+                                title="Anular (revierte el asiento)" onClick={() => handleAnularMov(m)}>
+                                <Ban className="h-3.5 w-3.5" />
+                              </Button>
                             </div>
                           )}
                           {tab === 'ignorados' && (
@@ -457,6 +496,9 @@ export default function ConciliacionBancariaPage() {
                               onClick={() => handleRevertir(m.id)}>
                               Revertir
                             </Button>
+                          )}
+                          {tab === 'anulados' && (
+                            <span className="text-xs text-slate-400">Anulado</span>
                           )}
                         </TableCell>
                       </TableRow>
@@ -629,6 +671,12 @@ export default function ConciliacionBancariaPage() {
                   onChange={e => setFormMov(f => ({ ...f, monto: e.target.value }))}
                   placeholder="0.00" className="mt-1" />
               </div>
+            </div>
+            <div>
+              <Label>Referencia / N° comprobante</Label>
+              <Input value={formMov.referencia}
+                onChange={e => setFormMov(f => ({ ...f, referencia: e.target.value }))}
+                placeholder="Opcional — n° de nota de débito del banco, etc." className="mt-1" />
             </div>
             <div>
               <Label>Cuenta contable de contrapartida *</Label>

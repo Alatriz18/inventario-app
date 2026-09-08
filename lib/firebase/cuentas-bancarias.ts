@@ -109,3 +109,8 @@ export async function revertirConciliacion(movId: string): Promise<void> {
     asientoId: null,
   });
 }
+
+/** Marca un movimiento bancario como anulado (conserva el asientoId como historial). */
+export async function anularMovimientoBancario(movId: string): Promise<void> {
+  await updateDoc(doc(db, COL_MOVS, movId), { estado: 'anulado' });
+}

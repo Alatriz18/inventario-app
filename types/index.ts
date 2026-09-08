@@ -706,7 +706,7 @@ export interface CuentaBancaria {
 }
 
 export type TipoMovBanco = 'credito' | 'debito';
-export type EstadoConciliacion = 'no_conciliado' | 'conciliado' | 'ignorado';
+export type EstadoConciliacion = 'no_conciliado' | 'conciliado' | 'ignorado' | 'anulado';
 
 export interface MovimientoBancario {
   id:             string;

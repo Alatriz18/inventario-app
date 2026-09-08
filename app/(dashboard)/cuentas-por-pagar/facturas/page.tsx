@@ -10,7 +10,7 @@ import { es } from 'date-fns/locale';
 import {
   Plus, FileCheck, Upload, ChevronDown, CreditCard,
   FileSearch, AlertTriangle, CheckCircle2, Clock, Download, Files, Mail, Ban, Banknote,
-  FileSpreadsheet, UserPlus, XCircle,
+  FileSpreadsheet, UserPlus, XCircle, Pencil,
 } from 'lucide-react';
 
 import PageHeader   from '@/components/shared/PageHeader';
@@ -43,8 +43,9 @@ import {
   updateFacturaProveedor,
   registrarPago,
   vincularAsientoPago,
-  anularPago,
+  anularPago, editarPago,
 } from '@/lib/firebase/facturas-proveedor';
+import { editarAsiento } from '@/lib/firebase/asientos';
 import { createDocRecibido } from '@/lib/firebase/docs-recibidos';
 import { createRetencionRecibida } from '@/lib/firebase/retenciones-recibidas';
 import { subscribeToProveedores, getOrCreateProveedorPorRuc } from '@/lib/firebase/proveedores';
@@ -175,6 +176,12 @@ export default function FacturasProveedorPage() {
   const [dialogOpen,   setDialogOpen]   = useState(false);
   const [pagoDialog,   setPagoDialog]   = useState<FacturaProveedor | null>(null);
   const [detailDialog, setDetailDialog] = useState<FacturaProveedor | null>(null);
+
+  // Dialog editar fecha/referencia de un pago ya registrado
+  const [editPagoDialog, setEditPagoDialog] = useState<FacturaProveedor['pagos'][number] | null>(null);
+  const [editPagoFecha,      setEditPagoFecha]      = useState('');
+  const [editPagoReferencia, setEditPagoReferencia] = useState('');
+  const [savingEditPago,     setSavingEditPago]     = useState(false);
   const [xmlDialog,    setXmlDialog]    = useState(false);
   const [xmlPreview,   setXmlPreview]   = useState<any>(null);
   const [saving,       setSaving]       = useState(false);
@@ -652,6 +659,41 @@ export default function FacturasProveedorPage() {
       toast.success(rev.ok ? 'Factura anulada y asiento revertido' : `Factura anulada (${rev.advertencia ?? 'sin asiento'})`);
     } catch (e: any) {
       toast.error(e?.message ?? 'Error al anular la factura');
+    }
+  };
+
+  // ── Editar fecha/referencia de UN pago ya registrado ──
+  const abrirEditarPago = (pago: FacturaProveedor['pagos'][number]) => {
+    setEditPagoDialog(pago);
+    setEditPagoFecha(format((pago.fecha as any)?.toDate?.() ?? new Date(pago.fecha), 'yyyy-MM-dd'));
+    setEditPagoReferencia(pago.referencia ?? '');
+  };
+
+  const handleGuardarEdicionPago = async () => {
+    if (!editPagoDialog || !detailDialog || !user) return;
+    if (!editPagoFecha) { toast.error('Ingresa la fecha'); return; }
+    setSavingEditPago(true);
+    try {
+      const nuevaFecha = new Date(editPagoFecha + 'T12:00:00');
+      await editarPago(detailDialog.id, editPagoDialog.id, { fecha: nuevaFecha, referencia: editPagoReferencia.trim() });
+
+      if (editPagoDialog.asientoId) {
+        try {
+          await editarAsiento(editPagoDialog.asientoId, { fecha: nuevaFecha },
+            user.uid, user.nombre);
+        } catch (e: any) {
+          toast.warning(`Pago actualizado, pero el asiento contable no se pudo actualizar: ${e.message}`, { duration: 10000 });
+          setEditPagoDialog(null);
+          return;
+        }
+      }
+      toast.success('Pago actualizado');
+      setEditPagoDialog(null);
+      setDetailDialog(null);
+    } catch (e: any) {
+      toast.error(e?.message ?? 'Error al editar el pago');
+    } finally {
+      setSavingEditPago(false);
     }
   };
 
@@ -1159,10 +1201,16 @@ export default function FacturasProveedorPage() {
                           <div className="flex items-center gap-2">
                             <p className="text-xs text-slate-400">{formatFecha(p.fecha)}</p>
                             {!p.anulado && (
-                              <Button variant="ghost" size="icon" className="h-7 w-7 text-slate-400 hover:text-red-600"
-                                title="Anular este pago" onClick={() => handleAnularPago(detailDialog, p)}>
-                                <Ban className="h-3.5 w-3.5" />
-                              </Button>
+                              <>
+                                <Button variant="ghost" size="icon" className="h-7 w-7 text-slate-400 hover:text-blue-600"
+                                  title="Editar fecha / referencia" onClick={() => abrirEditarPago(p)}>
+                                  <Pencil className="h-3.5 w-3.5" />
+                                </Button>
+                                <Button variant="ghost" size="icon" className="h-7 w-7 text-slate-400 hover:text-red-600"
+                                  title="Anular este pago" onClick={() => handleAnularPago(detailDialog, p)}>
+                                  <Ban className="h-3.5 w-3.5" />
+                                </Button>
+                              </>
                             )}
                           </div>
                         </div>
@@ -1173,6 +1221,43 @@ export default function FacturasProveedorPage() {
               )}
             </div>
           )}
+        </DialogContent>
+      </Dialog>
+
+      {/* ─── DIALOG EDITAR PAGO (fecha / referencia) ─── */}
+      <Dialog open={!!editPagoDialog} onOpenChange={(o) => !o && setEditPagoDialog(null)}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Editar Pago</DialogTitle>
+          </DialogHeader>
+          {editPagoDialog && (
+            <div className="space-y-3">
+              <p className="text-sm text-slate-500">
+                Monto: <strong className="text-slate-800">{currency(editPagoDialog.monto)}</strong> — {editPagoDialog.metodoPago}
+              </p>
+              <div>
+                <Label>Fecha de pago *</Label>
+                <Input type="date" value={editPagoFecha} max={new Date().toISOString().split('T')[0]}
+                  onChange={e => setEditPagoFecha(e.target.value)} className="mt-1" />
+              </div>
+              <div>
+                <Label>Referencia / N° comprobante</Label>
+                <Input value={editPagoReferencia} onChange={e => setEditPagoReferencia(e.target.value)}
+                  placeholder="Opcional" className="mt-1" />
+              </div>
+              {editPagoDialog.asientoId && (
+                <p className="text-xs text-slate-400">
+                  El asiento contable vinculado se actualizará con la nueva fecha automáticamente.
+                </p>
+              )}
+            </div>
+          )}
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setEditPagoDialog(null)}>Cancelar</Button>
+            <Button onClick={handleGuardarEdicionPago} disabled={savingEditPago}>
+              {savingEditPago ? 'Guardando…' : 'Guardar cambios'}
+            </Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
 

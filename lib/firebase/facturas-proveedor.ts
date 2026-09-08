@@ -107,6 +107,35 @@ export async function vincularAsientoPago(
   await updateDoc(ref, { pagos });
 }
 
+/** Edita la fecha y/o referencia de un pago ya registrado (no toca monto ni saldo). */
+export async function editarPago(
+  facturaId: string, pagoId: string,
+  cambios: { fecha?: Date; referencia?: string }
+): Promise<PagoFactura> {
+  let pagoEditado: PagoFactura | null = null;
+  await runTransaction(db, async (tx) => {
+    const ref  = doc(db, COL, facturaId);
+    const snap = await tx.get(ref);
+    if (!snap.exists()) throw new Error('Factura no encontrada');
+
+    const factura = snap.data() as FacturaProveedor;
+    const pagoExistente = (factura.pagos ?? []).find(p => p.id === pagoId);
+    if (!pagoExistente) throw new Error('Pago no encontrado');
+    if (pagoExistente.anulado) throw new Error('No se puede editar un pago anulado');
+
+    const actualizado: PagoFactura = { ...pagoExistente };
+    if (cambios.fecha) actualizado.fecha = cambios.fecha;
+    if (cambios.referencia !== undefined) {
+      if (cambios.referencia) actualizado.referencia = cambios.referencia;
+      else delete actualizado.referencia;
+    }
+    pagoEditado = actualizado;
+    const pagos = (factura.pagos ?? []).map(p => p.id === pagoId ? actualizado : p);
+    tx.update(ref, { pagos });
+  });
+  return pagoEditado!;
+}
+
 /** Anula un pago puntual (no toda la factura): lo marca como anulado y recalcula saldo/estado. */
 export async function anularPago(facturaId: string, pagoId: string): Promise<PagoFactura | null> {
   let pagoAnulado: PagoFactura | null = null;

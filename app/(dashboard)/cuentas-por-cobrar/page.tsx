@@ -20,14 +20,15 @@ import {
 import { Separator } from '@/components/ui/separator';
 import { Label }  from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Ban, ChevronDown } from 'lucide-react';
+import { Ban, ChevronDown, Pencil } from 'lucide-react';
 
 import { CuentaCobrar, CobroCxC, MetodoPago, Cliente } from '@/types';
 import {
   subscribeToCxC, registrarCobroCxC, actualizarEstadosVencidos, crearCuentaCobrar,
-  anularCobro, vincularAsientoCobro,
+  anularCobro, vincularAsientoCobro, editarCobro,
 } from '@/lib/firebase/cuentas-cobrar';
 import { crearAsientoCobro, crearAsientoReversion } from '@/lib/contabilidad/motor-asientos';
+import { editarAsiento } from '@/lib/firebase/asientos';
 import { subscribeToClientes } from '@/lib/firebase/clientes';
 import { useAuth } from '@/context/AuthContext';
 
@@ -60,6 +61,12 @@ export default function CxCPage() {
 
   // Dialog detalle (historial de cobros)
   const [detailCxc,  setDetailCxc]  = useState<CuentaCobrar | null>(null);
+
+  // Dialog editar cobro (fecha / referencia)
+  const [editCobro,     setEditCobro]     = useState<CobroCxC | null>(null);
+  const [editFecha,     setEditFecha]     = useState('');
+  const [editReferencia,setEditReferencia]= useState('');
+  const [savingEdit,    setSavingEdit]    = useState(false);
 
   // Nueva CxC manual
   const [nuevaOpen,     setNuevaOpen]     = useState(false);
@@ -249,6 +256,41 @@ export default function CxCPage() {
       setDetailCxc(null);
     } catch (e: any) {
       toast.error(e?.message ?? 'Error al anular el cobro');
+    }
+  };
+
+  // ── Editar fecha/referencia de UN cobro ya registrado ──
+  const abrirEditarCobro = (cobro: CobroCxC) => {
+    setEditCobro(cobro);
+    setEditFecha(format((cobro.fecha as any)?.toDate?.() ?? new Date(cobro.fecha), 'yyyy-MM-dd'));
+    setEditReferencia(cobro.referencia ?? '');
+  };
+
+  const handleGuardarEdicionCobro = async () => {
+    if (!editCobro || !detailCxc || !user) return;
+    if (!editFecha) { toast.error('Ingresa la fecha'); return; }
+    setSavingEdit(true);
+    try {
+      const nuevaFecha = new Date(editFecha + 'T12:00:00');
+      await editarCobro(detailCxc.id, editCobro.id, { fecha: nuevaFecha, referencia: editReferencia.trim() });
+
+      if (editCobro.asientoId) {
+        try {
+          await editarAsiento(editCobro.asientoId, { fecha: nuevaFecha },
+            user.uid, user.nombre ?? user.email ?? 'Usuario');
+        } catch (e: any) {
+          toast.warning(`Cobro actualizado, pero el asiento contable no se pudo actualizar: ${e.message}`, { duration: 10000 });
+          setEditCobro(null);
+          return;
+        }
+      }
+      toast.success('Cobro actualizado');
+      setEditCobro(null);
+      setDetailCxc(null);
+    } catch (e: any) {
+      toast.error(e?.message ?? 'Error al editar el cobro');
+    } finally {
+      setSavingEdit(false);
     }
   };
 
@@ -597,10 +639,16 @@ export default function CxCPage() {
                           <div className="flex items-center gap-2">
                             <p className="text-xs text-slate-400">{fmtDate(c.fecha)}</p>
                             {!c.anulado && (
-                              <Button variant="ghost" size="icon" className="h-7 w-7 text-slate-400 hover:text-red-600"
-                                title="Anular este cobro" onClick={() => handleAnularCobro(detailCxc, c)}>
-                                <Ban className="h-3.5 w-3.5" />
-                              </Button>
+                              <>
+                                <Button variant="ghost" size="icon" className="h-7 w-7 text-slate-400 hover:text-blue-600"
+                                  title="Editar fecha / referencia" onClick={() => abrirEditarCobro(c)}>
+                                  <Pencil className="h-3.5 w-3.5" />
+                                </Button>
+                                <Button variant="ghost" size="icon" className="h-7 w-7 text-slate-400 hover:text-red-600"
+                                  title="Anular este cobro" onClick={() => handleAnularCobro(detailCxc, c)}>
+                                  <Ban className="h-3.5 w-3.5" />
+                                </Button>
+                              </>
                             )}
                           </div>
                         </div>
@@ -614,6 +662,43 @@ export default function CxCPage() {
               )}
             </div>
           )}
+        </DialogContent>
+      </Dialog>
+
+      {/* Dialog editar fecha/referencia de un cobro */}
+      <Dialog open={!!editCobro} onOpenChange={(o) => !o && setEditCobro(null)}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Editar Cobro</DialogTitle>
+          </DialogHeader>
+          {editCobro && (
+            <div className="space-y-3">
+              <p className="text-sm text-slate-500">
+                Monto: <strong className="text-slate-800">{currency(editCobro.monto)}</strong> — {editCobro.metodoPago}
+              </p>
+              <div>
+                <Label>Fecha de cobro *</Label>
+                <Input type="date" value={editFecha} max={new Date().toISOString().split('T')[0]}
+                  onChange={e => setEditFecha(e.target.value)} className="mt-1" />
+              </div>
+              <div>
+                <Label>Referencia / N° comprobante</Label>
+                <Input value={editReferencia} onChange={e => setEditReferencia(e.target.value)}
+                  placeholder="Opcional" className="mt-1" />
+              </div>
+              {editCobro.asientoId && (
+                <p className="text-xs text-slate-400">
+                  El asiento contable vinculado se actualizará con la nueva fecha automáticamente.
+                </p>
+              )}
+            </div>
+          )}
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setEditCobro(null)}>Cancelar</Button>
+            <Button onClick={handleGuardarEdicionCobro} disabled={savingEdit}>
+              {savingEdit ? 'Guardando…' : 'Guardar cambios'}
+            </Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
     </div>

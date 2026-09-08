@@ -98,6 +98,35 @@ export async function vincularAsientoCobro(
   await updateDoc(ref, { cobros });
 }
 
+/** Edita la fecha y/o referencia de un cobro ya registrado (no toca monto ni saldo). */
+export async function editarCobro(
+  cxcId: string, cobroId: string,
+  cambios: { fecha?: Date; referencia?: string }
+): Promise<CobroCxC> {
+  let cobroEditado: CobroCxC | null = null;
+  await runTransaction(db, async (tx: Transaction) => {
+    const ref  = doc(db, COL, cxcId);
+    const snap = await tx.get(ref);
+    if (!snap.exists()) throw new Error('Cuenta por cobrar no encontrada');
+
+    const cxc = snap.data() as CuentaCobrar;
+    const cobroExistente = (cxc.cobros ?? []).find(c => c.id === cobroId);
+    if (!cobroExistente) throw new Error('Cobro no encontrado');
+    if (cobroExistente.anulado) throw new Error('No se puede editar un cobro anulado');
+
+    const actualizado: CobroCxC = { ...cobroExistente };
+    if (cambios.fecha) actualizado.fecha = cambios.fecha;
+    if (cambios.referencia !== undefined) {
+      if (cambios.referencia) actualizado.referencia = cambios.referencia;
+      else delete actualizado.referencia;
+    }
+    cobroEditado = actualizado;
+    const cobros = (cxc.cobros ?? []).map(c => c.id === cobroId ? actualizado : c);
+    tx.update(ref, { cobros });
+  });
+  return cobroEditado!;
+}
+
 /** Anula un cobro puntual (no toda la CxC): lo marca como anulado y recalcula saldo/estado. */
 export async function anularCobro(cxcId: string, cobroId: string): Promise<CobroCxC | null> {
   let cobroAnulado: CobroCxC | null = null;

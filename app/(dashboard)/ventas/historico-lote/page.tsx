@@ -64,6 +64,53 @@ function parseFechaCelda(v: any): Date | null {
   return isNaN(d.getTime()) ? null : d;
 }
 
+// ── Parser del reporte "Comprobantes Emitidos" (TXT/TSV) del SRI ──────────
+// Columnas típicas: FECHA_EMISION, COMPROBANTE, NUMERO_COMPROBANTE,
+// IDENTIFICACION_RECEPTOR, RAZON_SOCIAL, CLAVE_ACCESO, VALOR_TOTAL
+function parseFilasTxtEmitidos(texto: string): FilaLote[] {
+  const lineas = texto.split(/\r?\n/).filter(l => l.trim().length > 0);
+  if (lineas.length < 2) return [];
+
+  const headers = lineas[0].split('\t').map(h => h.trim().toUpperCase());
+  const idx = (col: string) => headers.indexOf(col);
+  const iFecha  = idx('FECHA_EMISION'), iTipo = idx('COMPROBANTE'),
+    iNum   = idx('NUMERO_COMPROBANTE'), iIdent = idx('IDENTIFICACION_RECEPTOR'),
+    iRazon = idx('RAZON_SOCIAL'), iClave = idx('CLAVE_ACCESO'), iTotal = idx('VALOR_TOTAL');
+
+  if (iFecha < 0 || iTotal < 0) return [];
+
+  const filas: FilaLote[] = [];
+  for (let i = 1; i < lineas.length; i++) {
+    const cols = lineas[i].split('\t').map(c => c.trim());
+    const fecha  = parseFechaCelda(cols[iFecha]);
+    const total  = parseFloat((cols[iTotal] ?? '').replace(',', '.')) || 0;
+    const subtotal = parseFloat((total / 1.15).toFixed(2));
+    const iva      = parseFloat((total - subtotal).toFixed(2));
+    const tipoRaw  = (cols[iTipo] ?? '').trim().toLowerCase();
+    const claveAcceso = (cols[iClave] ?? '').trim() || undefined;
+
+    const fila: FilaLote = {
+      idx: i + 1,
+      fecha, fechaTexto: fecha ? fecha.toLocaleDateString('es-EC') : '',
+      cliente: (cols[iRazon] ?? '').trim() || 'CONSUMIDOR FINAL',
+      identificacion: (cols[iIdent] ?? '').trim() || '9999999999999',
+      subtotal, iva, total,
+      metodoPago: 'efectivo', // el reporte del SRI no incluye forma de pago; ajusta manualmente si fue crédito
+      tipoComprobante: tipoRaw.includes('factura') ? 'factura' : tipoRaw.includes('nota') ? 'nota_venta' : 'factura',
+      numComprobante: (cols[iNum] ?? '').trim() || undefined,
+      claveAcceso,
+      numAutorizacion: claveAcceso, // desde 2022 el número de autorización = clave de acceso
+    };
+
+    if (!fecha)              fila.error = 'Fecha inválida o vacía';
+    else if (fecha > new Date()) fila.error = 'La fecha no puede ser futura';
+    else if (total <= 0)     fila.error = 'Valor total debe ser mayor a 0';
+
+    filas.push(fila);
+  }
+  return filas;
+}
+
 function parseFilas(rows: Record<string, any>[]): FilaLote[] {
   return rows.map((row, i) => {
     const fecha          = parseFechaCelda(normalizaClave(row, ['fecha']));
@@ -124,21 +171,42 @@ export default function VentasHistoricoLotePage() {
   const handleUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
+    const esTxt = /\.txt$/i.test(file.name);
     const reader = new FileReader();
-    reader.onload = (ev) => {
-      try {
-        const data = new Uint8Array(ev.target?.result as ArrayBuffer);
-        const wb   = XLSX.read(data, { type: 'array', cellDates: true });
-        const ws   = wb.Sheets[wb.SheetNames[0]];
-        const rows = XLSX.utils.sheet_to_json<Record<string, any>>(ws, { defval: '' });
-        if (rows.length === 0) { toast.error('El archivo no tiene filas de datos'); return; }
-        setFilas(parseFilas(rows));
-        setResultado(null);
-      } catch {
-        toast.error('No se pudo leer el archivo. Verifica que sea el formato de la plantilla.');
-      }
-    };
-    reader.readAsArrayBuffer(file);
+
+    if (esTxt) {
+      reader.onload = (ev) => {
+        try {
+          const texto = String(ev.target?.result ?? '');
+          const parsed = parseFilasTxtEmitidos(texto);
+          if (parsed.length === 0) {
+            toast.error('No se reconocieron columnas del reporte "Comprobantes Emitidos" del SRI en este TXT');
+            return;
+          }
+          setFilas(parsed);
+          setResultado(null);
+          toast.info('TXT del SRI detectado: se asumió método de pago "efectivo" y 15% de IVA sobre el total — revisa y ajusta antes de importar.', { duration: 9000 });
+        } catch {
+          toast.error('No se pudo leer el archivo TXT.');
+        }
+      };
+      reader.readAsText(file, 'utf-8');
+    } else {
+      reader.onload = (ev) => {
+        try {
+          const data = new Uint8Array(ev.target?.result as ArrayBuffer);
+          const wb   = XLSX.read(data, { type: 'array', cellDates: true });
+          const ws   = wb.Sheets[wb.SheetNames[0]];
+          const rows = XLSX.utils.sheet_to_json<Record<string, any>>(ws, { defval: '' });
+          if (rows.length === 0) { toast.error('El archivo no tiene filas de datos'); return; }
+          setFilas(parseFilas(rows));
+          setResultado(null);
+        } catch {
+          toast.error('No se pudo leer el archivo. Verifica que sea el formato de la plantilla.');
+        }
+      };
+      reader.readAsArrayBuffer(file);
+    }
     if (fileRef.current) fileRef.current.value = '';
   };
 
@@ -221,7 +289,7 @@ export default function VentasHistoricoLotePage() {
             <Button size="sm" onClick={() => fileRef.current?.click()}>
               <Upload className="mr-2 h-4 w-4" /> Subir archivo
             </Button>
-            <input ref={fileRef} type="file" accept=".xlsx,.xls,.csv" className="hidden" onChange={handleUpload} />
+            <input ref={fileRef} type="file" accept=".xlsx,.xls,.csv,.txt" className="hidden" onChange={handleUpload} />
           </div>
         }
       />
@@ -234,6 +302,10 @@ export default function VentasHistoricoLotePage() {
            y genera su asiento contable con la fecha real (para que ATS/Form. 104 la tomen del mes correcto).</p>
         <p>4. Si además ya tienes esa venta facturada electrónicamente, llena NumComprobante/ClaveAcceso/NumAutorizacion
            para que aparezca autorizada en Reportes → Facturas Emitidas.</p>
+        <p>5. También puedes subir directamente el TXT de "Comprobantes Emitidos" que exporta el SRI (columnas
+           FECHA_EMISION, COMPROBANTE, NUMERO_COMPROBANTE, IDENTIFICACION_RECEPTOR, RAZON_SOCIAL, CLAVE_ACCESO, VALOR_TOTAL).
+           En ese caso la clave de acceso se usa también como número de autorización, el IVA se calcula al 15% sobre el
+           total y el método de pago se asume "efectivo" — revisa la previsualización antes de importar.</p>
       </div>
 
       {filas.length > 0 && (

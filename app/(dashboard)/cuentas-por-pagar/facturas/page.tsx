@@ -774,10 +774,10 @@ export default function FacturasProveedorPage() {
         description="Control de cuentas por pagar — registra y gestiona facturas de proveedores"
         action={
           <div className="flex gap-2 flex-wrap">
-            <Button variant="outline" onClick={() => xmlRef.current?.click()}>
-              <Upload className="mr-2 h-4 w-4" /> Importar XML
+            <Button variant="outline" onClick={() => xmlRef.current?.click()} title="Detecta automáticamente si es factura, nota de crédito, nota de débito o retención">
+              <Upload className="mr-2 h-4 w-4" /> Importar XML (factura, NC, ND o retención)
             </Button>
-            <Button variant="outline" disabled={bulkImporting} onClick={() => bulkRef.current?.click()}>
+            <Button variant="outline" disabled={bulkImporting} onClick={() => bulkRef.current?.click()} title="Detecta automáticamente si es factura, nota de crédito, nota de débito o retención">
               <Files className="mr-2 h-4 w-4" />
               {bulkImporting ? 'Importando…' : 'Importar varios XML'}
             </Button>

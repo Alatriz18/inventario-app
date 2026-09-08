@@ -78,6 +78,17 @@ export async function importarMovimientosBancarios(
   await batch.commit();
 }
 
+/** Registra un solo movimiento bancario (comisión, cargo, interés…) — no requiere lote. */
+export async function registrarMovimientoBancario(
+  data: Omit<MovimientoBancario, 'id' | 'createdAt'>
+): Promise<string> {
+  const ref = await addDoc(collection(db, COL_MOVS), {
+    ...data,
+    createdAt: serverTimestamp(),
+  });
+  return ref.id;
+}
+
 export async function conciliarMovimiento(
   movId:     string,
   asientoId: string

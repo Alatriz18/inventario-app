@@ -1056,3 +1056,49 @@ export async function crearAsientoAjusteInventario(p: ParamsAjuste): Promise<str
     });
   } catch { return null; }
 }
+
+// ─────────────────────────────────────────────────────────────────────────
+// MOVIMIENTO BANCARIO DIRECTO (comisiones, cargos, intereses ganados…)
+// ─────────────────────────────────────────────────────────────────────────
+
+interface ParamsMovimientoBancario extends ParamsBase {
+  movId:                     string;
+  fecha:                     Date;
+  concepto:                  string;
+  monto:                     number;
+  cuentaBancoCodigo:         string;
+  cuentaContrapartidaCodigo: string;
+  tipo:                      'cargo' | 'abono'; // cargo = disminuye el banco (gasto/comisión), abono = lo aumenta (interés ganado)
+}
+
+export async function crearAsientoMovimientoBancario(p: ParamsMovimientoBancario): Promise<string | null> {
+  try {
+    const cuentas = await getCuentasCached();
+    const lineas: AsientoLinea[] = p.tipo === 'cargo'
+      ? [
+          buildLinea(cuentas, p.cuentaContrapartidaCodigo, p.monto, 0, p.concepto),
+          buildLinea(cuentas, p.cuentaBancoCodigo,          0, p.monto, p.concepto),
+        ]
+      : [
+          buildLinea(cuentas, p.cuentaBancoCodigo,          p.monto, 0, p.concepto),
+          buildLinea(cuentas, p.cuentaContrapartidaCodigo,  0, p.monto, p.concepto),
+        ];
+
+    return await createAsiento({
+      fecha:          p.fecha,
+      concepto:       p.concepto,
+      tipo:           'manual',
+      referenciaId:   p.movId,
+      referenciaTipo: 'movimiento_bancario',
+      lineas,
+      totalDebe:      lineas.reduce((s, l) => s + l.debe,  0),
+      totalHaber:     lineas.reduce((s, l) => s + l.haber, 0),
+      estado:         'confirmado',
+      bloqueado:      false,
+      editadoManualmente: false,
+      usuarioId:      p.usuarioId,
+      usuarioNombre:  p.usuarioNombre,
+      createdAt:      new Date(),
+    });
+  } catch { return null; }
+}

@@ -1,6 +1,6 @@
 import {
   collection, doc, onSnapshot, query, orderBy,
-  serverTimestamp, runTransaction, getDoc, setDoc,
+  serverTimestamp, runTransaction, getDoc, setDoc, updateDoc,
   getDocs, where, writeBatch, Transaction,
   QueryDocumentSnapshot, DocumentData,
 } from 'firebase/firestore';
@@ -57,31 +57,72 @@ export function crearCxCEnTransaccion(
   return ref.id;
 }
 
+/** Registra un cobro y devuelve su id (para poder vincular luego su asiento contable). */
 export async function registrarCobroCxC(
   cxcId:         string,
   cobro:         Omit<CobroCxC, 'id'>,
   usuarioId:     string,
   usuarioNombre: string
-): Promise<void> {
+): Promise<string> {
+  const id = `cobro-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
   await runTransaction(db, async (tx: Transaction) => {
     const ref  = doc(db, COL, cxcId);
     const snap = await tx.get(ref);
     if (!snap.exists()) throw new Error('Cuenta por cobrar no encontrada');
 
     const cxc            = snap.data() as CuentaCobrar;
-    const id             = `cobro-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
     const nuevoCobro: CobroCxC = { ...cobro, id, usuarioId, usuarioNombre };
 
     const cobros         = [...(cxc.cobros ?? []), nuevoCobro];
-    const totalCobrado   = Math.round(cobros.reduce((s, c) => s + c.monto, 0) * 100) / 100;
+    const totalCobrado   = Math.round(cobros.filter(c => !c.anulado).reduce((s, c) => s + c.monto, 0) * 100) / 100;
     const saldoPendiente = Math.round(Math.max(0, cxc.total - totalCobrado) * 100) / 100;
     const estado: EstadoCxC =
-      saldoPendiente === 0 ? 'pagada'  :
-      totalCobrado   > 0   ? 'parcial' :
+      saldoPendiente === 0 && totalCobrado > 0 ? 'pagada'  :
+      totalCobrado   > 0                       ? 'parcial' :
       'pendiente';
 
     tx.update(ref, { cobros, saldoPendiente, estado });
   });
+  return id;
+}
+
+/** Guarda el id del asiento contable generado para un cobro específico. */
+export async function vincularAsientoCobro(
+  cxcId: string, cobroId: string, asientoId: string
+): Promise<void> {
+  const ref  = doc(db, COL, cxcId);
+  const snap = await getDoc(ref);
+  if (!snap.exists()) return;
+  const cxc = snap.data() as CuentaCobrar;
+  const cobros = (cxc.cobros ?? []).map(c => c.id === cobroId ? { ...c, asientoId } : c);
+  await updateDoc(ref, { cobros });
+}
+
+/** Anula un cobro puntual (no toda la CxC): lo marca como anulado y recalcula saldo/estado. */
+export async function anularCobro(cxcId: string, cobroId: string): Promise<CobroCxC | null> {
+  let cobroAnulado: CobroCxC | null = null;
+  await runTransaction(db, async (tx: Transaction) => {
+    const ref  = doc(db, COL, cxcId);
+    const snap = await tx.get(ref);
+    if (!snap.exists()) throw new Error('Cuenta por cobrar no encontrada');
+
+    const cxc = snap.data() as CuentaCobrar;
+    const cobroExistente = (cxc.cobros ?? []).find(c => c.id === cobroId);
+    if (!cobroExistente) throw new Error('Cobro no encontrado');
+    if (cobroExistente.anulado) throw new Error('El cobro ya estaba anulado');
+    cobroAnulado = cobroExistente;
+
+    const cobros = (cxc.cobros ?? []).map(c => c.id === cobroId ? { ...c, anulado: true } : c);
+    const totalCobrado   = Math.round(cobros.filter(c => !c.anulado).reduce((s, c) => s + c.monto, 0) * 100) / 100;
+    const saldoPendiente = Math.round(Math.max(0, cxc.total - totalCobrado) * 100) / 100;
+    const estado: EstadoCxC =
+      saldoPendiente === 0 && totalCobrado > 0 ? 'pagada'  :
+      totalCobrado   > 0                       ? 'parcial' :
+      'pendiente';
+
+    tx.update(ref, { cobros, saldoPendiente, estado });
+  });
+  return cobroAnulado;
 }
 
 export async function actualizarEstadosVencidos(): Promise<void> {

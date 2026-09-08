@@ -17,14 +17,17 @@ import {
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from '@/components/ui/dialog';
+import { Separator } from '@/components/ui/separator';
 import { Label }  from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Ban, ChevronDown } from 'lucide-react';
 
 import { CuentaCobrar, CobroCxC, MetodoPago, Cliente } from '@/types';
 import {
   subscribeToCxC, registrarCobroCxC, actualizarEstadosVencidos, crearCuentaCobrar,
+  anularCobro, vincularAsientoCobro,
 } from '@/lib/firebase/cuentas-cobrar';
-import { crearAsientoCobro } from '@/lib/contabilidad/motor-asientos';
+import { crearAsientoCobro, crearAsientoReversion } from '@/lib/contabilidad/motor-asientos';
 import { subscribeToClientes } from '@/lib/firebase/clientes';
 import { useAuth } from '@/context/AuthContext';
 
@@ -48,11 +51,15 @@ export default function CxCPage() {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [cxcSel,     setCxcSel]     = useState<CuentaCobrar | null>(null);
   const [montoCobro, setMontoCobro] = useState('');
+  const [fechaCobro, setFechaCobro] = useState(new Date().toISOString().split('T')[0]);
   const [metodoPago, setMetodoPago] = useState<MetodoPago>('efectivo');
   const [refCobro,   setRefCobro]   = useState('');
   const [retFuente,  setRetFuente]  = useState('');
   const [retIVA,     setRetIVA]     = useState('');
   const [saving,     setSaving]     = useState(false);
+
+  // Dialog detalle (historial de cobros)
+  const [detailCxc,  setDetailCxc]  = useState<CuentaCobrar | null>(null);
 
   // Nueva CxC manual
   const [nuevaOpen,     setNuevaOpen]     = useState(false);
@@ -161,6 +168,7 @@ export default function CxCPage() {
   const abrirCobro = (cxc: CuentaCobrar) => {
     setCxcSel(cxc);
     setMontoCobro(cxc.saldoPendiente.toFixed(2));
+    setFechaCobro(new Date().toISOString().split('T')[0]);
     setMetodoPago('deposito');
     setRefCobro('');
     setRetFuente('');
@@ -176,24 +184,27 @@ export default function CxCPage() {
       toast.error(`El monto supera el saldo pendiente (${currency(cxcSel.saldoPendiente)})`);
       return;
     }
+    if (!fechaCobro) { toast.error('Ingresa la fecha del cobro'); return; }
     setSaving(true);
     try {
       const rf = parseFloat(retFuente) || 0;
       const ri = parseFloat(retIVA)    || 0;
+      const fecha = new Date(fechaCobro + 'T12:00:00');
       const cobro: Omit<CobroCxC, 'id'> = {
-        fecha:        new Date(),
+        fecha,
         monto,
         metodoPago,
         ...(refCobro ? { referencia: refCobro } : {}),
         usuarioId:    user.uid,
         usuarioNombre:user.nombre ?? user.email ?? 'Usuario',
       };
-      await registrarCobroCxC(cxcSel.id, cobro, user.uid, user.nombre ?? user.email ?? 'Usuario');
+      const cobroId = await registrarCobroCxC(cxcSel.id, cobro, user.uid, user.nombre ?? user.email ?? 'Usuario');
 
       // Asiento contable
-      await crearAsientoCobro({
+      const asientoId = await crearAsientoCobro({
         cxcId:        cxcSel.id,
-        fecha:        new Date(),
+        cobroId,
+        fecha,
         clienteNombre:cxcSel.clienteNombre,
         monto,
         usaBanco:     true,
@@ -204,12 +215,40 @@ export default function CxCPage() {
         usuarioNombre:user.nombre ?? user.email ?? 'Usuario',
       });
 
-      toast.success('Cobro registrado exitosamente');
+      if (asientoId) {
+        await vincularAsientoCobro(cxcSel.id, cobroId, asientoId);
+        toast.success('Cobro registrado exitosamente');
+      } else {
+        toast.warning('El cobro se registró, pero el asiento contable NO se pudo generar. Revísalo en Contabilidad → Libro Diario.', { duration: 12000 });
+      }
       setDialogOpen(false);
     } catch (e: any) {
       toast.error(e.message ?? 'Error al registrar cobro');
     } finally {
       setSaving(false);
+    }
+  };
+
+  // ── Anular UN cobro puntual sin anular toda la CxC ──
+  const handleAnularCobro = async (cxc: CuentaCobrar, cobro: CobroCxC) => {
+    if (!user) return;
+    if (cobro.anulado) { toast.info('Este cobro ya está anulado'); return; }
+    if (!window.confirm(`¿Anular el cobro de ${currency(cobro.monto)} del ${fmtDate(cobro.fecha)}? El saldo pendiente aumentará y podrás usarlo para conciliación.`)) return;
+    try {
+      await anularCobro(cxc.id, cobro.id);
+      if (cobro.asientoId) {
+        const rev = await crearAsientoReversion({
+          referenciaId: cobro.id, referenciaTipo: 'cobro_cliente',
+          fecha: new Date(), concepto: `Anulación de cobro a ${cxc.clienteNombre}`,
+          usuarioId: user.uid, usuarioNombre: user.nombre ?? user.email ?? 'Usuario',
+        });
+        toast.success(rev.ok ? 'Cobro anulado y asiento revertido' : `Cobro anulado (${rev.advertencia ?? 'revisa el asiento manualmente'})`);
+      } else {
+        toast.warning('Cobro anulado. Este cobro es anterior a esta función — revisa manualmente su asiento en Contabilidad → Libro Diario.', { duration: 10000 });
+      }
+      setDetailCxc(null);
+    } catch (e: any) {
+      toast.error(e?.message ?? 'Error al anular el cobro');
     }
   };
 
@@ -359,11 +398,17 @@ export default function CxCPage() {
                     </span>
                   </TableCell>
                   <TableCell>
-                    {c.estado !== 'pagada' && (
-                      <Button size="sm" variant="outline" onClick={() => abrirCobro(c)}>
-                        Cobrar
+                    <div className="flex gap-1 justify-end">
+                      <Button size="icon" variant="ghost" className="h-8 w-8 text-slate-500 hover:text-blue-600"
+                        title="Ver detalle / historial de cobros" onClick={() => setDetailCxc(c)}>
+                        <ChevronDown className="h-4 w-4" />
                       </Button>
-                    )}
+                      {c.estado !== 'pagada' && (
+                        <Button size="sm" variant="outline" onClick={() => abrirCobro(c)}>
+                          Cobrar
+                        </Button>
+                      )}
+                    </div>
                   </TableCell>
                 </TableRow>
               );
@@ -459,6 +504,11 @@ export default function CxCPage() {
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div className="col-span-2">
+                  <Label>Fecha de cobro *</Label>
+                  <Input type="date" value={fechaCobro} max={new Date().toISOString().split('T')[0]}
+                    onChange={e => setFechaCobro(e.target.value)} className="mt-1" />
+                </div>
+                <div className="col-span-2">
                   <Label>Monto a cobrar *</Label>
                   <Input type="number" step="0.01" value={montoCobro}
                     onChange={e => setMontoCobro(e.target.value)} className="mt-1" />
@@ -503,6 +553,67 @@ export default function CxCPage() {
               {saving ? 'Guardando…' : 'Registrar cobro'}
             </Button>
           </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Dialog detalle / historial de cobros */}
+      <Dialog open={!!detailCxc} onOpenChange={() => setDetailCxc(null)}>
+        <DialogContent className="max-w-lg max-h-[85vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>Detalle de Cuenta por Cobrar</DialogTitle>
+          </DialogHeader>
+          {detailCxc && (
+            <div className="space-y-4">
+              <div className="grid grid-cols-2 gap-3 text-sm">
+                <div><p className="text-xs text-slate-400">Cliente</p><p className="font-medium">{detailCxc.clienteNombre}</p></div>
+                <div><p className="text-xs text-slate-400">Identificación</p><p className="font-medium">{detailCxc.clienteIdentificacion}</p></div>
+                <div><p className="text-xs text-slate-400">Fecha emisión</p><p className="font-medium">{fmtDate(detailCxc.fechaEmision)}</p></div>
+                <div><p className="text-xs text-slate-400">Vencimiento</p><p className="font-medium">{fmtDate(detailCxc.fechaVencimiento)}</p></div>
+              </div>
+              <Separator />
+              <div className="flex justify-between text-sm">
+                <span className="text-slate-500">Total</span>
+                <span className="font-bold">{currency(detailCxc.total)}</span>
+              </div>
+              <div className="flex justify-between text-sm font-bold text-red-600">
+                <span>Saldo pendiente</span>
+                <span>{currency(detailCxc.saldoPendiente)}</span>
+              </div>
+              {(detailCxc.cobros?.length ?? 0) > 0 && (
+                <>
+                  <Separator />
+                  <div>
+                    <p className="text-sm font-semibold text-slate-700 mb-2">Historial de cobros</p>
+                    <div className="space-y-2">
+                      {detailCxc.cobros.map((c, i) => (
+                        <div key={i} className={`flex justify-between items-center text-sm py-1.5 border-b last:border-0 ${c.anulado ? 'opacity-50' : ''}`}>
+                          <div>
+                            <p className={`font-medium ${c.anulado ? 'line-through' : ''}`}>{currency(c.monto)}</p>
+                            <p className="text-xs text-slate-400">
+                              {c.metodoPago} {c.referencia ? `— ${c.referencia}` : ''}
+                              {c.anulado ? ' — anulado' : ''}
+                            </p>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <p className="text-xs text-slate-400">{fmtDate(c.fecha)}</p>
+                            {!c.anulado && (
+                              <Button variant="ghost" size="icon" className="h-7 w-7 text-slate-400 hover:text-red-600"
+                                title="Anular este cobro" onClick={() => handleAnularCobro(detailCxc, c)}>
+                                <Ban className="h-3.5 w-3.5" />
+                              </Button>
+                            )}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </>
+              )}
+              {(detailCxc.cobros?.length ?? 0) === 0 && (
+                <p className="text-xs text-slate-400 text-center py-2">Aún no se han registrado cobros.</p>
+              )}
+            </div>
+          )}
         </DialogContent>
       </Dialog>
     </div>

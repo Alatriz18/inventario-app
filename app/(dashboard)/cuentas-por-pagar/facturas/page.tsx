@@ -10,7 +10,7 @@ import { es } from 'date-fns/locale';
 import {
   Plus, FileCheck, Upload, ChevronDown, CreditCard,
   FileSearch, AlertTriangle, CheckCircle2, Clock, Download, Files, Mail, Ban, Banknote,
-  FileSpreadsheet, UserPlus, XCircle, Pencil,
+  FileSpreadsheet, UserPlus, XCircle, Pencil, RotateCcw,
 } from 'lucide-react';
 
 import PageHeader   from '@/components/shared/PageHeader';
@@ -43,7 +43,7 @@ import {
   updateFacturaProveedor,
   registrarPago,
   vincularAsientoPago,
-  anularPago, editarPago,
+  anularPago, editarPago, reactivarPago, reactivarFactura,
 } from '@/lib/firebase/facturas-proveedor';
 import { editarAsiento } from '@/lib/firebase/asientos';
 import { subscribeToCuentasBancarias, registrarMovimientoBancario, conciliarMovimiento } from '@/lib/firebase/cuentas-bancarias';
@@ -685,6 +685,30 @@ export default function FacturasProveedorPage() {
     }
   };
 
+  // ── Reactivar una factura anulada por error (deshace la anulación) ──
+  const handleReactivarFactura = async (f: FacturaProveedor) => {
+    if (!user) return;
+    if (!window.confirm(`¿Reactivar la factura ${f.numeroFactura} de ${f.proveedorNombre}? Se restaurará su asiento de compra.`)) return;
+    try {
+      let rev = await crearAsientoReversion({
+        referenciaId: f.id, referenciaTipo: 'factura_proveedor_anulacion',
+        fecha: new Date(), concepto: `Reactivación factura ${f.numeroFactura}`,
+        usuarioId: user.uid, usuarioNombre: user.nombre,
+      });
+      if (!rev.ok && f.entradaId) {
+        rev = await crearAsientoReversion({
+          referenciaId: f.entradaId, referenciaTipo: 'entrada_anulacion',
+          fecha: new Date(), concepto: `Reactivación factura ${f.numeroFactura}`,
+          usuarioId: user.uid, usuarioNombre: user.nombre,
+        });
+      }
+      await reactivarFactura(f.id);
+      toast.success(rev.ok ? 'Factura reactivada y asiento restaurado' : `Factura reactivada (${rev.advertencia ?? 'revisa el asiento manualmente'})`);
+    } catch (e: any) {
+      toast.error(e?.message ?? 'Error al reactivar la factura');
+    }
+  };
+
   // ── Editar fecha/referencia de UN pago ya registrado ──
   const abrirEditarPago = (pago: FacturaProveedor['pagos'][number]) => {
     setEditPagoDialog(pago);
@@ -740,6 +764,28 @@ export default function FacturasProveedorPage() {
       setDetailDialog(null);
     } catch (e: any) {
       toast.error(e?.message ?? 'Error al anular el pago');
+    }
+  };
+
+  // ── Reactivar un pago anulado por error (deshace la anulación) ──
+  const handleReactivarPago = async (f: FacturaProveedor, pago: FacturaProveedor['pagos'][number]) => {
+    if (!user) return;
+    if (!window.confirm(`¿Reactivar el pago de ${currency(pago.monto)} del ${formatFecha(pago.fecha)}?`)) return;
+    try {
+      await reactivarPago(f.id, pago.id);
+      if (pago.asientoId) {
+        const rev = await crearAsientoReversion({
+          referenciaId: pago.id, referenciaTipo: 'pago_proveedor_anulacion',
+          fecha: new Date(), concepto: `Reactivación de pago a ${f.proveedorNombre}`,
+          usuarioId: user.uid, usuarioNombre: user.nombre,
+        });
+        toast.success(rev.ok ? 'Pago reactivado y asiento restaurado' : `Pago reactivado (${rev.advertencia ?? 'revisa el asiento manualmente'})`);
+      } else {
+        toast.warning('Pago reactivado. No tenía asiento vinculado — revisa manualmente en Contabilidad → Libro Diario.', { duration: 10000 });
+      }
+      setDetailDialog(null);
+    } catch (e: any) {
+      toast.error(e?.message ?? 'Error al reactivar el pago');
     }
   };
 
@@ -990,11 +1036,17 @@ export default function FacturasProveedorPage() {
                           <CreditCard className="h-4 w-4" />
                         </Button>
                       )}
-                      {f.estado !== 'anulada' && (
+                      {f.estado !== 'anulada' ? (
                         <Button variant="ghost" size="icon" title="Anular factura"
                           onClick={() => anularFactura(f)}
                           className="h-8 w-8 text-slate-500 hover:text-red-600">
                           <Ban className="h-4 w-4" />
+                        </Button>
+                      ) : (
+                        <Button variant="ghost" size="icon" title="Reactivar factura (deshacer anulación)"
+                          onClick={() => handleReactivarFactura(f)}
+                          className="h-8 w-8 text-slate-500 hover:text-blue-600">
+                          <RotateCcw className="h-4 w-4" />
                         </Button>
                       )}
                     </div>
@@ -1272,6 +1324,12 @@ export default function FacturasProveedorPage() {
                                   <Ban className="h-3.5 w-3.5" />
                                 </Button>
                               </>
+                            )}
+                            {p.anulado && (
+                              <Button variant="ghost" size="icon" className="h-7 w-7 text-slate-400 hover:text-blue-600"
+                                title="Reactivar este pago (deshacer anulación)" onClick={() => handleReactivarPago(detailDialog, p)}>
+                                <RotateCcw className="h-3.5 w-3.5" />
+                              </Button>
                             )}
                           </div>
                         </div>

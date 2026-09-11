@@ -168,6 +168,64 @@ export async function anularPago(facturaId: string, pagoId: string): Promise<Pag
   return pagoAnulado;
 }
 
+/** Reactiva un pago anulado por error (queda como si nunca se hubiera anulado). */
+export async function reactivarPago(facturaId: string, pagoId: string): Promise<PagoFactura> {
+  let pagoReactivado: PagoFactura | null = null;
+  await runTransaction(db, async (tx) => {
+    const ref  = doc(db, COL, facturaId);
+    const snap = await tx.get(ref);
+    if (!snap.exists()) throw new Error('Factura no encontrada');
+
+    const factura = snap.data() as FacturaProveedor;
+    const pagoExistente = (factura.pagos ?? []).find(p => p.id === pagoId);
+    if (!pagoExistente) throw new Error('Pago no encontrado');
+    if (!pagoExistente.anulado) throw new Error('El pago no está anulado');
+    pagoReactivado = { ...pagoExistente, anulado: false };
+
+    const pagos = (factura.pagos ?? []).map(p => p.id === pagoId ? pagoReactivado! : p);
+    const totalPagado    = pagos.filter(p => !p.anulado).reduce((s, p) => s + p.monto, 0);
+    const saldoPendiente = Math.max(0, factura.total - totalPagado);
+
+    let estado: EstadoFacturaProveedor = 'pendiente';
+    if (saldoPendiente === 0 && totalPagado > 0) estado = 'pagada';
+    else if (totalPagado > 0)                    estado = 'parcial';
+    else if (factura.fechaVencimiento) {
+      const venc = (factura.fechaVencimiento as any)?.toDate?.()
+        ?? new Date(factura.fechaVencimiento);
+      if (venc < new Date()) estado = 'vencida';
+    }
+
+    tx.update(ref, { pagos, saldoPendiente, estado });
+  });
+  return pagoReactivado!;
+}
+
+/** Reactiva una factura de proveedor anulada por error, recalculando su saldo real. */
+export async function reactivarFactura(facturaId: string): Promise<void> {
+  await runTransaction(db, async (tx) => {
+    const ref  = doc(db, COL, facturaId);
+    const snap = await tx.get(ref);
+    if (!snap.exists()) throw new Error('Factura no encontrada');
+
+    const factura = snap.data() as FacturaProveedor;
+    if (factura.estado !== 'anulada') throw new Error('La factura no está anulada');
+
+    const totalPagado    = (factura.pagos ?? []).filter(p => !p.anulado).reduce((s, p) => s + p.monto, 0);
+    const saldoPendiente = Math.max(0, factura.total - totalPagado);
+
+    let estado: EstadoFacturaProveedor = 'pendiente';
+    if (saldoPendiente === 0 && totalPagado > 0) estado = 'pagada';
+    else if (totalPagado > 0)                    estado = 'parcial';
+    else if (factura.fechaVencimiento) {
+      const venc = (factura.fechaVencimiento as any)?.toDate?.()
+        ?? new Date(factura.fechaVencimiento);
+      if (venc < new Date()) estado = 'vencida';
+    }
+
+    tx.update(ref, { estado, saldoPendiente });
+  });
+}
+
 // Recalcular estado de facturas vencidas (para ejecutar periódicamente)
 export async function marcarVencidas(): Promise<void> {
   const snap = await getDoc(doc(db, COL, 'dummy')); // solo para tipado

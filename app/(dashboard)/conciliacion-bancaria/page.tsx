@@ -140,13 +140,13 @@ export default function ConciliacionBancariaPage() {
     try {
       const text  = await file.text();
       const lines = text.split('\n').filter(l => l.trim());
-      // Formato esperado: fecha,descripcion,tipo,monto,saldo
-      // tipo: credito o debito
+      // Formato esperado: fecha,descripcion,tipo,monto,saldo,referencia
+      // tipo: credito o debito — referencia (n° de comprobante/documento) es opcional
       const nuevosMovs: Omit<MovimientoBancario, 'id' | 'createdAt'>[] = [];
       for (const line of lines.slice(1)) { // skip header
         const cols = line.split(',').map(c => c.trim().replace(/"/g, ''));
         if (cols.length < 4) continue;
-        const [fechaStr, descripcion, tipo, montoStr, saldoStr] = cols;
+        const [fechaStr, descripcion, tipo, montoStr, saldoStr, referenciaStr] = cols;
         const partes = fechaStr.split('/');
         const fecha  = partes.length === 3
           ? new Date(parseInt(partes[2]), parseInt(partes[1]) - 1, parseInt(partes[0]))
@@ -158,7 +158,8 @@ export default function ConciliacionBancariaPage() {
           descripcion,
           tipo:  (tipo.toLowerCase().includes('cred') ? 'credito' : 'debito') as 'credito' | 'debito',
           monto: Math.abs(parseFloat(montoStr) || 0),
-          saldo: saldoStr ? parseFloat(saldoStr) : undefined,
+          ...(saldoStr ? { saldo: parseFloat(saldoStr) } : {}),
+          ...(referenciaStr ? { referencia: referenciaStr } : {}),
           estado:'no_conciliado',
         });
       }
@@ -374,8 +375,8 @@ export default function ConciliacionBancariaPage() {
       {/* Formato CSV info */}
       {cuentaSel && (
         <div className="bg-slate-50 border rounded-xl p-3 text-xs text-slate-500">
-          Formato CSV esperado: <code className="font-mono bg-white px-1 py-0.5 rounded border">fecha,descripcion,tipo,monto,saldo</code>
-          &nbsp;— tipo: <em>credito</em> o <em>debito</em> — fecha: dd/MM/yyyy
+          Formato CSV esperado: <code className="font-mono bg-white px-1 py-0.5 rounded border">fecha,descripcion,tipo,monto,saldo,referencia</code>
+          &nbsp;— tipo: <em>credito</em> o <em>debito</em> — fecha: dd/MM/yyyy — saldo y referencia (n° de comprobante) son opcionales
         </div>
       )}
 

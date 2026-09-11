@@ -520,7 +520,7 @@ export default function FacturasProveedorPage() {
     }
     toast.success(
       `Importadas: ${ok} · Duplicadas: ${dup}` +
-      `${omit ? ` · Omitidas (NC/ND/retención): ${omit}` : ''}${err ? ` · Con error: ${err}` : ''}`
+      `${omit ? ` · No reconocidas: ${omit}` : ''}${err ? ` · Con error: ${err}` : ''}`
     );
     if (sinAsiento > 0) {
       toast.warning(`${sinAsiento} factura(s) se importaron pero NO generaron asiento contable. Revísalas en Libro Diario.`, { duration: 12000 });

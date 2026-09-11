@@ -36,7 +36,7 @@ import {
   crearAsientoNotaCreditoRecibida, crearAsientoNotaDebitoRecibida,
   crearAsientoRetencionRecibida, crearAsientoReversion,
 } from '@/lib/contabilidad/motor-asientos';
-import { FacturaProveedor, Proveedor } from '@/types';
+import { FacturaProveedor, Proveedor, CuentaBancaria } from '@/types';
 import {
   subscribeToFacturasProveedor,
   createFacturaProveedor,
@@ -46,6 +46,7 @@ import {
   anularPago, editarPago,
 } from '@/lib/firebase/facturas-proveedor';
 import { editarAsiento } from '@/lib/firebase/asientos';
+import { subscribeToCuentasBancarias, registrarMovimientoBancario, conciliarMovimiento } from '@/lib/firebase/cuentas-bancarias';
 import { createDocRecibido } from '@/lib/firebase/docs-recibidos';
 import { createRetencionRecibida } from '@/lib/firebase/retenciones-recibidas';
 import { subscribeToProveedores, getOrCreateProveedorPorRuc } from '@/lib/firebase/proveedores';
@@ -176,6 +177,8 @@ export default function FacturasProveedorPage() {
   const [dialogOpen,   setDialogOpen]   = useState(false);
   const [pagoDialog,   setPagoDialog]   = useState<FacturaProveedor | null>(null);
   const [detailDialog, setDetailDialog] = useState<FacturaProveedor | null>(null);
+  const [cuentasBancarias, setCuentasBancarias] = useState<CuentaBancaria[]>([]);
+  const [pagoCuentaBancariaId, setPagoCuentaBancariaId] = useState('');
 
   // Dialog editar fecha/referencia de un pago ya registrado
   const [editPagoDialog, setEditPagoDialog] = useState<FacturaProveedor['pagos'][number] | null>(null);
@@ -213,7 +216,8 @@ export default function FacturasProveedorPage() {
   useEffect(() => {
     const u1 = subscribeToFacturasProveedor((d) => { setFacturas(d); setLoading(false); });
     const u2 = subscribeToProveedores(setProveedores);
-    return () => { u1(); u2(); };
+    const u3 = subscribeToCuentasBancarias(setCuentasBancarias);
+    return () => { u1(); u2(); u3(); };
   }, []);
 
   const stats = {
@@ -305,6 +309,24 @@ export default function FacturasProveedorPage() {
       if (asientoId) {
         await vincularAsientoPago(pagoDialog.id, pagoId, asientoId);
         toast.success('Pago registrado');
+
+        // Refleja el egreso en Movimientos Bancarios, ya conciliado con su asiento
+        if (data.metodoPago !== 'efectivo' && pagoCuentaBancariaId) {
+          try {
+            const movId = await registrarMovimientoBancario({
+              cuentaBancariaId: pagoCuentaBancariaId,
+              fecha: fechaPago,
+              descripcion: `Pago a ${pagoDialog.proveedorNombre}`,
+              tipo: 'debito',
+              monto: data.monto,
+              ...(data.referencia ? { referencia: data.referencia } : {}),
+              estado: 'conciliado',
+            });
+            await conciliarMovimiento(movId, asientoId);
+          } catch {
+            toast.warning('El pago no quedó reflejado en Movimientos Bancarios — agrégalo manualmente si lo necesitas para conciliar.');
+          }
+        }
       } else {
         toast.warning('El pago se registró, pero el asiento contable NO se pudo generar. Revísalo en Contabilidad → Libro Diario.', { duration: 12000 });
       }
@@ -746,7 +768,11 @@ export default function FacturasProveedorPage() {
       return n;
     });
 
-  const abrirPagoBanco = () => { setSeleccionadas(new Set()); setPagoBancoOpen(true); };
+  const abrirPagoBanco = () => {
+    setSeleccionadas(new Set());
+    setPagoCuentaBancariaId(cuentasBancarias.find(c => c.activa)?.id ?? '');
+    setPagoBancoOpen(true);
+  };
 
   const totalSeleccionado = facturasPagables
     .filter(f => seleccionadas.has(f.id))
@@ -776,8 +802,23 @@ export default function FacturasProveedorPage() {
           monto: f.saldoPendiente, usaBanco: true,
           usuarioId: user.uid, usuarioNombre: user.nombre,
         });
-        if (asientoId) await vincularAsientoPago(f.id, pagoId, asientoId);
-        else sinAsiento++;
+        if (asientoId) {
+          await vincularAsientoPago(f.id, pagoId, asientoId);
+          if (pagoCuentaBancariaId) {
+            try {
+              const movId = await registrarMovimientoBancario({
+                cuentaBancariaId: pagoCuentaBancariaId,
+                fecha: new Date(),
+                descripcion: `Pago a ${f.proveedorNombre}`,
+                tipo: 'debito',
+                monto: f.saldoPendiente,
+                referencia: f.numeroFactura,
+                estado: 'conciliado',
+              });
+              await conciliarMovimiento(movId, asientoId);
+            } catch { /* no bloquea el flujo de pago masivo */ }
+          }
+        } else sinAsiento++;
         // 3. Línea para el archivo del banco
         if (!prov?.numeroCuentaBancaria || !prov?.bancoCodigo) sinDatos++;
         pagos.push({
@@ -942,6 +983,7 @@ export default function FacturasProveedorPage() {
                         <Button variant="ghost" size="icon" title="Registrar pago"
                           onClick={() => {
                             setPagoDialog(f);
+                            setPagoCuentaBancariaId(cuentasBancarias.find(c => c.activa)?.id ?? '');
                             pagoForm.reset({ monto: f.saldoPendiente, metodoPago: 'transferencia', fecha: new Date().toISOString().split('T')[0] });
                           }}
                           className="h-8 w-8 text-slate-500 hover:text-green-600">
@@ -1133,6 +1175,24 @@ export default function FacturasProveedorPage() {
                 <Input placeholder="Número de transferencia, cheque, etc."
                   {...pagoForm.register('referencia')} />
               </div>
+              {pagoForm.watch('metodoPago') !== 'efectivo' && (
+                <div className="space-y-1.5">
+                  <Label>Cuenta bancaria de la que sale el dinero</Label>
+                  <Select value={pagoCuentaBancariaId} onValueChange={setPagoCuentaBancariaId}>
+                    <SelectTrigger><SelectValue placeholder="Sin registrar en Movimientos Bancarios" /></SelectTrigger>
+                    <SelectContent>
+                      {cuentasBancarias.filter(c => c.activa).map(c => (
+                        <SelectItem key={c.id} value={c.id}>
+                          {c.banco} — {c.numeroCuenta}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <p className="text-xs text-slate-400">
+                    Se registra ya conciliado en Movimientos Bancarios / Conciliación Bancaria.
+                  </p>
+                </div>
+              )}
             </div>
           )}
           <DialogFooter>
@@ -1478,7 +1538,7 @@ export default function FacturasProveedorPage() {
           <div className="space-y-4 py-2">
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 items-end">
               <div className="space-y-1.5">
-                <Label>Banco</Label>
+                <Label>Formato de archivo</Label>
                 <Select value={bancoSel} onValueChange={v => setBancoSel(v as BancoPago)}>
                   <SelectTrigger><SelectValue /></SelectTrigger>
                   <SelectContent>
@@ -1489,6 +1549,20 @@ export default function FacturasProveedorPage() {
               <div className="text-right">
                 <p className="text-xs text-slate-400">Seleccionado</p>
                 <p className="text-xl font-bold">{currency(totalSeleccionado)}</p>
+              </div>
+              <div className="space-y-1.5 sm:col-span-2">
+                <Label>Cuenta bancaria de la que sale el dinero</Label>
+                <Select value={pagoCuentaBancariaId} onValueChange={setPagoCuentaBancariaId}>
+                  <SelectTrigger><SelectValue placeholder="Sin registrar en Movimientos Bancarios" /></SelectTrigger>
+                  <SelectContent>
+                    {cuentasBancarias.filter(c => c.activa).map(c => (
+                      <SelectItem key={c.id} value={c.id}>{c.banco} — {c.numeroCuenta}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <p className="text-xs text-slate-400">
+                  Registra cada pago ya conciliado en Movimientos Bancarios / Conciliación Bancaria.
+                </p>
               </div>
             </div>
 

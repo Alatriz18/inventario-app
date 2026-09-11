@@ -22,7 +22,7 @@ import { Label }  from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Ban, ChevronDown, Pencil } from 'lucide-react';
 
-import { CuentaCobrar, CobroCxC, MetodoPago, Cliente } from '@/types';
+import { CuentaCobrar, CobroCxC, MetodoPago, Cliente, CuentaBancaria } from '@/types';
 import {
   subscribeToCxC, registrarCobroCxC, actualizarEstadosVencidos, crearCuentaCobrar,
   anularCobro, vincularAsientoCobro, editarCobro,
@@ -31,6 +31,7 @@ import { crearAsientoCobro, crearAsientoReversion } from '@/lib/contabilidad/mot
 import { editarAsiento } from '@/lib/firebase/asientos';
 import { subscribeToClientes } from '@/lib/firebase/clientes';
 import { subscribeToComprobantes, Comprobante } from '@/lib/firebase/comprobantes';
+import { subscribeToCuentasBancarias, registrarMovimientoBancario, conciliarMovimiento } from '@/lib/firebase/cuentas-bancarias';
 import { useAuth } from '@/context/AuthContext';
 
 const currency = (v: number) => `$${v.toFixed(2)}`;
@@ -60,6 +61,8 @@ export default function CxCPage() {
   const [retFuente,  setRetFuente]  = useState('');
   const [retIVA,     setRetIVA]     = useState('');
   const [saving,     setSaving]     = useState(false);
+  const [cuentasBancarias, setCuentasBancarias] = useState<CuentaBancaria[]>([]);
+  const [cuentaBancariaId, setCuentaBancariaId] = useState('');
 
   // Dialog detalle (historial de cobros)
   const [detailCxc,  setDetailCxc]  = useState<CuentaCobrar | null>(null);
@@ -85,7 +88,8 @@ export default function CxCPage() {
     const unsub = subscribeToCxC(data => { setCxcList(data); setLoading(false); });
     const unsubCli = subscribeToClientes(setClientes);
     const unsubComp = subscribeToComprobantes(setComprobantes);
-    return () => { unsub(); unsubCli(); unsubComp(); };
+    const unsubBancos = subscribeToCuentasBancarias(setCuentasBancarias);
+    return () => { unsub(); unsubCli(); unsubComp(); unsubBancos(); };
   }, []);
 
   // Comprobante (factura/nota de venta) vinculado a cada CxC, por ventaId
@@ -204,6 +208,7 @@ export default function CxCPage() {
     setRefCobro('');
     setRetFuente('');
     setRetIVA('');
+    setCuentaBancariaId(cuentasBancarias.find(c => c.activa)?.id ?? '');
     setDialogOpen(true);
   };
 
@@ -249,6 +254,24 @@ export default function CxCPage() {
       if (asientoId) {
         await vincularAsientoCobro(cxcSel.id, cobroId, asientoId);
         toast.success('Cobro registrado exitosamente');
+
+        // Refleja el ingreso en Movimientos Bancarios, ya conciliado con su asiento
+        if (cuentaBancariaId) {
+          try {
+            const movId = await registrarMovimientoBancario({
+              cuentaBancariaId,
+              fecha,
+              descripcion: `Cobro ${cxcSel.clienteNombre}`,
+              tipo: 'credito',
+              monto,
+              ...(refCobro ? { referencia: refCobro } : {}),
+              estado: 'conciliado',
+            });
+            await conciliarMovimiento(movId, asientoId);
+          } catch {
+            toast.warning('El cobro no quedó reflejado en Movimientos Bancarios — agrégalo manualmente si lo necesitas para conciliar.');
+          }
+        }
       } else {
         toast.warning('El cobro se registró, pero el asiento contable NO se pudo generar. Revísalo en Contabilidad → Libro Diario.', { duration: 12000 });
       }
@@ -603,6 +626,24 @@ export default function CxCPage() {
                   <Label>Referencia / N° cheque</Label>
                   <Input value={refCobro} onChange={e => setRefCobro(e.target.value)}
                     placeholder="Opcional" className="mt-1" />
+                </div>
+                <div className="col-span-2">
+                  <Label>Cuenta bancaria que recibe el dinero</Label>
+                  <Select value={cuentaBancariaId} onValueChange={setCuentaBancariaId}>
+                    <SelectTrigger className="mt-1">
+                      <SelectValue placeholder="Sin registrar en Movimientos Bancarios" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {cuentasBancarias.filter(c => c.activa).map(c => (
+                        <SelectItem key={c.id} value={c.id}>
+                          {c.banco} — {c.numeroCuenta}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <p className="text-xs text-slate-400 mt-1">
+                    Se registra ya conciliado en Movimientos Bancarios / Conciliación Bancaria.
+                  </p>
                 </div>
                 <div>
                   <Label>Ret. Fuente recibida ($)</Label>

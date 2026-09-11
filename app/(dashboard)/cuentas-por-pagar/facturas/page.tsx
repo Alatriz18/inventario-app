@@ -298,6 +298,7 @@ export default function FacturasProveedorPage() {
         fecha:           fechaPago,
         proveedorNombre: pagoDialog.proveedorNombre,
         monto:           data.monto,
+        usaBanco:        data.metodoPago !== 'efectivo',
         usuarioId:       user.uid,
         usuarioNombre:   user.nombre,
       });

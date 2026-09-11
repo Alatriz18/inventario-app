@@ -101,6 +101,14 @@ export default function CxCPage() {
     return cxc.notas ?? '—';
   };
 
+  // N° de comprobante(s) de pago (referencia de cada cobro registrado)
+  const referenciasCobros = (cxc: CuentaCobrar): string => {
+    const refs = (cxc.cobros ?? [])
+      .filter(c => !c.anulado && c.referencia)
+      .map(c => c.referencia as string);
+    return refs.length > 0 ? refs.join(', ') : '—';
+  };
+
   // ── Filtros ──
   const filtradas = useMemo(() => {
     const q = search.toLowerCase();
@@ -315,6 +323,7 @@ export default function CxCPage() {
     const rows = filtradas.map(c => ({
       Cliente:         c.clienteNombre,
       Comprobante:     numeroComprobante(c),
+      ComprobantePago: referenciasCobros(c),
       Identificacion:  c.clienteIdentificacion,
       FechaEmision:    fmtDate(c.fechaEmision),
       FechaVencimiento:fmtDate(c.fechaVencimiento),
@@ -408,6 +417,7 @@ export default function CxCPage() {
             <TableRow className="bg-slate-50">
               <TableHead>Cliente</TableHead>
               <TableHead>Comprobante</TableHead>
+              <TableHead>N° Comp. Pago</TableHead>
               <TableHead>Emisión</TableHead>
               <TableHead>Vencimiento</TableHead>
               <TableHead className="text-right">Total</TableHead>
@@ -420,13 +430,13 @@ export default function CxCPage() {
           <TableBody>
             {loading ? (
               Array.from({ length: 5 }).map((_, i) => (
-                <TableRow key={i}>{Array.from({ length: 9 }).map((_, j) => (
+                <TableRow key={i}>{Array.from({ length: 10 }).map((_, j) => (
                   <TableCell key={j}><Skeleton className="h-4 w-full" /></TableCell>
                 ))}</TableRow>
               ))
             ) : filtradas.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={9} className="text-center py-10 text-slate-400">
+                <TableCell colSpan={10} className="text-center py-10 text-slate-400">
                   No hay registros en esta categoría.
                 </TableCell>
               </TableRow>
@@ -440,6 +450,7 @@ export default function CxCPage() {
                     <p className="text-xs text-slate-400">{c.clienteIdentificacion}</p>
                   </TableCell>
                   <TableCell className="font-mono text-xs text-slate-500">{numeroComprobante(c)}</TableCell>
+                  <TableCell className="font-mono text-xs text-slate-500">{referenciasCobros(c)}</TableCell>
                   <TableCell className="text-sm text-slate-500">{fmtDate(c.fechaEmision)}</TableCell>
                   <TableCell className="text-sm text-slate-500">{fmtDate(c.fechaVencimiento)}</TableCell>
                   <TableCell className="text-right font-semibold">{currency(c.total)}</TableCell>

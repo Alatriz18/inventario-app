@@ -1,9 +1,9 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import { format } from 'date-fns';
 import { es } from 'date-fns/locale';
-import { Plus, FileText } from 'lucide-react';
+import { Plus, FileText, Upload } from 'lucide-react';
 import { toast } from 'sonner';
 
 import PageHeader  from '@/components/shared/PageHeader';
@@ -26,11 +26,20 @@ import { RetencionRecibida, LineaRetencionRecibida } from '@/types';
 import {
   subscribeToRetencionesRecibidas,
   createRetencionRecibida,
+  updateRetencionRecibida,
 } from '@/lib/firebase/retenciones-recibidas';
 import { crearAsientoRetencionRecibida } from '@/lib/contabilidad/motor-asientos';
+import { parsearRetencionXML, detectarTipoComprobante } from '@/lib/sri/xmlParser';
+import { subscribeToComprobantes, Comprobante } from '@/lib/firebase/comprobantes';
+import { getCxCByVentaId, registrarCobroCxC, vincularAsientoCobro } from '@/lib/firebase/cuentas-cobrar';
 import { useAuth } from '@/context/AuthContext';
 
 const currency = (v: number) => `$${v.toFixed(2)}`;
+
+function parseFechaXml(s: string): Date {
+  const [dd, MM, yyyy] = (s || '').split('/');
+  return yyyy ? new Date(`${yyyy}-${MM}-${dd}`) : new Date();
+}
 
 const CODIGOS_FUENTE = [
   { codigo: '303', descripcion: 'Honorarios profesionales — 10%',          porcentaje: 10 },
@@ -61,9 +70,12 @@ function nuevaLinea(): LineaForm {
 export default function RetencionesRecibidasPage() {
   const { user } = useAuth();
   const [retenciones, setRetenciones] = useState<RetencionRecibida[]>([]);
+  const [comprobantesEmitidos, setComprobantesEmitidos] = useState<Comprobante[]>([]);
   const [loading,     setLoading]     = useState(true);
   const [dialogOpen,  setDialogOpen]  = useState(false);
   const [saving,      setSaving]      = useState(false);
+  const [importing,   setImporting]   = useState(false);
+  const xmlRef = useRef<HTMLInputElement>(null);
 
   // Form state
   const [clienteNombre,        setClienteNombre]        = useState('');
@@ -75,8 +87,86 @@ export default function RetencionesRecibidasPage() {
   const [lineas,               setLineas]               = useState<LineaForm[]>([nuevaLinea()]);
 
   useEffect(() => {
-    return subscribeToRetencionesRecibidas(d => { setRetenciones(d); setLoading(false); });
+    const u1 = subscribeToRetencionesRecibidas(d => { setRetenciones(d); setLoading(false); });
+    const u2 = subscribeToComprobantes(setComprobantesEmitidos);
+    return () => { u1(); u2(); };
   }, []);
+
+  // ── Importar XML(s) de comprobantes de retención que nos entregan los clientes ──
+  const handleImportarXML = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(e.target.files ?? []);
+    if (!files.length || !user) return;
+    setImporting(true);
+    let ok = 0, dup = 0, err = 0, sinAsiento = 0;
+    const existentes = new Set(retenciones.map(r => r.claveAcceso).filter(Boolean) as string[]);
+
+    for (const file of files) {
+      try {
+        const xml = await file.text();
+        if (detectarTipoComprobante(xml) !== 'retencion') { err++; continue; }
+        const d = parsearRetencionXML(xml);
+        if (!d) { err++; continue; }
+        if (d.claveAcceso && existentes.has(d.claveAcceso)) { dup++; continue; }
+
+        const numeroRet = `${d.estab}-${d.ptoEmi}-${d.secuencial}`;
+
+        let ventaId = '', numeroComprobante = '';
+        if (d.numDocSustento && d.numDocSustento.length === 15) {
+          const serieBuscada = `${d.numDocSustento.slice(0, 3)}-${d.numDocSustento.slice(3, 6)}`;
+          const secBuscado   = d.numDocSustento.slice(6);
+          const comp = comprobantesEmitidos.find(c => c.serie === serieBuscada && c.secuencial === secBuscado);
+          if (comp) { ventaId = comp.ventaId ?? ''; numeroComprobante = `${comp.serie}-${comp.secuencial}`; }
+        }
+
+        const retId = await createRetencionRecibida({
+          ventaId, numeroComprobante,
+          clienteId: '', clienteNombre: d.razonSocial, clienteIdentificacion: d.ruc,
+          numeroRetencion: numeroRet, claveAcceso: d.claveAcceso, fechaEmision: parseFechaXml(d.fechaEmision),
+          ejercicioFiscal: d.periodoFiscal,
+          lineas: d.lineas.map(l => ({
+            tipo: l.tipo, codigo: l.codigo, descripcion: l.codigo,
+            porcentaje: l.porcentaje, baseImponible: l.baseImponible, valorRetenido: l.valorRetenido,
+          })),
+          totalRetenido: d.totalRetenido, retFuente: d.retFuente, retIVA: d.retIVA,
+          usuarioId: user.uid, usuarioNombre: user.nombre,
+        });
+
+        const asientoId = await crearAsientoRetencionRecibida({
+          retencionId: retId, fecha: parseFechaXml(d.fechaEmision), clienteNombre: d.razonSocial,
+          retFuente: d.retFuente, retIVA: d.retIVA, totalRetenido: d.totalRetenido,
+          usuarioId: user.uid, usuarioNombre: user.nombre,
+        });
+        if (asientoId) await updateRetencionRecibida(retId, { asientoId });
+        else sinAsiento++;
+
+        // Si sustenta una venta a crédito con CxC activa, la retención cancela parte del saldo
+        if (ventaId && asientoId) {
+          try {
+            const cxc = await getCxCByVentaId(ventaId);
+            if (cxc && cxc.estado !== 'pagada' && cxc.estado !== 'anulada') {
+              const cobroId = await registrarCobroCxC(cxc.id, {
+                fecha: parseFechaXml(d.fechaEmision), monto: d.totalRetenido, metodoPago: 'retencion',
+                referencia: numeroRet, usuarioId: user.uid, usuarioNombre: user.nombre,
+              }, user.uid, user.nombre);
+              await vincularAsientoCobro(cxc.id, cobroId, asientoId);
+            }
+          } catch { /* la retención ya quedó registrada; el saldo se puede ajustar manualmente */ }
+        }
+
+        if (d.claveAcceso) existentes.add(d.claveAcceso);
+        ok++;
+      } catch {
+        err++;
+      }
+    }
+
+    setImporting(false);
+    if (xmlRef.current) xmlRef.current.value = '';
+    toast.success(`Importadas: ${ok} · Duplicadas: ${dup}${err ? ` · Con error: ${err}` : ''}`);
+    if (sinAsiento > 0) {
+      toast.warning(`${sinAsiento} retención(es) se importaron pero NO generaron asiento contable. Revísalas en Libro Diario.`, { duration: 12000 });
+    }
+  };
 
   function addLinea() { setLineas(prev => [...prev, nuevaLinea()]); }
   function removeLinea(i: number) { setLineas(prev => prev.filter((_, idx) => idx !== i)); }
@@ -179,9 +269,16 @@ export default function RetencionesRecibidasPage() {
         title="Retenciones Recibidas"
         description="Comprobantes de retención que los clientes nos entregan al pagarnos"
         action={
-          <Button onClick={() => setDialogOpen(true)}>
-            <Plus className="mr-2 h-4 w-4" /> Registrar Retención
-          </Button>
+          <div className="flex gap-2">
+            <input ref={xmlRef} type="file" accept=".xml" multiple className="hidden" onChange={handleImportarXML} />
+            <Button variant="outline" disabled={importing} onClick={() => xmlRef.current?.click()}
+              title="Sube el/los comprobante(s) de retención que te entregó el cliente">
+              <Upload className="mr-2 h-4 w-4" /> {importing ? 'Importando…' : 'Importar XML'}
+            </Button>
+            <Button onClick={() => setDialogOpen(true)}>
+              <Plus className="mr-2 h-4 w-4" /> Registrar Retención
+            </Button>
+          </div>
         }
       />
 

@@ -30,6 +30,7 @@ import {
 import { crearAsientoCobro, crearAsientoReversion } from '@/lib/contabilidad/motor-asientos';
 import { editarAsiento } from '@/lib/firebase/asientos';
 import { subscribeToClientes } from '@/lib/firebase/clientes';
+import { subscribeToComprobantes, Comprobante } from '@/lib/firebase/comprobantes';
 import { useAuth } from '@/context/AuthContext';
 
 const currency = (v: number) => `$${v.toFixed(2)}`;
@@ -44,6 +45,7 @@ const BADGE_ESTADO: Record<string, string> = {
 export default function CxCPage() {
   const { user } = useAuth();
   const [cxcList,  setCxcList]  = useState<CuentaCobrar[]>([]);
+  const [comprobantes, setComprobantes] = useState<Comprobante[]>([]);
   const [loading,  setLoading]  = useState(true);
   const [search,   setSearch]   = useState('');
   const [tabActivo,setTabActivo]= useState('pendientes');
@@ -82,8 +84,22 @@ export default function CxCPage() {
     actualizarEstadosVencidos().catch(() => {});
     const unsub = subscribeToCxC(data => { setCxcList(data); setLoading(false); });
     const unsubCli = subscribeToClientes(setClientes);
-    return () => { unsub(); unsubCli(); };
+    const unsubComp = subscribeToComprobantes(setComprobantes);
+    return () => { unsub(); unsubCli(); unsubComp(); };
   }, []);
+
+  // Comprobante (factura/nota de venta) vinculado a cada CxC, por ventaId
+  const comprobantePorVenta = useMemo(() => {
+    const m = new Map<string, Comprobante>();
+    comprobantes.forEach(c => { if (c.ventaId) m.set(c.ventaId, c); });
+    return m;
+  }, [comprobantes]);
+
+  const numeroComprobante = (cxc: CuentaCobrar): string => {
+    const comp = cxc.ventaId ? comprobantePorVenta.get(cxc.ventaId) : undefined;
+    if (comp) return `${comp.serie}-${comp.secuencial}`;
+    return cxc.notas ?? '—';
+  };
 
   // ── Filtros ──
   const filtradas = useMemo(() => {
@@ -298,6 +314,7 @@ export default function CxCPage() {
   const exportar = () => {
     const rows = filtradas.map(c => ({
       Cliente:         c.clienteNombre,
+      Comprobante:     numeroComprobante(c),
       Identificacion:  c.clienteIdentificacion,
       FechaEmision:    fmtDate(c.fechaEmision),
       FechaVencimiento:fmtDate(c.fechaVencimiento),
@@ -390,6 +407,7 @@ export default function CxCPage() {
           <TableHeader>
             <TableRow className="bg-slate-50">
               <TableHead>Cliente</TableHead>
+              <TableHead>Comprobante</TableHead>
               <TableHead>Emisión</TableHead>
               <TableHead>Vencimiento</TableHead>
               <TableHead className="text-right">Total</TableHead>
@@ -402,13 +420,13 @@ export default function CxCPage() {
           <TableBody>
             {loading ? (
               Array.from({ length: 5 }).map((_, i) => (
-                <TableRow key={i}>{Array.from({ length: 8 }).map((_, j) => (
+                <TableRow key={i}>{Array.from({ length: 9 }).map((_, j) => (
                   <TableCell key={j}><Skeleton className="h-4 w-full" /></TableCell>
                 ))}</TableRow>
               ))
             ) : filtradas.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={8} className="text-center py-10 text-slate-400">
+                <TableCell colSpan={9} className="text-center py-10 text-slate-400">
                   No hay registros en esta categoría.
                 </TableCell>
               </TableRow>
@@ -421,6 +439,7 @@ export default function CxCPage() {
                     <p className="font-medium text-sm">{c.clienteNombre}</p>
                     <p className="text-xs text-slate-400">{c.clienteIdentificacion}</p>
                   </TableCell>
+                  <TableCell className="font-mono text-xs text-slate-500">{numeroComprobante(c)}</TableCell>
                   <TableCell className="text-sm text-slate-500">{fmtDate(c.fechaEmision)}</TableCell>
                   <TableCell className="text-sm text-slate-500">{fmtDate(c.fechaVencimiento)}</TableCell>
                   <TableCell className="text-right font-semibold">{currency(c.total)}</TableCell>
@@ -609,6 +628,7 @@ export default function CxCPage() {
               <div className="grid grid-cols-2 gap-3 text-sm">
                 <div><p className="text-xs text-slate-400">Cliente</p><p className="font-medium">{detailCxc.clienteNombre}</p></div>
                 <div><p className="text-xs text-slate-400">Identificación</p><p className="font-medium">{detailCxc.clienteIdentificacion}</p></div>
+                <div><p className="text-xs text-slate-400">Comprobante</p><p className="font-mono text-xs font-medium">{numeroComprobante(detailCxc)}</p></div>
                 <div><p className="text-xs text-slate-400">Fecha emisión</p><p className="font-medium">{fmtDate(detailCxc.fechaEmision)}</p></div>
                 <div><p className="text-xs text-slate-400">Vencimiento</p><p className="font-medium">{fmtDate(detailCxc.fechaVencimiento)}</p></div>
               </div>

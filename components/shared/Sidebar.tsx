@@ -106,7 +106,13 @@ const NAV: NavItem[] = [
     ],
   },
   { label: 'Activos Fijos',         href: '/activos-fijos',         icon: Layers,   modulo: 'activos_fijos' },
-  { label: 'Conciliación Bancaria', href: '/conciliacion-bancaria', icon: Building2,modulo: 'conciliacion_bancaria' },
+  {
+    label: 'Bancos', icon: Building2,
+    children: [
+      { label: 'Movimientos Bancarios', href: '/movimientos-bancarios', icon: Landmark, modulo: 'movimientos_bancarios' },
+      { label: 'Conciliación Bancaria', href: '/conciliacion-bancaria', icon: Building2, modulo: 'conciliacion_bancaria' },
+    ],
+  },
   {
     label: 'Reportes', icon: BarChart3,
     children: [

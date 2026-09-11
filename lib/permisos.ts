@@ -27,7 +27,7 @@ export type Modulo =
   | 'retenciones_config' | 'ret_emitidas' | 'ret_recibidas'
   | 'ice'             | 'ats'            | 'form_104'   | 'form_103'
   | 'form_105'        | 'form_rimpe'     | 'form_101'
-  | 'activos_fijos'   | 'conciliacion_bancaria'
+  | 'activos_fijos'   | 'movimientos_bancarios' | 'conciliacion_bancaria'
   | 'reportes'
   | 'usuarios'        | 'configuracion';
 
@@ -60,7 +60,7 @@ const PERMISOS_MODULO: Record<UserRole, Modulo[]> = {
     'periodos',
     'retenciones_config', 'ret_emitidas', 'ret_recibidas',
     'ice', 'ats', 'form_104', 'form_103', 'form_105', 'form_rimpe', 'form_101',
-    'activos_fijos', 'conciliacion_bancaria',
+    'activos_fijos', 'movimientos_bancarios', 'conciliacion_bancaria',
     'reportes',
     'usuarios', 'configuracion',
   ],
@@ -94,7 +94,7 @@ const PERMISOS_MODULO: Record<UserRole, Modulo[]> = {
     'periodos',
     'retenciones_config', 'ret_emitidas', 'ret_recibidas',
     'ice', 'ats', 'form_104', 'form_103', 'form_105', 'form_rimpe', 'form_101',
-    'activos_fijos', 'conciliacion_bancaria',
+    'activos_fijos', 'movimientos_bancarios', 'conciliacion_bancaria',
     'reportes',
   ],
 
@@ -199,6 +199,7 @@ const RUTA_MODULO: Record<string, Modulo> = {
   '/tributario/form-rimpe':               'form_rimpe',
   '/tributario/form-101':                 'form_101',
   '/activos-fijos':                       'activos_fijos',
+  '/movimientos-bancarios':               'movimientos_bancarios',
   '/conciliacion-bancaria':               'conciliacion_bancaria',
   '/reportes':                            'reportes',
   '/usuarios':                            'usuarios',

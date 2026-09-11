@@ -48,23 +48,38 @@ export async function deleteCuentaBancaria(id: string): Promise<void> {
 
 // ── Movimientos bancarios ──────────────────────────────────────────────────
 
+function toDateMov(v: any): Date {
+  if (!v) return new Date(0);
+  if (v?.toDate) return v.toDate();
+  return new Date(v);
+}
+
 export function subscribeToMovimientosBancarios(
   cuentaId: string,
-  callback: (data: MovimientoBancario[]) => void
+  callback: (data: MovimientoBancario[]) => void,
+  onError?: (error: Error) => void
 ): () => void {
+  // Solo se filtra por cuentaBancariaId (sin orderBy) para no depender de un
+  // índice compuesto en Firestore; se ordena por fecha en el cliente.
   const q = query(
     collection(db, COL_MOVS),
-    where('cuentaBancariaId', '==', cuentaId),
-    orderBy('fecha', 'desc')
+    where('cuentaBancariaId', '==', cuentaId)
   );
-  return onSnapshot(q, (snap) => {
-    callback(
-      snap.docs.map((d: QueryDocumentSnapshot<DocumentData>) => ({
+  return onSnapshot(
+    q,
+    (snap) => {
+      const data = snap.docs.map((d: QueryDocumentSnapshot<DocumentData>) => ({
         id: d.id,
         ...d.data(),
-      } as MovimientoBancario))
-    );
-  });
+      } as MovimientoBancario));
+      data.sort((a, b) => toDateMov(b.fecha).getTime() - toDateMov(a.fecha).getTime());
+      callback(data);
+    },
+    (error) => {
+      console.error('Error al leer movimientos bancarios:', error);
+      onError?.(error);
+    }
+  );
 }
 
 export async function importarMovimientosBancarios(

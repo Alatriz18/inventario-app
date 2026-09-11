@@ -82,6 +82,9 @@ export default function MovimientosBancariosPage() {
     const unsub = subscribeToMovimientosBancarios(cuentaSel, d => {
       setMovs(d);
       setLoading(false);
+    }, () => {
+      toast.error('No se pudieron cargar los movimientos de esta cuenta');
+      setLoading(false);
     });
     return unsub;
   }, [cuentaSel]);

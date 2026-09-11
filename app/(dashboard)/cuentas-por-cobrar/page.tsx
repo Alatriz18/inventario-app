@@ -28,7 +28,7 @@ import {
   anularCobro, vincularAsientoCobro, editarCobro,
 } from '@/lib/firebase/cuentas-cobrar';
 import { crearAsientoCobro, crearAsientoReversion } from '@/lib/contabilidad/motor-asientos';
-import { editarAsiento } from '@/lib/firebase/asientos';
+import { editarAsiento, escalarLineasAsiento } from '@/lib/firebase/asientos';
 import { subscribeToClientes } from '@/lib/firebase/clientes';
 import { subscribeToComprobantes, Comprobante } from '@/lib/firebase/comprobantes';
 import { subscribeToCuentasBancarias, registrarMovimientoBancario, conciliarMovimiento } from '@/lib/firebase/cuentas-bancarias';
@@ -71,6 +71,7 @@ export default function CxCPage() {
   const [editCobro,     setEditCobro]     = useState<CobroCxC | null>(null);
   const [editFecha,     setEditFecha]     = useState('');
   const [editReferencia,setEditReferencia]= useState('');
+  const [editMonto,     setEditMonto]     = useState('');
   const [savingEdit,    setSavingEdit]    = useState(false);
 
   // Nueva CxC manual
@@ -311,23 +312,42 @@ export default function CxCPage() {
     setEditCobro(cobro);
     setEditFecha(format((cobro.fecha as any)?.toDate?.() ?? new Date(cobro.fecha), 'yyyy-MM-dd'));
     setEditReferencia(cobro.referencia ?? '');
+    setEditMonto(cobro.monto.toFixed(2));
   };
 
   const handleGuardarEdicionCobro = async () => {
     if (!editCobro || !detailCxc || !user) return;
     if (!editFecha) { toast.error('Ingresa la fecha'); return; }
+    const nuevoMonto = parseFloat(editMonto);
+    if (isNaN(nuevoMonto) || nuevoMonto <= 0) { toast.error('Monto inválido'); return; }
+    const otrosCobrados = (detailCxc.cobros ?? [])
+      .filter(c => !c.anulado && c.id !== editCobro.id)
+      .reduce((s, c) => s + c.monto, 0);
+    if (otrosCobrados + nuevoMonto > detailCxc.total + 0.01) {
+      toast.error(`El monto supera el total de la cuenta (${currency(detailCxc.total)})`);
+      return;
+    }
     setSavingEdit(true);
     try {
       const nuevaFecha = new Date(editFecha + 'T12:00:00');
-      await editarCobro(detailCxc.id, editCobro.id, { fecha: nuevaFecha, referencia: editReferencia.trim() });
+      const montoCambio = Math.abs(nuevoMonto - editCobro.monto) > 0.005;
+      await editarCobro(detailCxc.id, editCobro.id, {
+        fecha: nuevaFecha, referencia: editReferencia.trim(),
+        ...(montoCambio ? { monto: nuevoMonto } : {}),
+      });
 
       if (editCobro.asientoId) {
         try {
+          if (montoCambio) {
+            await escalarLineasAsiento(editCobro.asientoId, nuevoMonto / editCobro.monto,
+              user.uid, user.nombre ?? user.email ?? 'Usuario');
+          }
           await editarAsiento(editCobro.asientoId, { fecha: nuevaFecha },
             user.uid, user.nombre ?? user.email ?? 'Usuario');
         } catch (e: any) {
           toast.warning(`Cobro actualizado, pero el asiento contable no se pudo actualizar: ${e.message}`, { duration: 10000 });
           setEditCobro(null);
+          setDetailCxc(null);
           return;
         }
       }
@@ -745,9 +765,12 @@ export default function CxCPage() {
           </DialogHeader>
           {editCobro && (
             <div className="space-y-3">
-              <p className="text-sm text-slate-500">
-                Monto: <strong className="text-slate-800">{currency(editCobro.monto)}</strong> — {editCobro.metodoPago}
-              </p>
+              <p className="text-sm text-slate-500">{editCobro.metodoPago}</p>
+              <div>
+                <Label>Monto *</Label>
+                <Input type="number" min="0.01" step="0.01" value={editMonto}
+                  onChange={e => setEditMonto(e.target.value)} className="mt-1" />
+              </div>
               <div>
                 <Label>Fecha de cobro *</Label>
                 <Input type="date" value={editFecha} max={new Date().toISOString().split('T')[0]}
@@ -760,7 +783,8 @@ export default function CxCPage() {
               </div>
               {editCobro.asientoId && (
                 <p className="text-xs text-slate-400">
-                  El asiento contable vinculado se actualizará con la nueva fecha automáticamente.
+                  El asiento contable vinculado se ajustará automáticamente (fecha y, si cambia el monto,
+                  el valor de sus líneas — Libro Diario, Balance y reportes quedan al día).
                 </p>
               )}
             </div>

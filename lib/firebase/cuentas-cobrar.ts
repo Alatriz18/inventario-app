@@ -98,10 +98,10 @@ export async function vincularAsientoCobro(
   await updateDoc(ref, { cobros });
 }
 
-/** Edita la fecha y/o referencia de un cobro ya registrado (no toca monto ni saldo). */
+/** Edita fecha, referencia y/o monto de un cobro ya registrado; recalcula saldo/estado si cambia el monto. */
 export async function editarCobro(
   cxcId: string, cobroId: string,
-  cambios: { fecha?: Date; referencia?: string }
+  cambios: { fecha?: Date; referencia?: string; monto?: number }
 ): Promise<CobroCxC> {
   let cobroEditado: CobroCxC | null = null;
   await runTransaction(db, async (tx: Transaction) => {
@@ -114,15 +114,34 @@ export async function editarCobro(
     if (!cobroExistente) throw new Error('Cobro no encontrado');
     if (cobroExistente.anulado) throw new Error('No se puede editar un cobro anulado');
 
+    if (cambios.monto !== undefined && cambios.monto <= 0) {
+      throw new Error('El monto debe ser mayor a 0');
+    }
+
     const actualizado: CobroCxC = { ...cobroExistente };
     if (cambios.fecha) actualizado.fecha = cambios.fecha;
+    if (cambios.monto !== undefined) actualizado.monto = cambios.monto;
     if (cambios.referencia !== undefined) {
       if (cambios.referencia) actualizado.referencia = cambios.referencia;
       else delete actualizado.referencia;
     }
     cobroEditado = actualizado;
     const cobros = (cxc.cobros ?? []).map(c => c.id === cobroId ? actualizado : c);
-    tx.update(ref, { cobros });
+
+    if (cambios.monto !== undefined) {
+      const totalCobrado   = Math.round(cobros.filter(c => !c.anulado).reduce((s, c) => s + c.monto, 0) * 100) / 100;
+      if (totalCobrado > cxc.total + 0.01) {
+        throw new Error(`El nuevo monto hace que el total cobrado (${totalCobrado.toFixed(2)}) supere el total de la cuenta (${cxc.total.toFixed(2)})`);
+      }
+      const saldoPendiente = Math.round(Math.max(0, cxc.total - totalCobrado) * 100) / 100;
+      const estado: EstadoCxC =
+        saldoPendiente === 0 && totalCobrado > 0 ? 'pagada'  :
+        totalCobrado   > 0                       ? 'parcial' :
+        'pendiente';
+      tx.update(ref, { cobros, saldoPendiente, estado });
+    } else {
+      tx.update(ref, { cobros });
+    }
   });
   return cobroEditado!;
 }

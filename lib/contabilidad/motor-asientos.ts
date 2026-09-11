@@ -380,43 +380,53 @@ interface ParamsCobro extends ParamsBase {
   retIVA?:      number;
 }
 
+const METODO_COBRO_LABEL: Record<string, string> = {
+  deposito:      'Depósito bancario',
+  cheque:        'Cheque',
+  transferencia: 'Transferencia',
+  tarjeta:       'Tarjeta',
+  efectivo:      'Efectivo',
+};
+
+function buildLineasCobro(
+  cuentas: CuentaContable[],
+  config:  Awaited<ReturnType<typeof getOrCreateConfigContable>>,
+  p:       ParamsCobro
+): AsientoLinea[] {
+  const cuentaEntrada = p.usaBanco ? config.cuentaBancos : config.cuentaCaja;
+  const lineas: AsientoLinea[] = [];
+  const metodoDesc = p.metodoCobro ? (METODO_COBRO_LABEL[p.metodoCobro] ?? p.metodoCobro) : 'Cobro';
+
+  // DB: Banco (neto cobrado)
+  const netoCobrado = p.monto - (p.retFuente ?? 0) - (p.retIVA ?? 0);
+  lineas.push(buildLinea(cuentas, cuentaEntrada, netoCobrado, 0, `${metodoDesc} - ${p.clienteNombre}`));
+
+  // DB: Retención fuente recibida
+  if ((p.retFuente ?? 0) > 0) {
+    lineas.push(buildLinea(cuentas, config.cuentaRetFuenteClientes,
+      p.retFuente!, 0, `Ret. fuente recibida de ${p.clienteNombre}`));
+  }
+
+  // DB: Retención IVA recibida
+  if ((p.retIVA ?? 0) > 0) {
+    lineas.push(buildLinea(cuentas, config.cuentaRetIVAClientes,
+      p.retIVA!, 0, `Ret. IVA recibida de ${p.clienteNombre}`));
+  }
+
+  // CR: CxC Clientes
+  lineas.push(buildLinea(cuentas, config.cuentaCxCClientes, 0, p.monto,
+    `Cancelación CxC ${p.clienteNombre}`));
+
+  return lineas;
+}
+
 export async function crearAsientoCobro(p: ParamsCobro): Promise<string | null> {
   try {
     const config  = await getConfigSegura();
     if (!config) return null;
     const cuentas = await getCuentasCached();
-
-    const cuentaEntrada = p.usaBanco ? config.cuentaBancos : config.cuentaCaja;
-    const lineas: AsientoLinea[] = [];
-
-    const METODO_LABEL: Record<string, string> = {
-      deposito:      'Depósito bancario',
-      cheque:        'Cheque',
-      transferencia: 'Transferencia',
-      tarjeta:       'Tarjeta',
-      efectivo:      'Efectivo',
-    };
-    const metodoDesc = p.metodoCobro ? (METODO_LABEL[p.metodoCobro] ?? p.metodoCobro) : 'Cobro';
-
-    // DB: Banco (neto cobrado)
-    const netoCobrado = p.monto - (p.retFuente ?? 0) - (p.retIVA ?? 0);
-    lineas.push(buildLinea(cuentas, cuentaEntrada, netoCobrado, 0, `${metodoDesc} - ${p.clienteNombre}`));
-
-    // DB: Retención fuente recibida
-    if ((p.retFuente ?? 0) > 0) {
-      lineas.push(buildLinea(cuentas, config.cuentaRetFuenteClientes,
-        p.retFuente!, 0, `Ret. fuente recibida de ${p.clienteNombre}`));
-    }
-
-    // DB: Retención IVA recibida
-    if ((p.retIVA ?? 0) > 0) {
-      lineas.push(buildLinea(cuentas, config.cuentaRetIVAClientes,
-        p.retIVA!, 0, `Ret. IVA recibida de ${p.clienteNombre}`));
-    }
-
-    // CR: CxC Clientes
-    lineas.push(buildLinea(cuentas, config.cuentaCxCClientes, 0, p.monto,
-      `Cancelación CxC ${p.clienteNombre}`));
+    const lineas  = buildLineasCobro(cuentas, config, p);
+    const metodoDesc = p.metodoCobro ? (METODO_COBRO_LABEL[p.metodoCobro] ?? p.metodoCobro) : 'Cobro';
 
     return await createAsiento({
       fecha:          p.fecha,
@@ -435,6 +445,30 @@ export async function crearAsientoCobro(p: ParamsCobro): Promise<string | null> 
       createdAt:      new Date(),
     });
   } catch { return null; }
+}
+
+export async function recalcularAsientoCobro(
+  p: ParamsCobro & { forzar?: boolean }
+): Promise<{ actualizado: boolean; advertencia?: string }> {
+  try {
+    const config  = await getConfigSegura();
+    if (!config) return { actualizado: false, advertencia: 'Sin configuración contable' };
+    const cuentas = await getCuentasCached();
+    const lineas  = buildLineasCobro(cuentas, config, p);
+    const metodoDesc = p.metodoCobro ? (METODO_COBRO_LABEL[p.metodoCobro] ?? p.metodoCobro) : 'Cobro';
+
+    return await recalcularAsientoDeDocumento({
+      referenciaId:   p.cobroId ?? p.cxcId,
+      referenciaTipo: p.cobroId ? 'cobro_cliente' : 'cxc',
+      nuevasLineas:   lineas,
+      nuevoConcepto:  `${metodoDesc} cobro cliente ${p.clienteNombre}`,
+      usuarioId:      p.usuarioId,
+      usuarioNombre:  p.usuarioNombre,
+      forzar:         p.forzar,
+    });
+  } catch (e: any) {
+    return { actualizado: false, advertencia: e.message };
+  }
 }
 
 // ─────────────────────────────────────────────────────────────────────────

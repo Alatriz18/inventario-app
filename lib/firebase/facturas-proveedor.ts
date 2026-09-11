@@ -110,7 +110,7 @@ export async function vincularAsientoPago(
 /** Edita la fecha y/o referencia de un pago ya registrado (no toca monto ni saldo). */
 export async function editarPago(
   facturaId: string, pagoId: string,
-  cambios: { fecha?: Date; referencia?: string }
+  cambios: { fecha?: Date; referencia?: string; monto?: number }
 ): Promise<PagoFactura> {
   let pagoEditado: PagoFactura | null = null;
   await runTransaction(db, async (tx) => {
@@ -123,15 +123,37 @@ export async function editarPago(
     if (!pagoExistente) throw new Error('Pago no encontrado');
     if (pagoExistente.anulado) throw new Error('No se puede editar un pago anulado');
 
+    if (cambios.monto !== undefined && cambios.monto <= 0) {
+      throw new Error('El monto debe ser mayor a 0');
+    }
+
     const actualizado: PagoFactura = { ...pagoExistente };
     if (cambios.fecha) actualizado.fecha = cambios.fecha;
+    if (cambios.monto !== undefined) actualizado.monto = cambios.monto;
     if (cambios.referencia !== undefined) {
       if (cambios.referencia) actualizado.referencia = cambios.referencia;
       else delete actualizado.referencia;
     }
     pagoEditado = actualizado;
     const pagos = (factura.pagos ?? []).map(p => p.id === pagoId ? actualizado : p);
-    tx.update(ref, { pagos });
+
+    if (cambios.monto !== undefined) {
+      const totalPagado = pagos.filter(p => !p.anulado).reduce((s, p) => s + p.monto, 0);
+      if (totalPagado > factura.total + 0.01) {
+        throw new Error(`El nuevo monto hace que el total pagado (${totalPagado.toFixed(2)}) supere el total de la factura (${factura.total.toFixed(2)})`);
+      }
+      const saldoPendiente = Math.max(0, factura.total - totalPagado);
+      let estado: EstadoFacturaProveedor = 'pendiente';
+      if (saldoPendiente === 0 && totalPagado > 0) estado = 'pagada';
+      else if (totalPagado > 0)                    estado = 'parcial';
+      else if (factura.fechaVencimiento) {
+        const venc = (factura.fechaVencimiento as any)?.toDate?.() ?? new Date(factura.fechaVencimiento);
+        if (venc < new Date()) estado = 'vencida';
+      }
+      tx.update(ref, { pagos, saldoPendiente, estado });
+    } else {
+      tx.update(ref, { pagos });
+    }
   });
   return pagoEditado!;
 }

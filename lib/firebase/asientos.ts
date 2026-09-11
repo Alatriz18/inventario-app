@@ -156,6 +156,44 @@ export async function editarAsiento(
   }
 }
 
+/**
+ * Escala proporcionalmente el debe/haber de TODAS las líneas de un asiento
+ * (ej. al corregir el monto de un cobro/pago ya registrado), preservando
+ * la mezcla original de cuentas (retenciones, etc.) sin necesidad de
+ * reconstruirla desde cero.
+ */
+export async function escalarLineasAsiento(
+  id:            string,
+  factor:        number,
+  usuarioId:     string,
+  usuarioNombre: string
+): Promise<void> {
+  const snap = await getDoc(doc(db, COL, id));
+  if (!snap.exists()) throw new Error('Asiento no encontrado');
+  const asiento = fromDoc(snap);
+  if (asiento.bloqueado) {
+    throw new Error('No se puede editar: el período contable está cerrado.');
+  }
+
+  const nuevasLineas: AsientoLinea[] = asiento.lineas.map(l => ({
+    ...l,
+    debe:  Math.round(l.debe  * factor * 100) / 100,
+    haber: Math.round(l.haber * factor * 100) / 100,
+  }));
+  const totalDebe  = nuevasLineas.reduce((s, l) => s + l.debe,  0);
+  const totalHaber = nuevasLineas.reduce((s, l) => s + l.haber, 0);
+
+  await updateDoc(doc(db, COL, id), {
+    lineas: nuevasLineas,
+    totalDebe,
+    totalHaber,
+    editadoManualmente:   true,
+    updatedAt:            serverTimestamp(),
+    usuarioEdicionId:     usuarioId,
+    usuarioEdicionNombre: usuarioNombre,
+  });
+}
+
 // ── RECÁLCULO desde documento origen ─────────────────────────────────────
 /**
  * Cuando se edita una VENTA o COMPRA, el motor de asientos llama a esta

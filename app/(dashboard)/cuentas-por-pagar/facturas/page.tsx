@@ -45,7 +45,7 @@ import {
   vincularAsientoPago,
   anularPago, editarPago, reactivarPago, reactivarFactura,
 } from '@/lib/firebase/facturas-proveedor';
-import { editarAsiento } from '@/lib/firebase/asientos';
+import { editarAsiento, escalarLineasAsiento } from '@/lib/firebase/asientos';
 import { subscribeToCuentasBancarias, registrarMovimientoBancario, conciliarMovimiento } from '@/lib/firebase/cuentas-bancarias';
 import { createDocRecibido } from '@/lib/firebase/docs-recibidos';
 import { createRetencionRecibida } from '@/lib/firebase/retenciones-recibidas';
@@ -184,6 +184,7 @@ export default function FacturasProveedorPage() {
   const [editPagoDialog, setEditPagoDialog] = useState<FacturaProveedor['pagos'][number] | null>(null);
   const [editPagoFecha,      setEditPagoFecha]      = useState('');
   const [editPagoReferencia, setEditPagoReferencia] = useState('');
+  const [editPagoMonto,      setEditPagoMonto]      = useState('');
   const [savingEditPago,     setSavingEditPago]     = useState(false);
   const [xmlDialog,    setXmlDialog]    = useState(false);
   const [xmlPreview,   setXmlPreview]   = useState<any>(null);
@@ -714,23 +715,42 @@ export default function FacturasProveedorPage() {
     setEditPagoDialog(pago);
     setEditPagoFecha(format((pago.fecha as any)?.toDate?.() ?? new Date(pago.fecha), 'yyyy-MM-dd'));
     setEditPagoReferencia(pago.referencia ?? '');
+    setEditPagoMonto(pago.monto.toFixed(2));
   };
 
   const handleGuardarEdicionPago = async () => {
     if (!editPagoDialog || !detailDialog || !user) return;
     if (!editPagoFecha) { toast.error('Ingresa la fecha'); return; }
+    const nuevoMonto = parseFloat(editPagoMonto);
+    if (isNaN(nuevoMonto) || nuevoMonto <= 0) { toast.error('Monto inválido'); return; }
+    const otrosPagados = (detailDialog.pagos ?? [])
+      .filter(p => !p.anulado && p.id !== editPagoDialog.id)
+      .reduce((s, p) => s + p.monto, 0);
+    if (otrosPagados + nuevoMonto > detailDialog.total + 0.01) {
+      toast.error(`El monto supera el total de la factura (${currency(detailDialog.total)})`);
+      return;
+    }
     setSavingEditPago(true);
     try {
-      const nuevaFecha = new Date(editPagoFecha + 'T12:00:00');
-      await editarPago(detailDialog.id, editPagoDialog.id, { fecha: nuevaFecha, referencia: editPagoReferencia.trim() });
+      const nuevaFecha  = new Date(editPagoFecha + 'T12:00:00');
+      const montoCambio = Math.abs(nuevoMonto - editPagoDialog.monto) > 0.005;
+      await editarPago(detailDialog.id, editPagoDialog.id, {
+        fecha: nuevaFecha, referencia: editPagoReferencia.trim(),
+        ...(montoCambio ? { monto: nuevoMonto } : {}),
+      });
 
       if (editPagoDialog.asientoId) {
         try {
+          if (montoCambio) {
+            await escalarLineasAsiento(editPagoDialog.asientoId, nuevoMonto / editPagoDialog.monto,
+              user.uid, user.nombre);
+          }
           await editarAsiento(editPagoDialog.asientoId, { fecha: nuevaFecha },
             user.uid, user.nombre);
         } catch (e: any) {
           toast.warning(`Pago actualizado, pero el asiento contable no se pudo actualizar: ${e.message}`, { duration: 10000 });
           setEditPagoDialog(null);
+          setDetailDialog(null);
           return;
         }
       }
@@ -1351,9 +1371,12 @@ export default function FacturasProveedorPage() {
           </DialogHeader>
           {editPagoDialog && (
             <div className="space-y-3">
-              <p className="text-sm text-slate-500">
-                Monto: <strong className="text-slate-800">{currency(editPagoDialog.monto)}</strong> — {editPagoDialog.metodoPago}
-              </p>
+              <p className="text-sm text-slate-500">{editPagoDialog.metodoPago}</p>
+              <div>
+                <Label>Monto *</Label>
+                <Input type="number" min="0.01" step="0.01" value={editPagoMonto}
+                  onChange={e => setEditPagoMonto(e.target.value)} className="mt-1" />
+              </div>
               <div>
                 <Label>Fecha de pago *</Label>
                 <Input type="date" value={editPagoFecha} max={new Date().toISOString().split('T')[0]}
@@ -1366,7 +1389,8 @@ export default function FacturasProveedorPage() {
               </div>
               {editPagoDialog.asientoId && (
                 <p className="text-xs text-slate-400">
-                  El asiento contable vinculado se actualizará con la nueva fecha automáticamente.
+                  El asiento contable vinculado se ajustará automáticamente (fecha y, si cambia el monto,
+                  el valor de sus líneas — Libro Diario, Balance y reportes quedan al día).
                 </p>
               )}
             </div>

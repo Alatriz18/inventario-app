@@ -29,6 +29,14 @@ export async function getCxCById(id: string): Promise<CuentaCobrar | null> {
   return { id: snap.id, ...snap.data() } as CuentaCobrar;
 }
 
+/** Busca la CxC (si existe) generada por una venta a crédito. */
+export async function getCxCByVentaId(ventaId: string): Promise<CuentaCobrar | null> {
+  const snap = await getDocs(query(collection(db, COL), where('ventaId', '==', ventaId)));
+  if (snap.empty) return null;
+  const d = snap.docs[0];
+  return { id: d.id, ...d.data() } as CuentaCobrar;
+}
+
 export async function crearCuentaCobrar(
   data: Omit<CuentaCobrar, 'id' | 'cobros' | 'estado' | 'createdAt'>
 ): Promise<string> {

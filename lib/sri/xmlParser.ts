@@ -181,6 +181,7 @@ export interface RetencionRecibidaData {
   retFuente:    number;
   retIVA:       number;
   totalRetenido:number;
+  numDocSustento?: string; // n° de la factura/venta que sustenta la retención (estab+ptoEmi+secuencial, 15 dígitos)
 }
 
 export function parsearRetencionXML(xmlString: string): RetencionRecibidaData | null {
@@ -225,6 +226,8 @@ export function parsearRetencionXML(xmlString: string): RetencionRecibidaData | 
       retFuente,
       retIVA,
       totalRetenido: retFuente + retIVA,
+      // Solo se vincula automáticamente cuando la retención sustenta UNA sola factura
+      numDocSustento: docs.length === 1 ? String(docs[0]?.numDocSustento ?? '') || undefined : undefined,
     };
   } catch { return null; }
 }

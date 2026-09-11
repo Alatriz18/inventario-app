@@ -50,6 +50,8 @@ import { subscribeToCuentasBancarias, registrarMovimientoBancario, conciliarMovi
 import { createDocRecibido } from '@/lib/firebase/docs-recibidos';
 import { createRetencionRecibida } from '@/lib/firebase/retenciones-recibidas';
 import { subscribeToProveedores, getOrCreateProveedorPorRuc } from '@/lib/firebase/proveedores';
+import { subscribeToComprobantes, Comprobante } from '@/lib/firebase/comprobantes';
+import { getCxCByVentaId, registrarCobroCxC, vincularAsientoCobro } from '@/lib/firebase/cuentas-cobrar';
 import { getConfigEmail } from '@/lib/firebase/config-email';
 import {
   parsearFacturaXML, extraerIVAdeXML, detectarTipoComprobante,
@@ -179,6 +181,7 @@ export default function FacturasProveedorPage() {
   const [detailDialog, setDetailDialog] = useState<FacturaProveedor | null>(null);
   const [cuentasBancarias, setCuentasBancarias] = useState<CuentaBancaria[]>([]);
   const [pagoCuentaBancariaId, setPagoCuentaBancariaId] = useState('');
+  const [comprobantesEmitidos, setComprobantesEmitidos] = useState<Comprobante[]>([]);
 
   // Dialog editar fecha/referencia de un pago ya registrado
   const [editPagoDialog, setEditPagoDialog] = useState<FacturaProveedor['pagos'][number] | null>(null);
@@ -218,7 +221,8 @@ export default function FacturasProveedorPage() {
     const u1 = subscribeToFacturasProveedor((d) => { setFacturas(d); setLoading(false); });
     const u2 = subscribeToProveedores(setProveedores);
     const u3 = subscribeToCuentasBancarias(setCuentasBancarias);
-    return () => { u1(); u2(); u3(); };
+    const u4 = subscribeToComprobantes(setComprobantesEmitidos);
+    return () => { u1(); u2(); u3(); u4(); };
   }, []);
 
   const stats = {
@@ -475,8 +479,18 @@ export default function FacturasProveedorPage() {
         if (!d) return 'err';
         if (d.claveAcceso && existentes.has(d.claveAcceso)) return 'dup';
         const numeroRet = `${d.estab}-${d.ptoEmi}-${d.secuencial}`;
+
+        // Vincula con la factura/venta que sustenta la retención, si se puede identificar
+        let ventaId = '', numeroComprobante = '';
+        if (d.numDocSustento && d.numDocSustento.length === 15) {
+          const serieBuscada = `${d.numDocSustento.slice(0, 3)}-${d.numDocSustento.slice(3, 6)}`;
+          const secBuscado   = d.numDocSustento.slice(6);
+          const comp = comprobantesEmitidos.find(c => c.serie === serieBuscada && c.secuencial === secBuscado);
+          if (comp) { ventaId = comp.ventaId ?? ''; numeroComprobante = `${comp.serie}-${comp.secuencial}`; }
+        }
+
         const retId = await createRetencionRecibida({
-          ventaId: '', numeroComprobante: '',
+          ventaId, numeroComprobante,
           clienteId: '', clienteNombre: d.razonSocial, clienteIdentificacion: d.ruc,
           numeroRetencion: numeroRet, claveAcceso: d.claveAcceso, fechaEmision: parseFecha(d.fechaEmision),
           ejercicioFiscal: d.periodoFiscal,
@@ -492,6 +506,22 @@ export default function FacturasProveedorPage() {
           retFuente: d.retFuente, retIVA: d.retIVA, totalRetenido: d.totalRetenido,
           usuarioId: user.uid, usuarioNombre: user.nombre,
         });
+
+        // Si la venta era a crédito, la retención cancela parte de su saldo pendiente
+        // (se reutiliza el mismo asiento de arriba, sin duplicar la contabilización)
+        if (ventaId && asientoRetId) {
+          try {
+            const cxc = await getCxCByVentaId(ventaId);
+            if (cxc && cxc.estado !== 'pagada' && cxc.estado !== 'anulada') {
+              const cobroId = await registrarCobroCxC(cxc.id, {
+                fecha: parseFecha(d.fechaEmision), monto: d.totalRetenido, metodoPago: 'retencion',
+                referencia: numeroRet, usuarioId: user.uid, usuarioNombre: user.nombre,
+              }, user.uid, user.nombre);
+              await vincularAsientoCobro(cxc.id, cobroId, asientoRetId);
+            }
+          } catch { /* la retención ya quedó registrada; el saldo de la CxC se puede ajustar manualmente */ }
+        }
+
         if (d.claveAcceso) existentes.add(d.claveAcceso);
         return asientoRetId ? 'ok' : 'ok_sin_asiento';
       }

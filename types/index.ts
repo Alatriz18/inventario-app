@@ -722,6 +722,33 @@ export interface MovimientoBancario {
   createdAt:      Date;
 }
 
+// ─── LOTES DE RECLASIFICACIÓN (deshacer "mover historial a Caja") ──────────
+
+export interface ItemLoteReclasificacion {
+  movId:                  string;
+  asientoId?:             string;
+  huboAsiento:            boolean; // false si el movimiento no tenía asiento vinculado
+  cuentaOrigenCodigo:     string;
+  cuentaOrigenNombre:     string;
+  cuentaOrigenId:         string;
+  estadoMovOriginal:      EstadoConciliacion;
+  descripcionMovOriginal: string;
+}
+
+export interface LoteReclasificacion {
+  id:                  string;
+  cuentaBancariaId:    string;
+  cuentaBancoNombre:   string;
+  cuentaDestinoCodigo: string;
+  cuentaDestinoNombre: string;
+  fecha:               Date;
+  estado:              'aplicado' | 'revertido';
+  items:               ItemLoteReclasificacion[];
+  usuarioId:           string;
+  usuarioNombre:       string;
+  createdAt:           Date;
+}
+
 // ─── ACTIVOS FIJOS ─────────────────────────────────────────────────────────
 
 export type MetodoDepreciacion = 'linea_recta' | 'saldo_decreciente' | 'unidades_produccion';

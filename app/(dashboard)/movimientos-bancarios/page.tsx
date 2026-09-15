@@ -18,16 +18,19 @@ import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from '@/components/ui/table';
 
-import { CuentaBancaria, MovimientoBancario, CuentaContable } from '@/types';
+import { CuentaBancaria, MovimientoBancario, CuentaContable, LoteReclasificacion, ItemLoteReclasificacion } from '@/types';
 import {
   subscribeToCuentasBancarias, createCuentaBancaria,
   subscribeToMovimientosBancarios, importarMovimientosBancarios,
   registrarMovimientoBancario, anularMovimientoBancario, conciliarMovimiento,
-  marcarMovimientoReclasificado,
+  marcarMovimientoReclasificado, restaurarMovimiento,
 } from '@/lib/firebase/cuentas-bancarias';
 import { subscribeToCuentas }  from '@/lib/firebase/plan-cuentas';
 import { reclasificarCuentaEnAsiento } from '@/lib/firebase/asientos';
 import { getOrCreateConfigContable } from '@/lib/firebase/config-contable';
+import {
+  crearLoteReclasificacion, subscribeToLotesReclasificacion, marcarLoteRevertido,
+} from '@/lib/firebase/reclasificaciones';
 import {
   crearAsientoMovimientoBancario, crearAsientoReversion, crearAsientoReclasificacionCaja,
 } from '@/lib/contabilidad/motor-asientos';
@@ -84,6 +87,10 @@ export default function MovimientosBancariosPage() {
   const [moviendoTodo, setMoviendoTodo] = useState(false);
   const [progresoMoverTodo, setProgresoMoverTodo] = useState(0);
 
+  // Lotes de reclasificación (para poder deshacer "Mover TODO el historial a Caja")
+  const [lotes, setLotes] = useState<LoteReclasificacion[]>([]);
+  const [revirtiendoLoteId, setRevirtiendoLoteId] = useState<string | null>(null);
+
   useEffect(() => {
     const u1 = subscribeToCuentasBancarias(setCuentas);
     const u2 = subscribeToCuentas(setPlanCuentas);
@@ -101,6 +108,11 @@ export default function MovimientosBancariosPage() {
       setLoading(false);
     });
     return unsub;
+  }, [cuentaSel]);
+
+  useEffect(() => {
+    if (!cuentaSel) { setLotes([]); return; }
+    return subscribeToLotesReclasificacion(cuentaSel, setLotes);
   }, [cuentaSel]);
 
   const cuentaSelObj = useMemo(() => cuentas.find(c => c.id === cuentaSel) ?? null, [cuentas, cuentaSel]);
@@ -314,30 +326,55 @@ export default function MovimientosBancariosPage() {
     setMoviendoTodo(true);
     setProgresoMoverTodo(0);
     let ok = 0, sinAsiento = 0, err = 0;
+    const items: ItemLoteReclasificacion[] = [];
     try {
       const config = await getOrCreateConfigContable();
-      const cuentaCaja = planCuentas.find(c => c.codigo === config.cuentaCaja);
+      const cuentaCaja   = planCuentas.find(c => c.codigo === config.cuentaCaja);
+      const cuentaOrigen  = planCuentas.find(c => c.codigo === cuentaSelObj.cuentaContableCodigo);
       const destino = { codigo: config.cuentaCaja, nombre: cuentaCaja?.nombre ?? 'Caja General' };
 
       for (let i = 0; i < movsParaMover.length; i++) {
         const mov = movsParaMover[i];
         try {
+          let huboAsiento = false;
           if (mov.asientoId) {
-            const cambio = await reclasificarCuentaEnAsiento(
+            huboAsiento = await reclasificarCuentaEnAsiento(
               mov.asientoId, cuentaSelObj.cuentaContableCodigo, destino,
               user.uid, user.nombre
             );
-            if (!cambio) sinAsiento++;
+            if (!huboAsiento) sinAsiento++;
           } else {
             sinAsiento++;
           }
           await marcarMovimientoReclasificado(mov.id, `${mov.descripcion} (reclasificado a Caja General)`);
+          items.push({
+            movId: mov.id, asientoId: mov.asientoId, huboAsiento,
+            cuentaOrigenCodigo: cuentaSelObj.cuentaContableCodigo,
+            cuentaOrigenNombre: cuentaOrigen?.nombre ?? cuentaSelObj.cuentaContableCodigo,
+            cuentaOrigenId:     cuentaOrigen?.id ?? cuentaSelObj.cuentaContableCodigo,
+            estadoMovOriginal:      mov.estado,
+            descripcionMovOriginal: mov.descripcion,
+          });
           ok++;
         } catch {
           err++;
         }
         setProgresoMoverTodo(i + 1);
       }
+
+      if (items.length > 0) {
+        await crearLoteReclasificacion({
+          cuentaBancariaId: cuentaSel,
+          cuentaBancoNombre: cuentaSelObj.banco,
+          cuentaDestinoCodigo: destino.codigo,
+          cuentaDestinoNombre: destino.nombre,
+          fecha: new Date(),
+          items,
+          usuarioId: user.uid,
+          usuarioNombre: user.nombre,
+        });
+      }
+
       toast.success(
         `${ok} movimiento(s) movidos a Caja General` +
         (sinAsiento ? ` — ${sinAsiento} sin asiento vinculado para reclasificar (revísalos manualmente)` : '') +
@@ -349,6 +386,41 @@ export default function MovimientosBancariosPage() {
       toast.error(e.message ?? 'Error al mover los movimientos a Caja');
     } finally {
       setMoviendoTodo(false);
+    }
+  };
+
+  // Deshace un lote de "Mover TODO el historial a Caja": regresa cada asiento
+  // y cada movimiento a como estaban antes.
+  const handleDeshacerLote = async (lote: LoteReclasificacion) => {
+    if (!user) return;
+    if (!window.confirm(`¿Deshacer esta reclasificación de ${lote.items.length} movimiento(s) y devolverlos a ${lote.items[0]?.cuentaOrigenNombre ?? 'su cuenta original'}?`)) return;
+    setRevirtiendoLoteId(lote.id);
+    let ok = 0, err = 0;
+    try {
+      for (const item of lote.items) {
+        try {
+          if (item.huboAsiento && item.asientoId) {
+            await reclasificarCuentaEnAsiento(
+              item.asientoId, lote.cuentaDestinoCodigo,
+              { codigo: item.cuentaOrigenCodigo, nombre: item.cuentaOrigenNombre, id: item.cuentaOrigenId },
+              user.uid, user.nombre
+            );
+          }
+          await restaurarMovimiento(item.movId, {
+            estado: item.estadoMovOriginal,
+            descripcion: item.descripcionMovOriginal,
+          });
+          ok++;
+        } catch {
+          err++;
+        }
+      }
+      await marcarLoteRevertido(lote.id);
+      toast.success(`${ok} movimiento(s) devueltos a ${lote.cuentaBancoNombre}` + (err ? ` — ${err} con error` : ''), { duration: 10000 });
+    } catch (e: any) {
+      toast.error(e.message ?? 'Error al deshacer la reclasificación');
+    } finally {
+      setRevirtiendoLoteId(null);
     }
   };
 
@@ -528,6 +600,36 @@ export default function MovimientosBancariosPage() {
                 ))}
               </TableBody>
             </Table>
+          </div>
+        </div>
+      )}
+
+      {/* Historial de reclasificaciones masivas — permite deshacer */}
+      {cuentaSel && lotes.length > 0 && (
+        <div className="bg-white rounded-xl border overflow-hidden">
+          <div className="p-4 border-b">
+            <p className="font-semibold text-slate-700">Reclasificaciones a Caja realizadas</p>
+          </div>
+          <div className="divide-y">
+            {lotes.map(lote => (
+              <div key={lote.id} className="p-4 flex flex-wrap items-center justify-between gap-3">
+                <div>
+                  <p className="text-sm">
+                    <strong>{lote.items.length}</strong> movimiento(s) de <strong>{lote.cuentaBancoNombre}</strong> → {lote.cuentaDestinoNombre}
+                  </p>
+                  <p className="text-xs text-slate-400">
+                    {format((lote.fecha as any)?.toDate?.() ?? new Date(lote.fecha), 'dd/MM/yyyy HH:mm')} — {lote.usuarioNombre}
+                    {lote.estado === 'revertido' && <span className="ml-2 text-amber-600 font-medium">· Revertido</span>}
+                  </p>
+                </div>
+                {lote.estado === 'aplicado' && (
+                  <Button variant="outline" size="sm" disabled={revirtiendoLoteId === lote.id}
+                    onClick={() => handleDeshacerLote(lote)}>
+                    {revirtiendoLoteId === lote.id ? 'Deshaciendo…' : 'Deshacer'}
+                  </Button>
+                )}
+              </div>
+            ))}
           </div>
         </div>
       )}
@@ -738,6 +840,7 @@ export default function MovimientosBancariosPage() {
               <li>Los montos, fechas y el resto de líneas (retenciones, etc.) no cambian.</li>
               <li>Los movimientos sin asiento vinculado no se pueden reclasificar automáticamente y se avisan aparte.</li>
               <li>Los asientos de períodos ya cerrados no se pueden tocar y también se avisan aparte.</li>
+              <li><strong>Se puede deshacer</strong> después con un clic — queda un registro del lote debajo de la tabla.</li>
             </ul>
             {moviendoTodo && (
               <p className="text-sm text-slate-500">Procesando {progresoMoverTodo}/{movsParaMover.length}…</p>

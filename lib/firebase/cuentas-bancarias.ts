@@ -135,3 +135,11 @@ export async function anularMovimientoBancario(movId: string): Promise<void> {
 export async function marcarMovimientoReclasificado(movId: string, descripcion: string): Promise<void> {
   await updateDoc(doc(db, COL_MOVS, movId), { estado: 'ignorado', descripcion });
 }
+
+/** Restaura estado y descripción originales de un movimiento (deshacer reclasificación). */
+export async function restaurarMovimiento(
+  movId: string,
+  data: { estado: MovimientoBancario['estado']; descripcion: string }
+): Promise<void> {
+  await updateDoc(doc(db, COL_MOVS, movId), data);
+}

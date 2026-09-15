@@ -203,6 +203,50 @@ export async function escalarLineasAsiento(
   });
 }
 
+/**
+ * Reemplaza, dentro de un asiento, todas las líneas que usan una cuenta
+ * contable por otra cuenta (mismo debe/haber, solo cambia a qué cuenta
+ * apunta). Se usa para reclasificar movimientos ya registrados contra el
+ * banco hacia Caja General cuando el banco ya no se puede conciliar.
+ * Devuelve true si alguna línea coincidía y se reclasificó.
+ */
+export async function reclasificarCuentaEnAsiento(
+  id:                 string,
+  cuentaOrigenCodigo: string,
+  cuentaDestino:      { codigo: string; nombre: string; id?: string },
+  usuarioId:          string,
+  usuarioNombre:       string
+): Promise<boolean> {
+  const snap = await getDoc(doc(db, COL, id));
+  if (!snap.exists()) throw new Error('Asiento no encontrado');
+  const asiento = fromDoc(snap);
+  if (asiento.bloqueado) {
+    throw new Error('No se puede editar: el período contable está cerrado.');
+  }
+
+  let cambio = false;
+  const nuevasLineas: AsientoLinea[] = asiento.lineas.map(l => {
+    if (l.cuentaCodigo !== cuentaOrigenCodigo) return l;
+    cambio = true;
+    return {
+      ...l,
+      cuentaCodigo: cuentaDestino.codigo,
+      cuentaNombre: cuentaDestino.nombre,
+      cuentaId:     cuentaDestino.id ?? cuentaDestino.codigo,
+    };
+  });
+  if (!cambio) return false;
+
+  await updateDoc(doc(db, COL, id), {
+    lineas: nuevasLineas,
+    editadoManualmente:   true,
+    updatedAt:            serverTimestamp(),
+    usuarioEdicionId:     usuarioId,
+    usuarioEdicionNombre: usuarioNombre,
+  });
+  return true;
+}
+
 // ── RECÁLCULO desde documento origen ─────────────────────────────────────
 /**
  * Cuando se edita una VENTA o COMPRA, el motor de asientos llama a esta

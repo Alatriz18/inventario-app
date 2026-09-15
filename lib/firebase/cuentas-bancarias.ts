@@ -129,3 +129,9 @@ export async function revertirConciliacion(movId: string): Promise<void> {
 export async function anularMovimientoBancario(movId: string): Promise<void> {
   await updateDoc(doc(db, COL_MOVS, movId), { estado: 'anulado' });
 }
+
+/** Marca un movimiento como reclasificado a otra cuenta (ej. Caja General):
+ *  deja de contar para la conciliación de este banco, sin borrarlo. */
+export async function marcarMovimientoReclasificado(movId: string, descripcion: string): Promise<void> {
+  await updateDoc(doc(db, COL_MOVS, movId), { estado: 'ignorado', descripcion });
+}

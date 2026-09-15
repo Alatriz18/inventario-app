@@ -36,7 +36,9 @@ export default function DashboardPage() {
 
   useEffect(() => {
     const u1 = subscribeToProductos(setProductos);
-    const u2 = verFinanzas ? subscribeToVentas(setVentas) : () => {};
+    // Solo se necesita desde el inicio del mes (KPIs de hoy/ayer/mes/semana) —
+    // evita releer TODO el historial de ventas cada vez que se abre el dashboard.
+    const u2 = verFinanzas ? subscribeToVentas(setVentas, { desde: startOfMonth(new Date()) }) : () => {};
     const u3 = verCxC      ? subscribeToCxC(setCxc)       : () => {};
     return () => { u1(); u2(); u3(); };
   }, [verFinanzas, verCxC]);

@@ -1,6 +1,6 @@
 import {
   collection, doc, addDoc, updateDoc, getDoc, onSnapshot,
-  query, orderBy, where, getDocs, serverTimestamp, Timestamp,
+  query, orderBy, where, getDocs, serverTimestamp, Timestamp, limit as fsLimit,
 } from 'firebase/firestore';
 import { db } from '@/lib/firebase/config';
 import { AsientoContable, AsientoLinea, TipoAsiento } from '@/types';
@@ -35,9 +35,11 @@ export function subscribeToAsientos(
   callback: (data: AsientoContable[]) => void,
   limite = 300
 ): () => void {
-  const q = query(collection(db, COL), orderBy('fecha', 'desc'));
+  // El límite se aplica en la propia consulta (fsLimit) para no cobrar
+  // lecturas de TODA la colección y luego recortar en el cliente.
+  const q = query(collection(db, COL), orderBy('fecha', 'desc'), fsLimit(limite));
   return onSnapshot(q, snap => {
-    callback(snap.docs.slice(0, limite).map(fromDoc));
+    callback(snap.docs.map(fromDoc));
   });
 }
 

@@ -1,17 +1,28 @@
 import {
   collection, doc, onSnapshot,
   query, orderBy, serverTimestamp, runTransaction,
-  where, getDocs, writeBatch, updateDoc,
+  where, getDocs, writeBatch, updateDoc, limit as fsLimit,
 } from 'firebase/firestore';
 import { db } from './config';
 import { Venta, EstadoCxC } from '@/types';
 
 const COL = 'ventas';
 
+/**
+ * `desde`: si se pasa, solo trae ventas con fecha >= esa fecha (evita leer
+ * TODO el historial cuando la pantalla solo necesita un período reciente,
+ * ej. el Dashboard). `limite`: tope adicional de documentos por si acaso.
+ */
 export function subscribeToVentas(
-  callback: (data: Venta[]) => void
+  callback: (data: Venta[]) => void,
+  opts?: { desde?: Date; hasta?: Date; limite?: number }
 ): () => void {
-  const q = query(collection(db, COL), orderBy('fecha', 'desc'));
+  const constraints = [];
+  if (opts?.desde) constraints.push(where('fecha', '>=', opts.desde));
+  if (opts?.hasta) constraints.push(where('fecha', '<=', opts.hasta));
+  constraints.push(orderBy('fecha', 'desc'));
+  if (opts?.limite) constraints.push(fsLimit(opts.limite));
+  const q = query(collection(db, COL), ...constraints);
   return onSnapshot(q, (snap) => {
     callback(snap.docs.map((d) => ({ id: d.id, ...d.data() } as Venta)));
   });

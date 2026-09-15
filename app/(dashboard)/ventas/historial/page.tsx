@@ -54,9 +54,11 @@ export default function HistorialVentasPage() {
   const [loading,   setLoading]   = useState(true);
   const [search,    setSearch]    = useState('');
   const [filtroMetodo, setFiltroMetodo] = useState('todos');
-  const [dateFrom,     setDateFrom]     = useState('');
-  const [dateTo,       setDateTo]       = useState('');
-  const [preset,       setPreset]       = useState<'todos' | 'hoy' | 'semana' | 'mes'>('todos');
+  // Por defecto se acota al mes actual para no leer TODO el historial de ventas
+  // cada vez que se abre la pantalla — "Todos" sigue disponible, se lee bajo demanda.
+  const [dateFrom,     setDateFrom]     = useState(format(startOfMonth(new Date()), 'yyyy-MM-dd'));
+  const [dateTo,       setDateTo]       = useState(format(new Date(), 'yyyy-MM-dd'));
+  const [preset,       setPreset]       = useState<'todos' | 'hoy' | 'semana' | 'mes'>('mes');
   const [filtroCategoria, setFiltroCategoria] = useState('todas');
   const [filtroProducto,  setFiltroProducto]  = useState('todos');
   const [detailId,    setDetailId]    = useState<string | null>(null);
@@ -67,10 +69,17 @@ export default function HistorialVentasPage() {
   const [reparando,   setReparando]   = useState(false);
 
   useEffect(() => {
-    const u1 = subscribeToVentas((data) => { setVentas(data); setLoading(false); });
+    setLoading(true);
+    const desde = dateFrom ? new Date(dateFrom + 'T00:00:00') : undefined;
+    const hasta = dateTo   ? new Date(dateTo   + 'T23:59:59') : undefined;
+    const u1 = subscribeToVentas((data) => { setVentas(data); setLoading(false); }, { desde, hasta });
+    return u1;
+  }, [dateFrom, dateTo]);
+
+  useEffect(() => {
     const u2 = subscribeToProductos(setProductos);
     const u3 = subscribeToCategorias(setCategorias);
-    return () => { u1(); u2(); u3(); };
+    return () => { u2(); u3(); };
   }, []);
 
   const applyPreset = (p: 'todos' | 'hoy' | 'semana' | 'mes') => {

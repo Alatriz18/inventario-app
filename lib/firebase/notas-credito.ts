@@ -1,6 +1,6 @@
 import {
   collection, doc, onSnapshot, query, orderBy,
-  serverTimestamp, addDoc, updateDoc, getDoc,
+  serverTimestamp, addDoc, updateDoc, getDoc, where, limit as fsLimit,
   QueryDocumentSnapshot, DocumentData,
 } from 'firebase/firestore';
 import { db } from '@/lib/firebase/config';
@@ -9,9 +9,15 @@ import { NotaCredito } from '@/types';
 const COL = 'notas_credito';
 
 export function subscribeToNotasCredito(
-  callback: (data: NotaCredito[]) => void
+  callback: (data: NotaCredito[]) => void,
+  opts?: { desde?: Date; hasta?: Date; limite?: number }
 ): () => void {
-  const q = query(collection(db, COL), orderBy('createdAt', 'desc'));
+  const constraints = [];
+  if (opts?.desde) constraints.push(where('fechaEmision', '>=', opts.desde));
+  if (opts?.hasta) constraints.push(where('fechaEmision', '<=', opts.hasta));
+  constraints.push(orderBy('fechaEmision', 'desc'));
+  if (opts?.limite) constraints.push(fsLimit(opts.limite));
+  const q = query(collection(db, COL), ...constraints);
   return onSnapshot(q, (snap) => {
     callback(
       snap.docs.map((d: QueryDocumentSnapshot<DocumentData>) => ({

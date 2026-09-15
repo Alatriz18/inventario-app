@@ -59,12 +59,19 @@ export default function ReportesPage() {
   const [filtroProducto,  setFiltroProducto]  = useState('todos');
 
   useEffect(() => {
-    const u1 = subscribeToVentas((d) => { setVentas(d); setLoading(false); });
+    setLoading(true);
+    const desde = new Date(dateFrom + 'T00:00:00');
+    const hasta = new Date(dateTo   + 'T23:59:59');
+    const u1 = subscribeToVentas((d) => { setVentas(d); setLoading(false); }, { desde, hasta });
+    const u4 = subscribeToFacturasProveedor(setFacturasP, { desde, hasta });
+    return () => { u1(); u4(); };
+  }, [dateFrom, dateTo]);
+
+  useEffect(() => {
     const u2 = subscribeToProductos(setProductos);
-    const u3 = subscribeToEntradas(setEntradas);
-    const u4 = subscribeToFacturasProveedor(setFacturasP);
+    const u3 = subscribeToEntradas(setEntradas, { limite: 1000 });
     const u5 = subscribeToCategorias(setCategorias);
-    return () => { u1(); u2(); u3(); u4(); u5(); };
+    return () => { u2(); u3(); u5(); };
   }, []);
 
   const applyPreset = (p: typeof PRESETS[0]) => {

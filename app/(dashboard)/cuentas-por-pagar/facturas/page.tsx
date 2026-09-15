@@ -221,7 +221,7 @@ export default function FacturasProveedorPage() {
     const u1 = subscribeToFacturasProveedor((d) => { setFacturas(d); setLoading(false); });
     const u2 = subscribeToProveedores(setProveedores);
     const u3 = subscribeToCuentasBancarias(setCuentasBancarias);
-    const u4 = subscribeToComprobantes(setComprobantesEmitidos);
+    const u4 = subscribeToComprobantes(setComprobantesEmitidos, { limite: 1000 });
     return () => { u1(); u2(); u3(); u4(); };
   }, []);
 

@@ -110,7 +110,7 @@ export default function DespachosPage() {
   const total = watchItems?.reduce((s, i) => s + ((i.cantidad * i.precioUnitario) || 0), 0) ?? 0;
 
   useEffect(() => {
-    const u1 = subscribeToDespachos((d) => { setDespachos(d); setLoading(false); });
+    const u1 = subscribeToDespachos((d) => { setDespachos(d); setLoading(false); }, { limite: 500 });
     const u2 = subscribeToProductos(setProductos);
     const u3 = subscribeToBodegas(setBodegas);
     const u4 = subscribeToCategorias(setCategorias);

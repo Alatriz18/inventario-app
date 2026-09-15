@@ -49,8 +49,11 @@ export default function FormRIMPEPage() {
       if (c?.regimen === 'rimpe_negocio_popular') setRegimen('negocio_popular');
       else setRegimen('emprendedor');
     }).catch(() => {});
-    return subscribeToVentas(d => { setVentas(d); setLoading(false); });
-  }, []);
+    setLoading(true);
+    const desde = new Date(Number(anio), 0, 1);
+    const hasta = new Date(Number(anio), Number(mes), 0, 23, 59, 59);
+    return subscribeToVentas(d => { setVentas(d); setLoading(false); }, { desde, hasta });
+  }, [anio, mes]);
 
   const ventasFiltradas = useMemo(() => {
     return ventas.filter(v => {

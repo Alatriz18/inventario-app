@@ -47,16 +47,17 @@ export default function Form101Page() {
   const [loading,   setLoading]   = useState(true);
   const [anio,      setAnio]      = useState(new Date().getFullYear().toString());
 
-  useEffect(() => {
-    const u1 = subscribeToVentas(d => { setVentas(d); setLoading(false); });
-    const u2 = subscribeToFacturasProveedor(setFacturas);
-    const u3 = subscribeToAsientos(setAsientos, 100000);
-    return () => { u1(); u2(); u3(); };
-  }, []);
-
   const anioNum = parseInt(anio) || new Date().getFullYear();
   const desde   = new Date(anioNum, 0, 1);
   const hasta   = new Date(anioNum, 11, 31, 23, 59, 59);
+
+  useEffect(() => {
+    setLoading(true);
+    const u1 = subscribeToVentas(d => { setVentas(d); setLoading(false); }, { desde, hasta });
+    const u2 = subscribeToFacturasProveedor(setFacturas, { desde, hasta });
+    const u3 = subscribeToAsientos(setAsientos, 100000, { desde, hasta });
+    return () => { u1(); u2(); u3(); };
+  }, [anio]);
 
   const flt = (d: any) => {
     const date = d?.toDate?.() ?? new Date(d);

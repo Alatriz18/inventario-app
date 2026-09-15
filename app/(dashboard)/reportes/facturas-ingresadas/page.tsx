@@ -47,10 +47,17 @@ export default function ReporteFacturasIngresadasPage() {
   const [preset,       setPreset]       = useState('Este mes');
 
   useEffect(() => {
-    const u1 = subscribeToFacturasProveedor(d => { setFacturas(d); setLoading(false); });
+    setLoading(true);
+    const desde = new Date(dateFrom + 'T00:00:00');
+    const hasta = new Date(dateTo   + 'T23:59:59');
+    const u1 = subscribeToFacturasProveedor(d => { setFacturas(d); setLoading(false); }, { desde, hasta });
+    return u1;
+  }, [dateFrom, dateTo]);
+
+  useEffect(() => {
     const u2 = subscribeToProveedores(setProveedores);
     const u3 = subscribeToRetencionesEmitidas(setRetenciones);
-    return () => { u1(); u2(); u3(); };
+    return () => { u2(); u3(); };
   }, []);
 
   const proveedoresPorId = useMemo(() => new Map(proveedores.map(p => [p.id, p])), [proveedores]);

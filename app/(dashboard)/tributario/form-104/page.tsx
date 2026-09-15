@@ -37,10 +37,13 @@ export default function Form104Page() {
   const [mes,     setMes]     = useState(String(new Date().getMonth() + 1));
 
   useEffect(() => {
-    const u1 = subscribeToVentas(d => { setVentas(d); setLoading(false); });
-    const u2 = subscribeToFacturasProveedor(setCompras);
+    setLoading(true);
+    const desde = new Date(Number(anio), Number(mes) - 1, 1);
+    const hasta = new Date(Number(anio), Number(mes), 0, 23, 59, 59);
+    const u1 = subscribeToVentas(d => { setVentas(d); setLoading(false); }, { desde, hasta });
+    const u2 = subscribeToFacturasProveedor(setCompras, { desde, hasta });
     return () => { u1(); u2(); };
-  }, []);
+  }, [anio, mes]);
 
   const filtrar = (items: any[], campoFecha: string) => {
     return items.filter(item => {

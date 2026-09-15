@@ -89,7 +89,7 @@ export default function ComprobantesPage() {
   };
 
   useEffect(() => {
-    return subscribeToComprobantes((data) => { setComprobantes(data); setLoading(false); });
+    return subscribeToComprobantes((data) => { setComprobantes(data); setLoading(false); }, { limite: 500 });
   }, []);
 
   const filtered = comprobantes.filter(c => {

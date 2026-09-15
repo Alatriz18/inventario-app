@@ -1,8 +1,8 @@
 import {
   collection, doc, onSnapshot, query, orderBy,
   serverTimestamp, runTransaction, getDoc, setDoc, updateDoc,
-  getDocs, where, writeBatch, Transaction,
-  QueryDocumentSnapshot, DocumentData,
+  getDocs, where, writeBatch, Transaction, limit as fsLimit,
+  QueryDocumentSnapshot, DocumentData, QueryConstraint,
 } from 'firebase/firestore';
 import { db } from '@/lib/firebase/config';
 import { CuentaCobrar, CobroCxC, EstadoCxC } from '@/types';
@@ -10,9 +10,14 @@ import { CuentaCobrar, CobroCxC, EstadoCxC } from '@/types';
 const COL = 'cuentas_cobrar';
 
 export function subscribeToCxC(
-  callback: (data: CuentaCobrar[]) => void
+  callback: (data: CuentaCobrar[]) => void,
+  opts?: { limite?: number }
 ): () => void {
-  const q = query(collection(db, COL), orderBy('fechaEmision', 'desc'));
+  // No se acota por fecha por defecto: una CxC pendiente puede ser muy
+  // antigua y debe seguir viéndose en "Saldos y Cobros" hasta que se pague.
+  const constraints: QueryConstraint[] = [orderBy('fechaEmision', 'desc')];
+  if (opts?.limite) constraints.push(fsLimit(opts.limite));
+  const q = query(collection(db, COL), ...constraints);
   return onSnapshot(q, (snap) => {
     callback(
       snap.docs.map((d: QueryDocumentSnapshot<DocumentData>) => ({

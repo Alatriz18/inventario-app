@@ -1,6 +1,6 @@
 import {
   collection, doc, addDoc, updateDoc, onSnapshot,
-  query, orderBy, serverTimestamp, getDoc,
+  query, orderBy, serverTimestamp, getDoc, where, limit as fsLimit,
 } from 'firebase/firestore';
 import { db } from '@/lib/firebase/config';
 
@@ -36,9 +36,17 @@ export interface Comprobante {
 const COL = 'comprobantes';
 
 export function subscribeToComprobantes(
-  callback: (data: Comprobante[]) => void
+  callback: (data: Comprobante[]) => void,
+  opts?: { desde?: Date; hasta?: Date; limite?: number }
 ): () => void {
-  const q = query(collection(db, COL), orderBy('createdAt', 'desc'));
+  // Se ordena/filtra por fechaEmision (no createdAt): las ventas historicas
+  // se importan con fecha real pasada, así que createdAt no serviría para reportes.
+  const constraints = [];
+  if (opts?.desde) constraints.push(where('fechaEmision', '>=', opts.desde));
+  if (opts?.hasta) constraints.push(where('fechaEmision', '<=', opts.hasta));
+  constraints.push(orderBy('fechaEmision', 'desc'));
+  if (opts?.limite) constraints.push(fsLimit(opts.limite));
+  const q = query(collection(db, COL), ...constraints);
   return onSnapshot(q, (snap) => {
     callback(snap.docs.map((d) => ({ id: d.id, ...d.data() } as Comprobante)));
   });

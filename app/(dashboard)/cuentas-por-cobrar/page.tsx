@@ -88,7 +88,7 @@ export default function CxCPage() {
     actualizarEstadosVencidos().catch(() => {});
     const unsub = subscribeToCxC(data => { setCxcList(data); setLoading(false); });
     const unsubCli = subscribeToClientes(setClientes);
-    const unsubComp = subscribeToComprobantes(setComprobantes);
+    const unsubComp = subscribeToComprobantes(setComprobantes, { limite: 1000 });
     const unsubBancos = subscribeToCuentasBancarias(setCuentasBancarias);
     return () => { unsub(); unsubCli(); unsubComp(); unsubBancos(); };
   }, []);

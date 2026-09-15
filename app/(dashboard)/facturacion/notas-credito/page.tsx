@@ -91,8 +91,8 @@ export default function NotasCreditoPage() {
   const [histIva,             setHistIva]             = useState(0);
 
   useEffect(() => {
-    const u1 = subscribeToNotasCredito(d => { setNotas(d); setLoading(false); });
-    const u2 = subscribeToComprobantes(setComprobantes);
+    const u1 = subscribeToNotasCredito(d => { setNotas(d); setLoading(false); }, { limite: 500 });
+    const u2 = subscribeToComprobantes(setComprobantes, { limite: 1000 });
     return () => { u1(); u2(); };
   }, []);
 

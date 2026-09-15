@@ -133,7 +133,7 @@ export default function DocumentosRecibidosPage() {
   const [txtProgreso,   setTxtProgreso]   = useState(0);
   const [txtResultado,  setTxtResultado]  = useState<{ ok: number; sinAsiento: number; err: number } | null>(null);
 
-  useEffect(() => subscribeToDocsRecibidos(d => { setDocs(d); setLoading(false); }), []);
+  useEffect(() => subscribeToDocsRecibidos(d => { setDocs(d); setLoading(false); }, { limite: 500 }), []);
 
   const filtrados = useMemo(() => docs.filter(d =>
     !search ||

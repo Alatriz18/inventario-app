@@ -1,6 +1,6 @@
 import {
   collection, doc, addDoc, updateDoc, onSnapshot,
-  query, orderBy, where, getDocs, serverTimestamp, runTransaction, getDoc,
+  query, orderBy, where, getDocs, serverTimestamp, runTransaction, getDoc, limit as fsLimit,
 } from 'firebase/firestore';
 import { db } from '@/lib/firebase/config';
 import { FacturaProveedor, PagoFactura, EstadoFacturaProveedor } from '@/types';
@@ -33,9 +33,17 @@ export async function existeFacturaProveedor(
 }
 
 export function subscribeToFacturasProveedor(
-  callback: (data: FacturaProveedor[]) => void
+  callback: (data: FacturaProveedor[]) => void,
+  opts?: { desde?: Date; hasta?: Date; limite?: number }
 ): () => void {
-  const q = query(collection(db, COL), orderBy('createdAt', 'desc'));
+  // Se ordena/filtra por fechaEmision (no createdAt): las facturas historicas
+  // se importan con fecha real pasada, así que createdAt no serviría para reportes.
+  const constraints = [];
+  if (opts?.desde) constraints.push(where('fechaEmision', '>=', opts.desde));
+  if (opts?.hasta) constraints.push(where('fechaEmision', '<=', opts.hasta));
+  constraints.push(orderBy('fechaEmision', 'desc'));
+  if (opts?.limite) constraints.push(fsLimit(opts.limite));
+  const q = query(collection(db, COL), ...constraints);
   return onSnapshot(q, (snap) => {
     callback(snap.docs.map((d) => ({ id: d.id, ...d.data() } as FacturaProveedor)));
   });

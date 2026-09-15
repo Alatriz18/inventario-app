@@ -67,9 +67,12 @@ export default function ReporteFacturasEmitidasPage() {
   const [filtroTipo,   setFiltroTipo]   = useState<'todos' | 'factura' | 'nota_venta'>('todos');
 
   useEffect(() => {
-    const u = subscribeToComprobantes(d => { setComprobantes(d); setLoading(false); });
+    setLoading(true);
+    const desde = new Date(dateFrom + 'T00:00:00');
+    const hasta = new Date(dateTo   + 'T23:59:59');
+    const u = subscribeToComprobantes(d => { setComprobantes(d); setLoading(false); }, { desde, hasta });
     return () => u();
-  }, []);
+  }, [dateFrom, dateTo]);
 
   const comprobantesFiltrados = useMemo(() => {
     return comprobantes

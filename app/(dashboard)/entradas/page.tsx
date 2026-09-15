@@ -97,7 +97,7 @@ export default function EntradasPage() {
   const total    = subtotal + iva;
 
   useEffect(() => {
-    const u1 = subscribeToEntradas((d) => { setEntradas(d); setLoading(false); });
+    const u1 = subscribeToEntradas((d) => { setEntradas(d); setLoading(false); }, { limite: 500 });
     const u2 = subscribeToProductos(setProductos);
     const u3 = subscribeToProveedores(setProveedores);
     const u4 = subscribeToBodegas(setBodegas);

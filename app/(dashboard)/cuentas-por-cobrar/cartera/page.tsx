@@ -53,9 +53,9 @@ export default function CarteraPage() {
   const [filtro,       setFiltro]       = useState('todos');
 
   useEffect(() => {
-    const u1 = subscribeToComprobantes(d => { setComprobantes(d); setLoading(false); });
+    const u1 = subscribeToComprobantes(d => { setComprobantes(d); setLoading(false); }, { limite: 500 });
     const u2 = subscribeToCxC(setCxc);
-    const u3 = subscribeToVentas(setVentas);
+    const u3 = subscribeToVentas(setVentas, { limite: 500 });
     return () => { u1(); u2(); u3(); };
   }, []);
 

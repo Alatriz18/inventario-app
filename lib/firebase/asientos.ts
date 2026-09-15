@@ -33,11 +33,18 @@ function fromDoc(d: any): AsientoContable {
 
 export function subscribeToAsientos(
   callback: (data: AsientoContable[]) => void,
-  limite = 300
+  limite = 300,
+  opts?: { desde?: Date; hasta?: Date }
 ): () => void {
   // El límite se aplica en la propia consulta (fsLimit) para no cobrar
-  // lecturas de TODA la colección y luego recortar en el cliente.
-  const q = query(collection(db, COL), orderBy('fecha', 'desc'), fsLimit(limite));
+  // lecturas de TODA la colección y luego recortar en el cliente. Si se pasa
+  // un rango de fechas (ej. reportes anuales) se acota ahí en vez de usar
+  // solo el límite, que igual sirve de tope de seguridad.
+  const constraints = [];
+  if (opts?.desde) constraints.push(where('fecha', '>=', opts.desde));
+  if (opts?.hasta) constraints.push(where('fecha', '<=', opts.hasta));
+  constraints.push(orderBy('fecha', 'desc'), fsLimit(limite));
+  const q = query(collection(db, COL), ...constraints);
   return onSnapshot(q, snap => {
     callback(snap.docs.map(fromDoc));
   });

@@ -33,10 +33,13 @@ export default function Form103Page() {
   const [mes,         setMes]         = useState(String(new Date().getMonth() + 1));
 
   useEffect(() => {
-    const u1 = subscribeToFacturasProveedor(d => { setCompras(d); setLoading(false); });
+    setLoading(true);
+    const desde = new Date(Number(anio), Number(mes) - 1, 1);
+    const hasta = new Date(Number(anio), Number(mes), 0, 23, 59, 59);
+    const u1 = subscribeToFacturasProveedor(d => { setCompras(d); setLoading(false); }, { desde, hasta });
     const u2 = subscribeToRetenciones(setRetenciones);
     return () => { u1(); u2(); };
-  }, []);
+  }, [anio, mes]);
 
   const comprasMes = useMemo(() => compras.filter(f => {
     const fecha = (f.fechaEmision as any)?.toDate?.() ?? new Date(f.fechaEmision as any);

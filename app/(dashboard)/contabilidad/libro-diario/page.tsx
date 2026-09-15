@@ -35,8 +35,11 @@ export default function LibroDiarioPage() {
   const [dateTo,   setDateTo]   = useState(format(new Date(), 'yyyy-MM-dd'));
 
   useEffect(() => {
-    return subscribeToAsientos(d => { setAsientos(d); setLoading(false); }, 100000);
-  }, []);
+    setLoading(true);
+    const desde = new Date(dateFrom + 'T00:00:00');
+    const hasta = new Date(dateTo   + 'T23:59:59');
+    return subscribeToAsientos(d => { setAsientos(d); setLoading(false); }, 100000, { desde, hasta });
+  }, [dateFrom, dateTo]);
 
   const filtrados = useMemo(() => {
     const from = new Date(dateFrom + 'T00:00:00');

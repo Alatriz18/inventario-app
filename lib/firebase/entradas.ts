@@ -1,6 +1,6 @@
 import {
   collection, doc, onSnapshot,
-  query, orderBy, serverTimestamp, runTransaction,
+  query, orderBy, serverTimestamp, runTransaction, where, limit as fsLimit,
 } from 'firebase/firestore';
 import { db } from './config';
 import { Entrada } from '@/types';
@@ -8,9 +8,15 @@ import { Entrada } from '@/types';
 const COL = 'entradas';
 
 export function subscribeToEntradas(
-  callback: (data: Entrada[]) => void
+  callback: (data: Entrada[]) => void,
+  opts?: { desde?: Date; hasta?: Date; limite?: number }
 ): () => void {
-  const q = query(collection(db, COL), orderBy('createdAt', 'desc'));
+  const constraints = [];
+  if (opts?.desde) constraints.push(where('createdAt', '>=', opts.desde));
+  if (opts?.hasta) constraints.push(where('createdAt', '<=', opts.hasta));
+  constraints.push(orderBy('createdAt', 'desc'));
+  if (opts?.limite) constraints.push(fsLimit(opts.limite));
+  const q = query(collection(db, COL), ...constraints);
   return onSnapshot(q, (snap) => {
     callback(snap.docs.map((d) => ({ id: d.id, ...d.data() } as Entrada)));
   });

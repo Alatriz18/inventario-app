@@ -26,10 +26,13 @@ export default function EstadoResultadosPage() {
   const [dateTo,   setDateTo]   = useState(format(new Date(), 'yyyy-MM-dd'));
 
   useEffect(() => {
-    const u1 = subscribeToAsientos(d => { setAsientos(d); setLoading(false); }, 100000);
+    setLoading(true);
+    const desde = new Date(dateFrom + 'T00:00:00');
+    const hasta = new Date(dateTo   + 'T23:59:59');
+    const u1 = subscribeToAsientos(d => { setAsientos(d); setLoading(false); }, 100000, { desde, hasta });
     const u2 = subscribeToCuentas(setCuentas);
     return () => { u1(); u2(); };
-  }, []);
+  }, [dateFrom, dateTo]);
 
   const data = useMemo(() => {
     const from = new Date(dateFrom + 'T00:00:00');

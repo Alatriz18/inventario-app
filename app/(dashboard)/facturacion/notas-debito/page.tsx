@@ -61,8 +61,8 @@ export default function NotasDebitoPage() {
   const [histNumAutorizacion, setHistNumAutorizacion] = useState('');
 
   useEffect(() => {
-    const u1 = subscribeToNotasDebito(d => { setNotas(d); setLoading(false); });
-    const u2 = subscribeToComprobantes(setComprobantes);
+    const u1 = subscribeToNotasDebito(d => { setNotas(d); setLoading(false); }, { limite: 500 });
+    const u2 = subscribeToComprobantes(setComprobantes, { limite: 1000 });
     return () => { u1(); u2(); };
   }, []);
 

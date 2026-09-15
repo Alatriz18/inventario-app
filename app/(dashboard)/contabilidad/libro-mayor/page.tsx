@@ -32,10 +32,13 @@ export default function LibroMayorPage() {
   const [cuentaId, setCuentaId] = useState('todas');
 
   useEffect(() => {
-    const u1 = subscribeToAsientos(d => { setAsientos(d); setLoading(false); }, 100000);
+    setLoading(true);
+    const desde = new Date(dateFrom + 'T00:00:00');
+    const hasta = new Date(dateTo   + 'T23:59:59');
+    const u1 = subscribeToAsientos(d => { setAsientos(d); setLoading(false); }, 100000, { desde, hasta });
     const u2 = subscribeToCuentas(setCuentas);
     return () => { u1(); u2(); };
-  }, []);
+  }, [dateFrom, dateTo]);
 
   // Solo cuentas que aceptan movimientos
   const cuentasMovimiento = cuentas.filter(c => c.aceptaMovimientos && c.activa);

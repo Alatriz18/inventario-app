@@ -67,12 +67,15 @@ export default function ATSPage() {
   const [generando, setGenerando] = useState(false);
 
   useEffect(() => {
-    const u1 = subscribeToVentas(d => { setVentas(d); setLoading(false); });
-    const u2 = subscribeToFacturasProveedor(setCompras);
-    const u3 = subscribeToRetencionesEmitidas(setRetenciones);
-    const u4 = subscribeToComprobantes(setComprobantes);
+    setLoading(true);
+    const desde = new Date(Number(anio), Number(mes) - 1, 1);
+    const hasta = new Date(Number(anio), Number(mes), 0, 23, 59, 59);
+    const u1 = subscribeToVentas(d => { setVentas(d); setLoading(false); }, { desde, hasta });
+    const u2 = subscribeToFacturasProveedor(setCompras, { desde, hasta });
+    const u3 = subscribeToRetencionesEmitidas(setRetenciones, { desde, hasta });
+    const u4 = subscribeToComprobantes(setComprobantes, { desde, hasta });
     return () => { u1(); u2(); u3(); u4(); };
-  }, []);
+  }, [anio, mes]);
 
   // Mapa: facturaProveedorId → retención (fuente / IVA) que emitimos
   const retPorFactura = useMemo(() => {

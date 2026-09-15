@@ -70,8 +70,8 @@ export default function RetencionesEmitidasPage() {
   const [histNumAutorizacion, setHistNumAutorizacion] = useState('');
 
   useEffect(() => {
-    const u1 = subscribeToRetencionesEmitidas(d => { setRetenciones(d); setLoading(false); });
-    const u2 = subscribeToFacturasProveedor(setFacturas);
+    const u1 = subscribeToRetencionesEmitidas(d => { setRetenciones(d); setLoading(false); }, { limite: 500 });
+    const u2 = subscribeToFacturasProveedor(setFacturas, { limite: 500 });
     const u3 = subscribeToRetenciones(setConfigRet);
     return () => { u1(); u2(); u3(); };
   }, []);

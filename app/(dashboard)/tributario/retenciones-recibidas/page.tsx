@@ -87,8 +87,8 @@ export default function RetencionesRecibidasPage() {
   const [lineas,               setLineas]               = useState<LineaForm[]>([nuevaLinea()]);
 
   useEffect(() => {
-    const u1 = subscribeToRetencionesRecibidas(d => { setRetenciones(d); setLoading(false); });
-    const u2 = subscribeToComprobantes(setComprobantesEmitidos);
+    const u1 = subscribeToRetencionesRecibidas(d => { setRetenciones(d); setLoading(false); }, { limite: 500 });
+    const u2 = subscribeToComprobantes(setComprobantesEmitidos, { limite: 1000 });
     return () => { u1(); u2(); };
   }, []);
 

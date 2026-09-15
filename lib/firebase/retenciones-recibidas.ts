@@ -1,6 +1,6 @@
 import {
   collection, doc, onSnapshot, query, orderBy, where, getDocs,
-  serverTimestamp, addDoc, updateDoc, getDoc,
+  serverTimestamp, addDoc, updateDoc, getDoc, limit as fsLimit,
   QueryDocumentSnapshot, DocumentData,
 } from 'firebase/firestore';
 import { db } from '@/lib/firebase/config';
@@ -15,9 +15,15 @@ export async function existeRetencionRecibida(claveAcceso?: string): Promise<boo
 }
 
 export function subscribeToRetencionesRecibidas(
-  callback: (data: RetencionRecibida[]) => void
+  callback: (data: RetencionRecibida[]) => void,
+  opts?: { desde?: Date; hasta?: Date; limite?: number }
 ): () => void {
-  const q = query(collection(db, COL), orderBy('createdAt', 'desc'));
+  const constraints = [];
+  if (opts?.desde) constraints.push(where('fechaEmision', '>=', opts.desde));
+  if (opts?.hasta) constraints.push(where('fechaEmision', '<=', opts.hasta));
+  constraints.push(orderBy('fechaEmision', 'desc'));
+  if (opts?.limite) constraints.push(fsLimit(opts.limite));
+  const q = query(collection(db, COL), ...constraints);
   return onSnapshot(q, (snap) => {
     callback(
       snap.docs.map((d: QueryDocumentSnapshot<DocumentData>) => ({

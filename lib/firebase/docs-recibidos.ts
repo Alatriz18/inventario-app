@@ -1,6 +1,6 @@
 import {
   collection, doc, addDoc, updateDoc, onSnapshot,
-  query, orderBy, where, getDocs, serverTimestamp,
+  query, orderBy, where, getDocs, serverTimestamp, limit as fsLimit,
 } from 'firebase/firestore';
 import { db } from '@/lib/firebase/config';
 import { DocumentoRecibido } from '@/types';
@@ -8,9 +8,15 @@ import { DocumentoRecibido } from '@/types';
 const COL = 'documentos_recibidos';
 
 export function subscribeToDocsRecibidos(
-  callback: (data: DocumentoRecibido[]) => void
+  callback: (data: DocumentoRecibido[]) => void,
+  opts?: { desde?: Date; hasta?: Date; limite?: number }
 ): () => void {
-  const q = query(collection(db, COL), orderBy('createdAt', 'desc'));
+  const constraints = [];
+  if (opts?.desde) constraints.push(where('fechaEmision', '>=', opts.desde));
+  if (opts?.hasta) constraints.push(where('fechaEmision', '<=', opts.hasta));
+  constraints.push(orderBy('fechaEmision', 'desc'));
+  if (opts?.limite) constraints.push(fsLimit(opts.limite));
+  const q = query(collection(db, COL), ...constraints);
   return onSnapshot(q, (snap) => {
     callback(snap.docs.map((d) => ({ id: d.id, ...d.data() } as DocumentoRecibido)));
   });

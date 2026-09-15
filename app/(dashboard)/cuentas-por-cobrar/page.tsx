@@ -209,7 +209,7 @@ export default function CxCPage() {
     setRefCobro('');
     setRetFuente('');
     setRetIVA('');
-    setCuentaBancariaId(cuentasBancarias.find(c => c.activa)?.id ?? '');
+    setCuentaBancariaId('caja');
     setDialogOpen(true);
   };
 
@@ -237,6 +237,8 @@ export default function CxCPage() {
       };
       const cobroId = await registrarCobroCxC(cxcSel.id, cobro, user.uid, user.nombre ?? user.email ?? 'Usuario');
 
+      const usaBanco = cuentaBancariaId !== 'caja' && !!cuentaBancariaId;
+
       // Asiento contable
       const asientoId = await crearAsientoCobro({
         cxcId:        cxcSel.id,
@@ -244,7 +246,7 @@ export default function CxCPage() {
         fecha,
         clienteNombre:cxcSel.clienteNombre,
         monto,
-        usaBanco:     true,
+        usaBanco,
         metodoCobro:  metodoPago,
         retFuente:    rf,
         retIVA:       ri,
@@ -257,7 +259,8 @@ export default function CxCPage() {
         toast.success('Cobro registrado exitosamente');
 
         // Refleja el ingreso en Movimientos Bancarios, ya conciliado con su asiento
-        if (cuentaBancariaId) {
+        // (solo si va a una cuenta bancaria real; a Caja no genera movimiento bancario)
+        if (usaBanco) {
           try {
             const movId = await registrarMovimientoBancario({
               cuentaBancariaId,
@@ -648,12 +651,13 @@ export default function CxCPage() {
                     placeholder="Opcional" className="mt-1" />
                 </div>
                 <div className="col-span-2">
-                  <Label>Cuenta bancaria que recibe el dinero</Label>
+                  <Label>¿Dónde se registra el dinero?</Label>
                   <Select value={cuentaBancariaId} onValueChange={setCuentaBancariaId}>
                     <SelectTrigger className="mt-1">
-                      <SelectValue placeholder="Sin registrar en Movimientos Bancarios" />
+                      <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
+                      <SelectItem value="caja">Caja General</SelectItem>
                       {cuentasBancarias.filter(c => c.activa).map(c => (
                         <SelectItem key={c.id} value={c.id}>
                           {c.banco} — {c.numeroCuenta}
@@ -662,7 +666,9 @@ export default function CxCPage() {
                     </SelectContent>
                   </Select>
                   <p className="text-xs text-slate-400 mt-1">
-                    Se registra ya conciliado en Movimientos Bancarios / Conciliación Bancaria.
+                    {cuentaBancariaId === 'caja'
+                      ? 'Se contabiliza en Caja General, sin generar movimiento bancario.'
+                      : 'Se registra ya conciliado en Movimientos Bancarios / Conciliación Bancaria.'}
                   </p>
                 </div>
                 <div>

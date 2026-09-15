@@ -300,6 +300,8 @@ export default function FacturasProveedorPage() {
         usuarioNombre: user.nombre,
       });
 
+      const usaBanco = data.metodoPago !== 'efectivo' && pagoCuentaBancariaId !== 'caja' && !!pagoCuentaBancariaId;
+
       // ── Motor contable automático ──
       const asientoId = await crearAsientoPago({
         facturaId:       pagoDialog.id,
@@ -307,7 +309,7 @@ export default function FacturasProveedorPage() {
         fecha:           fechaPago,
         proveedorNombre: pagoDialog.proveedorNombre,
         monto:           data.monto,
-        usaBanco:        data.metodoPago !== 'efectivo',
+        usaBanco,
         usuarioId:       user.uid,
         usuarioNombre:   user.nombre,
       });
@@ -316,7 +318,8 @@ export default function FacturasProveedorPage() {
         toast.success('Pago registrado');
 
         // Refleja el egreso en Movimientos Bancarios, ya conciliado con su asiento
-        if (data.metodoPago !== 'efectivo' && pagoCuentaBancariaId) {
+        // (solo si va a una cuenta bancaria real; a Caja no genera movimiento bancario)
+        if (usaBanco) {
           try {
             const movId = await registrarMovimientoBancario({
               cuentaBancariaId: pagoCuentaBancariaId,
@@ -866,7 +869,7 @@ export default function FacturasProveedorPage() {
 
   const abrirPagoBanco = () => {
     setSeleccionadas(new Set());
-    setPagoCuentaBancariaId(cuentasBancarias.find(c => c.activa)?.id ?? '');
+    setPagoCuentaBancariaId('caja');
     setPagoBancoOpen(true);
   };
 
@@ -892,15 +895,16 @@ export default function FacturasProveedorPage() {
           referencia: `Pago archivo ${BANCOS_PAGO.find(b => b.value === bancoSel)?.label ?? ''}`,
           usuarioId: user.uid, usuarioNombre: user.nombre,
         });
-        // 2. Egreso contable (DB CxP / CR Bancos)
+        // 2. Egreso contable (DB CxP / CR Bancos o Caja)
+        const usaBanco = pagoCuentaBancariaId !== 'caja' && !!pagoCuentaBancariaId;
         const asientoId = await crearAsientoPago({
           facturaId: f.id, pagoId, fecha: new Date(), proveedorNombre: f.proveedorNombre,
-          monto: f.saldoPendiente, usaBanco: true,
+          monto: f.saldoPendiente, usaBanco,
           usuarioId: user.uid, usuarioNombre: user.nombre,
         });
         if (asientoId) {
           await vincularAsientoPago(f.id, pagoId, asientoId);
-          if (pagoCuentaBancariaId) {
+          if (usaBanco) {
             try {
               const movId = await registrarMovimientoBancario({
                 cuentaBancariaId: pagoCuentaBancariaId,
@@ -1079,7 +1083,7 @@ export default function FacturasProveedorPage() {
                         <Button variant="ghost" size="icon" title="Registrar pago"
                           onClick={() => {
                             setPagoDialog(f);
-                            setPagoCuentaBancariaId(cuentasBancarias.find(c => c.activa)?.id ?? '');
+                            setPagoCuentaBancariaId('caja');
                             pagoForm.reset({ monto: f.saldoPendiente, metodoPago: 'transferencia', fecha: new Date().toISOString().split('T')[0] });
                           }}
                           className="h-8 w-8 text-slate-500 hover:text-green-600">
@@ -1279,10 +1283,11 @@ export default function FacturasProveedorPage() {
               </div>
               {pagoForm.watch('metodoPago') !== 'efectivo' && (
                 <div className="space-y-1.5">
-                  <Label>Cuenta bancaria de la que sale el dinero</Label>
+                  <Label>¿De dónde sale el dinero?</Label>
                   <Select value={pagoCuentaBancariaId} onValueChange={setPagoCuentaBancariaId}>
-                    <SelectTrigger><SelectValue placeholder="Sin registrar en Movimientos Bancarios" /></SelectTrigger>
+                    <SelectTrigger><SelectValue /></SelectTrigger>
                     <SelectContent>
+                      <SelectItem value="caja">Caja General</SelectItem>
                       {cuentasBancarias.filter(c => c.activa).map(c => (
                         <SelectItem key={c.id} value={c.id}>
                           {c.banco} — {c.numeroCuenta}
@@ -1291,7 +1296,9 @@ export default function FacturasProveedorPage() {
                     </SelectContent>
                   </Select>
                   <p className="text-xs text-slate-400">
-                    Se registra ya conciliado en Movimientos Bancarios / Conciliación Bancaria.
+                    {pagoCuentaBancariaId === 'caja'
+                      ? 'Se contabiliza en Caja General, sin generar movimiento bancario.'
+                      : 'Se registra ya conciliado en Movimientos Bancarios / Conciliación Bancaria.'}
                   </p>
                 </div>
               )}
@@ -1663,17 +1670,20 @@ export default function FacturasProveedorPage() {
                 <p className="text-xl font-bold">{currency(totalSeleccionado)}</p>
               </div>
               <div className="space-y-1.5 sm:col-span-2">
-                <Label>Cuenta bancaria de la que sale el dinero</Label>
+                <Label>¿De dónde sale el dinero?</Label>
                 <Select value={pagoCuentaBancariaId} onValueChange={setPagoCuentaBancariaId}>
-                  <SelectTrigger><SelectValue placeholder="Sin registrar en Movimientos Bancarios" /></SelectTrigger>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
                   <SelectContent>
+                    <SelectItem value="caja">Caja General</SelectItem>
                     {cuentasBancarias.filter(c => c.activa).map(c => (
                       <SelectItem key={c.id} value={c.id}>{c.banco} — {c.numeroCuenta}</SelectItem>
                     ))}
                   </SelectContent>
                 </Select>
                 <p className="text-xs text-slate-400">
-                  Registra cada pago ya conciliado en Movimientos Bancarios / Conciliación Bancaria.
+                  {pagoCuentaBancariaId === 'caja'
+                    ? 'Se contabiliza cada pago en Caja General, sin generar movimiento bancario.'
+                    : 'Registra cada pago ya conciliado en Movimientos Bancarios / Conciliación Bancaria.'}
                 </p>
               </div>
             </div>

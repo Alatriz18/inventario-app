@@ -26,7 +26,7 @@ import {
   marcarMovimientoReclasificado, restaurarMovimiento,
 } from '@/lib/firebase/cuentas-bancarias';
 import { subscribeToCuentas }  from '@/lib/firebase/plan-cuentas';
-import { reclasificarCuentaEnAsiento } from '@/lib/firebase/asientos';
+import { reclasificarCuentaEnAsiento, getAsientos } from '@/lib/firebase/asientos';
 import { getOrCreateConfigContable } from '@/lib/firebase/config-contable';
 import {
   crearLoteReclasificacion, subscribeToLotesReclasificacion, marcarLoteRevertido,
@@ -317,49 +317,88 @@ export default function MovimientosBancariosPage() {
     }
   };
 
-  // Mueve TODOS los movimientos ya registrados de esta cuenta (y sus asientos
-  // vinculados) a Caja General, uno por uno: cada asiento cambia su línea de
-  // Banco por Caja (mismo monto), y el movimiento bancario deja de contar
-  // para la conciliación de este banco. No crea ni borra ningún asiento.
+  // Mueve TODO lo que toque la cuenta de este banco a Caja General:
+  //  1. Los movimientos bancarios ya registrados (y su asiento, si tienen).
+  //  2. CUALQUIER otro asiento que tenga una línea contra este banco pero que
+  //     nunca tuvo un movimiento bancario propio (ej. cobros/pagos antiguos,
+  //     de antes de que existiera el registro automático en Movimientos
+  //     Bancarios) — se busca directamente en el Libro Diario.
+  // No crea ni borra ningún asiento, solo reclasifica la cuenta dentro de
+  // cada uno; todo queda registrado en un lote que se puede deshacer.
   const handleMoverTodoACaja = async () => {
-    if (!user || !cuentaSelObj?.cuentaContableCodigo || movsParaMover.length === 0) return;
+    if (!user || !cuentaSelObj?.cuentaContableCodigo) return;
     setMoviendoTodo(true);
     setProgresoMoverTodo(0);
-    let ok = 0, sinAsiento = 0, err = 0;
+    let ok = 0, sinAsiento = 0, bloqueados = 0, err = 0;
     const items: ItemLoteReclasificacion[] = [];
+    const bancoCodigo = cuentaSelObj.cuentaContableCodigo;
     try {
       const config = await getOrCreateConfigContable();
       const cuentaCaja   = planCuentas.find(c => c.codigo === config.cuentaCaja);
-      const cuentaOrigen  = planCuentas.find(c => c.codigo === cuentaSelObj.cuentaContableCodigo);
+      const cuentaOrigen = planCuentas.find(c => c.codigo === bancoCodigo);
       const destino = { codigo: config.cuentaCaja, nombre: cuentaCaja?.nombre ?? 'Caja General' };
+      const origen  = {
+        codigo: bancoCodigo,
+        nombre: cuentaOrigen?.nombre ?? bancoCodigo,
+        id:     cuentaOrigen?.id ?? bancoCodigo,
+      };
 
-      for (let i = 0; i < movsParaMover.length; i++) {
-        const mov = movsParaMover[i];
+      // 1) Todos los asientos del sistema que tocan la cuenta de este banco
+      const todosAsientos = await getAsientos();
+      const asientosDelBanco = todosAsientos.filter(a =>
+        a.lineas.some(l => l.cuentaCodigo === bancoCodigo)
+      );
+      const asientosBloqueados = asientosDelBanco.filter(a => a.bloqueado);
+      const asientosAProcesar  = asientosDelBanco.filter(a => !a.bloqueado);
+      bloqueados = asientosBloqueados.length;
+
+      // Movimiento bancario vinculado a cada asiento (si existe), para poder
+      // marcarlo también como reclasificado.
+      const movPorAsiento = new Map(movsParaMover.filter(m => m.asientoId).map(m => [m.asientoId as string, m]));
+
+      const total = asientosAProcesar.length;
+      for (let i = 0; i < total; i++) {
+        const asiento = asientosAProcesar[i];
         try {
-          let huboAsiento = false;
-          if (mov.asientoId) {
-            huboAsiento = await reclasificarCuentaEnAsiento(
-              mov.asientoId, cuentaSelObj.cuentaContableCodigo, destino,
-              user.uid, user.nombre
-            );
-            if (!huboAsiento) sinAsiento++;
-          } else {
-            sinAsiento++;
+          const huboAsiento = await reclasificarCuentaEnAsiento(
+            asiento.id, bancoCodigo, destino, user.uid, user.nombre
+          );
+          if (!huboAsiento) sinAsiento++;
+
+          const mov = movPorAsiento.get(asiento.id);
+          if (mov) {
+            await marcarMovimientoReclasificado(mov.id, `${mov.descripcion} (reclasificado a Caja General)`);
           }
-          await marcarMovimientoReclasificado(mov.id, `${mov.descripcion} (reclasificado a Caja General)`);
+
           items.push({
-            movId: mov.id, asientoId: mov.asientoId, huboAsiento,
-            cuentaOrigenCodigo: cuentaSelObj.cuentaContableCodigo,
-            cuentaOrigenNombre: cuentaOrigen?.nombre ?? cuentaSelObj.cuentaContableCodigo,
-            cuentaOrigenId:     cuentaOrigen?.id ?? cuentaSelObj.cuentaContableCodigo,
-            estadoMovOriginal:      mov.estado,
-            descripcionMovOriginal: mov.descripcion,
+            ...(mov ? { movId: mov.id, estadoMovOriginal: mov.estado, descripcionMovOriginal: mov.descripcion } : {}),
+            asientoId: asiento.id, huboAsiento,
+            cuentaOrigenCodigo: origen.codigo,
+            cuentaOrigenNombre: origen.nombre,
+            cuentaOrigenId:     origen.id,
           });
           ok++;
         } catch {
           err++;
         }
         setProgresoMoverTodo(i + 1);
+      }
+
+      // 2) Movimientos bancarios sin ningún asiento vinculado: no hay nada que
+      // reclasificar contablemente, pero igual dejan de contar para el saldo.
+      for (const mov of movsParaMover) {
+        if (mov.asientoId) continue; // ya se procesó (o se procesará) arriba
+        try {
+          await marcarMovimientoReclasificado(mov.id, `${mov.descripcion} (reclasificado a Caja General)`);
+          items.push({
+            movId: mov.id, estadoMovOriginal: mov.estado, descripcionMovOriginal: mov.descripcion,
+            huboAsiento: false,
+            cuentaOrigenCodigo: origen.codigo, cuentaOrigenNombre: origen.nombre, cuentaOrigenId: origen.id,
+          });
+          sinAsiento++;
+        } catch {
+          err++;
+        }
       }
 
       if (items.length > 0) {
@@ -376,11 +415,15 @@ export default function MovimientosBancariosPage() {
       }
 
       toast.success(
-        `${ok} movimiento(s) movidos a Caja General` +
-        (sinAsiento ? ` — ${sinAsiento} sin asiento vinculado para reclasificar (revísalos manualmente)` : '') +
+        `${ok} asiento(s) reclasificados a Caja General` +
+        (sinAsiento ? ` — ${sinAsiento} sin línea de banco que reclasificar` : '') +
+        (bloqueados ? ` — ${bloqueados} en períodos cerrados (no se tocaron)` : '') +
         (err ? ` — ${err} con error` : ''),
-        { duration: 12000 }
+        { duration: 14000 }
       );
+      if (items.length === 0) {
+        toast.info('No se encontró nada que mover: ningún asiento ni movimiento de esta cuenta hace referencia al banco.');
+      }
       setDlgMoverTodo(false);
     } catch (e: any) {
       toast.error(e.message ?? 'Error al mover los movimientos a Caja');
@@ -406,10 +449,12 @@ export default function MovimientosBancariosPage() {
               user.uid, user.nombre
             );
           }
-          await restaurarMovimiento(item.movId, {
-            estado: item.estadoMovOriginal,
-            descripcion: item.descripcionMovOriginal,
-          });
+          if (item.movId && item.estadoMovOriginal && item.descripcionMovOriginal !== undefined) {
+            await restaurarMovimiento(item.movId, {
+              estado: item.estadoMovOriginal,
+              descripcion: item.descripcionMovOriginal,
+            });
+          }
           ok++;
         } catch {
           err++;
@@ -491,8 +536,8 @@ export default function MovimientosBancariosPage() {
                 <ArrowRightLeft className="mr-2 h-4 w-4" /> Reclasificar saldo a Caja
               </Button>
               <Button variant="outline" size="sm" className="text-amber-700 border-amber-300 hover:bg-amber-50"
-                disabled={!cuentaSelObj?.cuentaContableCodigo || movsParaMover.length === 0}
-                title={!cuentaSelObj?.cuentaContableCodigo ? 'Primero vincula esta cuenta a una cuenta contable' : 'Reclasifica cada movimiento y su asiento — historial completo'}
+                disabled={!cuentaSelObj?.cuentaContableCodigo}
+                title={!cuentaSelObj?.cuentaContableCodigo ? 'Primero vincula esta cuenta a una cuenta contable' : 'Busca en TODO el Libro Diario los asientos de este banco y los reclasifica a Caja'}
                 onClick={() => setDlgMoverTodo(true)}>
                 <ArrowRightLeft className="mr-2 h-4 w-4" /> Mover TODO el historial a Caja
               </Button>
@@ -830,27 +875,29 @@ export default function MovimientosBancariosPage() {
           </DialogHeader>
           <div className="space-y-3">
             <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 text-sm text-amber-800">
-              Esto va a reclasificar <strong>{movsParaMover.length} movimiento(s)</strong> de{' '}
-              <strong>{cuentaSelObj?.banco}</strong>: cada asiento vinculado cambiará su línea de banco
-              por <strong>Caja General</strong> (mismo monto, misma fecha original), y esos movimientos
-              dejarán de contar para la conciliación de este banco.
+              Esto va a buscar en <strong>todo el Libro Diario</strong> cada asiento que tenga una línea
+              contra <strong>{cuentaSelObj?.banco}</strong> — incluidos cobros/pagos antiguos que nunca
+              tuvieron un movimiento bancario propio — y cambiar esa línea a <strong>Caja General</strong>{' '}
+              (mismo monto, misma fecha original).
             </div>
             <ul className="text-xs text-slate-500 list-disc pl-4 space-y-1">
               <li>No se crea ni se borra ningún asiento — se reclasifica la cuenta dentro de cada uno.</li>
               <li>Los montos, fechas y el resto de líneas (retenciones, etc.) no cambian.</li>
-              <li>Los movimientos sin asiento vinculado no se pueden reclasificar automáticamente y se avisan aparte.</li>
-              <li>Los asientos de períodos ya cerrados no se pueden tocar y también se avisan aparte.</li>
+              <li>Los asientos de períodos ya cerrados no se pueden tocar y se avisan aparte.</li>
+              <li>Puede tardar un momento si hay muchos asientos — no cierres esta ventana mientras procesa.</li>
               <li><strong>Se puede deshacer</strong> después con un clic — queda un registro del lote debajo de la tabla.</li>
             </ul>
             {moviendoTodo && (
-              <p className="text-sm text-slate-500">Procesando {progresoMoverTodo}/{movsParaMover.length}…</p>
+              <p className="text-sm text-slate-500">
+                {progresoMoverTodo > 0 ? `Procesando asiento ${progresoMoverTodo}…` : 'Buscando asientos de este banco…'}
+              </p>
             )}
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setDlgMoverTodo(false)} disabled={moviendoTodo}>Cancelar</Button>
             <Button onClick={handleMoverTodoACaja} disabled={moviendoTodo}
               className="bg-amber-600 hover:bg-amber-700">
-              {moviendoTodo ? `Moviendo ${progresoMoverTodo}/${movsParaMover.length}…` : `Mover ${movsParaMover.length} movimiento(s)`}
+              {moviendoTodo ? 'Moviendo…' : 'Buscar y mover a Caja'}
             </Button>
           </DialogFooter>
         </DialogContent>

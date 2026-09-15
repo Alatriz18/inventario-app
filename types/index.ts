@@ -725,14 +725,14 @@ export interface MovimientoBancario {
 // ─── LOTES DE RECLASIFICACIÓN (deshacer "mover historial a Caja") ──────────
 
 export interface ItemLoteReclasificacion {
-  movId:                  string;
+  movId?:                 string; // ausente si el asiento no tenía movimiento bancario vinculado
   asientoId?:             string;
-  huboAsiento:            boolean; // false si el movimiento no tenía asiento vinculado
+  huboAsiento:            boolean; // false si no se encontró/pudo reclasificar ningún asiento
   cuentaOrigenCodigo:     string;
   cuentaOrigenNombre:     string;
   cuentaOrigenId:         string;
-  estadoMovOriginal:      EstadoConciliacion;
-  descripcionMovOriginal: string;
+  estadoMovOriginal?:     EstadoConciliacion;
+  descripcionMovOriginal?:string;
 }
 
 export interface LoteReclasificacion {

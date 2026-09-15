@@ -14,7 +14,7 @@ import {
 } from '@/components/ui/table';
 
 import { FacturaProveedor } from '@/types';
-import { subscribeToFacturasProveedor } from '@/lib/firebase/facturas-proveedor';
+import { subscribeToFacturasProveedorActivas } from '@/lib/firebase/facturas-proveedor';
 import { useRouter } from 'next/navigation';
 
 function currency(v: number) { return `$${v.toFixed(2)}`; }
@@ -37,7 +37,7 @@ export default function PagosPendientesPage() {
   const [loading,  setLoading]  = useState(true);
 
   useEffect(() => {
-    return subscribeToFacturasProveedor((data) => {
+    return subscribeToFacturasProveedorActivas((data) => {
       setFacturas(data);
       setLoading(false);
     });

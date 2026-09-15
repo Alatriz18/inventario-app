@@ -85,7 +85,7 @@ function EmitirComprobanteInner() {
   }, [searchParams]);
 
   useEffect(() => {
-    return subscribeToVentas((data) => { setVentas(data); setLoading(false); });
+    return subscribeToVentas((data) => { setVentas(data); setLoading(false); }, { limite: 1500 });
   }, []);
 
   // Cargar comprobantes habilitados según el régimen y ajustar el tipo activo

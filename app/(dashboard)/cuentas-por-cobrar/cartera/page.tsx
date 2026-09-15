@@ -54,7 +54,7 @@ export default function CarteraPage() {
 
   useEffect(() => {
     const u1 = subscribeToComprobantes(d => { setComprobantes(d); setLoading(false); }, { limite: 500 });
-    const u2 = subscribeToCxC(setCxc);
+    const u2 = subscribeToCxC(setCxc, { limite: 3000 });
     const u3 = subscribeToVentas(setVentas, { limite: 500 });
     return () => { u1(); u2(); u3(); };
   }, []);

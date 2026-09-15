@@ -49,6 +49,38 @@ export function subscribeToFacturasProveedor(
   });
 }
 
+/**
+ * Para pantallas operativas (lista principal, pagos pendientes): trae TODAS
+ * las facturas activas (pendiente/parcial/vencida — ese conjunto se mantiene
+ * naturalmente acotado en un negocio sano) más solo las últimas
+ * `limitePagadas` ya liquidadas (pagada/anulada), en vez de leer el archivo
+ * histórico completo cada vez que se abre la pantalla. Los conteos/KPIs que
+ * dependen de saldos pendientes quedan exactos porque las activas nunca se
+ * recortan; solo se acota el histórico ya cerrado.
+ */
+export function subscribeToFacturasProveedorActivas(
+  callback: (data: FacturaProveedor[]) => void,
+  limitePagadas = 300
+): () => void {
+  let activas: FacturaProveedor[] = [];
+  let cerradas: FacturaProveedor[] = [];
+  const emit = () => callback([...activas, ...cerradas]);
+
+  const qActivas = query(collection(db, COL), where('estado', 'in', ['pendiente', 'parcial', 'vencida']));
+  const u1 = onSnapshot(qActivas, snap => {
+    activas = snap.docs.map(d => ({ id: d.id, ...d.data() } as FacturaProveedor));
+    emit();
+  });
+
+  const qCerradas = query(collection(db, COL), where('estado', 'in', ['pagada', 'anulada']), fsLimit(limitePagadas));
+  const u2 = onSnapshot(qCerradas, snap => {
+    cerradas = snap.docs.map(d => ({ id: d.id, ...d.data() } as FacturaProveedor));
+    emit();
+  });
+
+  return () => { u1(); u2(); };
+}
+
 export async function createFacturaProveedor(
   data: Omit<FacturaProveedor, 'id'>
 ): Promise<string> {

@@ -65,7 +65,7 @@ export default function ReporteCobrosPage() {
   const [preset,   setPreset]   = useState('Hoy');
 
   useEffect(() => {
-    const unsub = subscribeToCxC(data => { setCxcList(data); setLoading(false); });
+    const unsub = subscribeToCxC(data => { setCxcList(data); setLoading(false); }, { limite: 3000 });
     return () => unsub();
   }, []);
 

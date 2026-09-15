@@ -38,7 +38,7 @@ import {
 } from '@/lib/contabilidad/motor-asientos';
 import { FacturaProveedor, Proveedor, CuentaBancaria } from '@/types';
 import {
-  subscribeToFacturasProveedor,
+  subscribeToFacturasProveedorActivas,
   createFacturaProveedor,
   updateFacturaProveedor,
   registrarPago,
@@ -218,7 +218,7 @@ export default function FacturasProveedorPage() {
   });
 
   useEffect(() => {
-    const u1 = subscribeToFacturasProveedor((d) => { setFacturas(d); setLoading(false); });
+    const u1 = subscribeToFacturasProveedorActivas((d) => { setFacturas(d); setLoading(false); });
     const u2 = subscribeToProveedores(setProveedores);
     const u3 = subscribeToCuentasBancarias(setCuentasBancarias);
     const u4 = subscribeToComprobantes(setComprobantesEmitidos, { limite: 1000 });

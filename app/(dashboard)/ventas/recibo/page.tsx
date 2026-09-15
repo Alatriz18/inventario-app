@@ -71,7 +71,7 @@ function ReciboInternoInner() {
   const [generando, setGenerando] = useState<string | null>(null);
 
   useEffect(() => {
-    const u = subscribeToVentas(d => { setVentas(d); setLoading(false); });
+    const u = subscribeToVentas(d => { setVentas(d); setLoading(false); }, { limite: 1500 });
     getConfigSRI().then(setConfig);
     return u;
   }, []);

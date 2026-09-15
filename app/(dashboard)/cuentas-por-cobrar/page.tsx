@@ -24,7 +24,7 @@ import { Ban, ChevronDown, Pencil } from 'lucide-react';
 
 import { CuentaCobrar, CobroCxC, MetodoPago, Cliente, CuentaBancaria } from '@/types';
 import {
-  subscribeToCxC, registrarCobroCxC, actualizarEstadosVencidos, crearCuentaCobrar,
+  subscribeToCxCActivas, registrarCobroCxC, actualizarEstadosVencidos, crearCuentaCobrar,
   anularCobro, vincularAsientoCobro, editarCobro,
 } from '@/lib/firebase/cuentas-cobrar';
 import { crearAsientoCobro, crearAsientoReversion } from '@/lib/contabilidad/motor-asientos';
@@ -86,7 +86,7 @@ export default function CxCPage() {
 
   useEffect(() => {
     actualizarEstadosVencidos().catch(() => {});
-    const unsub = subscribeToCxC(data => { setCxcList(data); setLoading(false); });
+    const unsub = subscribeToCxCActivas(data => { setCxcList(data); setLoading(false); });
     const unsubCli = subscribeToClientes(setClientes);
     const unsubComp = subscribeToComprobantes(setComprobantes, { limite: 1000 });
     const unsubBancos = subscribeToCuentasBancarias(setCuentasBancarias);

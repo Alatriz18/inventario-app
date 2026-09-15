@@ -28,6 +28,37 @@ export function subscribeToCxC(
   });
 }
 
+/**
+ * Para la pantalla operativa principal (Saldos y Cobros): trae TODAS las
+ * cuentas activas (pendiente/parcial/vencida — se mantiene naturalmente
+ * acotado) más solo las últimas `limiteCerradas` ya liquidadas (pagada/
+ * anulada), en vez de leer el historial completo de CxC cada vez que se
+ * abre la pantalla. El aging y los saldos pendientes quedan exactos porque
+ * las activas nunca se recortan.
+ */
+export function subscribeToCxCActivas(
+  callback: (data: CuentaCobrar[]) => void,
+  limiteCerradas = 300
+): () => void {
+  let activas: CuentaCobrar[] = [];
+  let cerradas: CuentaCobrar[] = [];
+  const emit = () => callback([...activas, ...cerradas]);
+
+  const qActivas = query(collection(db, COL), where('estado', 'in', ['pendiente', 'parcial', 'vencida']));
+  const u1 = onSnapshot(qActivas, snap => {
+    activas = snap.docs.map(d => ({ id: d.id, ...d.data() } as CuentaCobrar));
+    emit();
+  });
+
+  const qCerradas = query(collection(db, COL), where('estado', 'in', ['pagada', 'anulada']), fsLimit(limiteCerradas));
+  const u2 = onSnapshot(qCerradas, snap => {
+    cerradas = snap.docs.map(d => ({ id: d.id, ...d.data() } as CuentaCobrar));
+    emit();
+  });
+
+  return () => { u1(); u2(); };
+}
+
 export async function getCxCById(id: string): Promise<CuentaCobrar | null> {
   const snap = await getDoc(doc(db, COL, id));
   if (!snap.exists()) return null;

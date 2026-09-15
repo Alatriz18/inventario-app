@@ -20,15 +20,48 @@ import {
 } from '@/lib/firebase/asientos';
 import { CuentaContable, AsientoLinea, TipoAsiento } from '@/types';
 
-// ── Cache de cuentas (se invalida en cada llamada para seguridad) ─────────
+// ── Caché en memoria del plan de cuentas y la config contable ────────────
+// Antes se releía TODO el plan de cuentas (getDocs completo) y el doc de
+// config en CADA venta/pago/cobro/etc. — con el volumen de transacciones
+// diario eso multiplicaba muchísimo las lecturas de Firestore. Como ambos
+// cambian muy rara vez (solo cuando alguien edita el plan de cuentas o la
+// configuración contable), se cachean por unos minutos en memoria; cada
+// pestaña/sesión del navegador vuelve a poblar el caché al recargar.
+
+const CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutos
+
+let cuentasCache: CuentaContable[] | null = null;
+let cuentasCacheAt = 0;
 
 async function getCuentasCached(): Promise<CuentaContable[]> {
-  return await getCuentas();
+  const ahora = Date.now();
+  if (cuentasCache && (ahora - cuentasCacheAt) < CACHE_TTL_MS) return cuentasCache;
+  cuentasCache   = await getCuentas();
+  cuentasCacheAt = ahora;
+  return cuentasCache;
 }
 
+/** Llamar tras crear/editar/eliminar una cuenta del plan para no esperar el TTL. */
+export function invalidarCacheCuentas(): void {
+  cuentasCache = null;
+}
+
+let configCache: Awaited<ReturnType<typeof getOrCreateConfigContable>> | null = null;
+let configCacheAt = 0;
+
 async function getConfigSegura() {
-  try { return await getOrCreateConfigContable(); }
-  catch { return null; }
+  try {
+    const ahora = Date.now();
+    if (configCache && (ahora - configCacheAt) < CACHE_TTL_MS) return configCache;
+    configCache   = await getOrCreateConfigContable();
+    configCacheAt = ahora;
+    return configCache;
+  } catch { return null; }
+}
+
+/** Llamar tras editar la configuración contable para no esperar el TTL. */
+export function invalidarCacheConfigContable(): void {
+  configCache = null;
 }
 
 // ── Helper para construir una línea ──────────────────────────────────────

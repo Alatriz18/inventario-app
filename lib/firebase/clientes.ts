@@ -1,16 +1,22 @@
 import {
   collection, addDoc, updateDoc, deleteDoc,
-  doc, onSnapshot, query, orderBy, where, getDocs, serverTimestamp,
+  doc, onSnapshot, query, orderBy, where, getDocs, serverTimestamp, limit as fsLimit,
 } from 'firebase/firestore';
 import { db } from './config';
 import { Cliente } from '@/types';
 
 const COL = 'clientes';
 
+// Tope de seguridad: evita facturar lecturas de un catálogo sin fin. Si el
+// negocio llega a tener más clientes que esto, hace falta rediseñar esta
+// pantalla con búsqueda del lado del servidor en vez de traer todo.
+const LIMITE_DEFAULT = 3000;
+
 export function subscribeToClientes(
-  callback: (data: Cliente[]) => void
+  callback: (data: Cliente[]) => void,
+  limite = LIMITE_DEFAULT
 ): () => void {
-  const q = query(collection(db, COL), orderBy('nombre'));
+  const q = query(collection(db, COL), orderBy('nombre'), fsLimit(limite));
   return onSnapshot(q, (snap) => {
     callback(snap.docs.map((d) => ({ id: d.id, ...d.data() } as Cliente)));
   });

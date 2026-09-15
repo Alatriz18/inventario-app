@@ -1,16 +1,22 @@
 import {
   collection, addDoc, updateDoc, deleteDoc,
-  doc, onSnapshot, query, orderBy, serverTimestamp,
+  doc, onSnapshot, query, orderBy, serverTimestamp, limit as fsLimit,
 } from 'firebase/firestore';
 import { db } from './config';
 import { Producto } from '@/types';
 
 const COL = 'productos';
 
+// Tope de seguridad: evita facturar lecturas de un catálogo sin fin. Si el
+// negocio llega a tener más productos que esto, hace falta rediseñar esta
+// pantalla con búsqueda del lado del servidor en vez de traer todo.
+const LIMITE_DEFAULT = 3000;
+
 export function subscribeToProductos(
-  callback: (data: Producto[]) => void
+  callback: (data: Producto[]) => void,
+  limite = LIMITE_DEFAULT
 ): () => void {
-  const q = query(collection(db, COL), orderBy('nombre'));
+  const q = query(collection(db, COL), orderBy('nombre'), fsLimit(limite));
   return onSnapshot(q, (snap) => {
     callback(snap.docs.map((d) => ({ id: d.id, ...d.data() } as Producto)));
   });

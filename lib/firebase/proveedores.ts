@@ -1,11 +1,14 @@
 import {
   collection, addDoc, updateDoc, deleteDoc,
-  doc, onSnapshot, query, orderBy, where, getDocs, serverTimestamp,
+  doc, onSnapshot, query, orderBy, where, getDocs, serverTimestamp, limit as fsLimit,
 } from 'firebase/firestore';
 import { db } from './config';
 import { Proveedor } from '@/types';
 
 const COL = 'proveedores';
+
+// Tope de seguridad: evita facturar lecturas de un catálogo sin fin.
+const LIMITE_DEFAULT = 2000;
 
 /**
  * Busca un proveedor por RUC; si no existe lo crea automáticamente con los
@@ -38,9 +41,10 @@ export async function getOrCreateProveedorPorRuc(
 }
 
 export function subscribeToProveedores(
-  callback: (data: Proveedor[]) => void
+  callback: (data: Proveedor[]) => void,
+  limite = LIMITE_DEFAULT
 ): () => void {
-  const q = query(collection(db, COL), orderBy('nombre'));
+  const q = query(collection(db, COL), orderBy('nombre'), fsLimit(limite));
   return onSnapshot(q, (snap) => {
     callback(snap.docs.map((d) => ({ id: d.id, ...d.data() } as Proveedor)));
   });

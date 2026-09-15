@@ -1,6 +1,6 @@
 import {
   collection, addDoc, updateDoc, deleteDoc,
-  doc, onSnapshot, query, orderBy, serverTimestamp,
+  doc, onSnapshot, query, orderBy, serverTimestamp, limit as fsLimit,
 } from 'firebase/firestore';
 import { db } from './config';
 import { Categoria } from '@/types';
@@ -8,9 +8,10 @@ import { Categoria } from '@/types';
 const COL = 'categorias';
 
 export function subscribeToCategorias(
-  callback: (data: Categoria[]) => void
+  callback: (data: Categoria[]) => void,
+  limite = 500
 ): () => void {
-  const q = query(collection(db, COL), orderBy('nombre'));
+  const q = query(collection(db, COL), orderBy('nombre'), fsLimit(limite));
   return onSnapshot(q, (snap) => {
     callback(snap.docs.map((d) => ({ id: d.id, ...d.data() } as Categoria)));
   });

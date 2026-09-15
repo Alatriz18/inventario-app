@@ -1,6 +1,6 @@
 import {
   collection, addDoc, updateDoc, deleteDoc,
-  doc, onSnapshot, query, orderBy, serverTimestamp,
+  doc, onSnapshot, query, orderBy, serverTimestamp, limit as fsLimit,
 } from 'firebase/firestore';
 import { db } from './config';
 import { Bodega } from '@/types';
@@ -8,9 +8,10 @@ import { Bodega } from '@/types';
 const COL = 'bodegas';
 
 export function subscribeToBodegas(
-  callback: (data: Bodega[]) => void
+  callback: (data: Bodega[]) => void,
+  limite = 500
 ): () => void {
-  const q = query(collection(db, COL), orderBy('nombre'));
+  const q = query(collection(db, COL), orderBy('nombre'), fsLimit(limite));
   return onSnapshot(q, (snap) => {
     callback(snap.docs.map((d) => ({ id: d.id, ...d.data() } as Bodega)));
   });

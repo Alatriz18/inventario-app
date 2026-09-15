@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useMemo, useRef } from 'react';
 import { format } from 'date-fns';
-import { Plus, Upload, Building2, Receipt, Ban } from 'lucide-react';
+import { Plus, Upload, Building2, Receipt, Ban, ArrowRightLeft } from 'lucide-react';
 import { toast } from 'sonner';
 
 import PageHeader  from '@/components/shared/PageHeader';
@@ -22,10 +22,12 @@ import { CuentaBancaria, MovimientoBancario, CuentaContable } from '@/types';
 import {
   subscribeToCuentasBancarias, createCuentaBancaria,
   subscribeToMovimientosBancarios, importarMovimientosBancarios,
-  registrarMovimientoBancario, anularMovimientoBancario,
+  registrarMovimientoBancario, anularMovimientoBancario, conciliarMovimiento,
 } from '@/lib/firebase/cuentas-bancarias';
 import { subscribeToCuentas }  from '@/lib/firebase/plan-cuentas';
-import { crearAsientoMovimientoBancario, crearAsientoReversion } from '@/lib/contabilidad/motor-asientos';
+import {
+  crearAsientoMovimientoBancario, crearAsientoReversion, crearAsientoReclasificacionCaja,
+} from '@/lib/contabilidad/motor-asientos';
 import { useAuth } from '@/context/AuthContext';
 
 const currency = (v: number) => `$${v.toFixed(2)}`;
@@ -69,6 +71,10 @@ export default function MovimientosBancariosPage() {
     tipo: 'cargo' as 'cargo' | 'abono',
     cuentaContrapartidaCodigo: '',
   });
+
+  // Dialog reclasificar saldo completo de la cuenta a Caja General
+  const [dlgReclasificar, setDlgReclasificar] = useState(false);
+  const [savingReclasificar, setSavingReclasificar] = useState(false);
 
   useEffect(() => {
     const u1 = subscribeToCuentasBancarias(setCuentas);
@@ -208,7 +214,6 @@ export default function MovimientosBancariosPage() {
       });
 
       if (asientoId) {
-        const { conciliarMovimiento } = await import('@/lib/firebase/cuentas-bancarias');
         await conciliarMovimiento(movId, asientoId);
         toast.success('Movimiento bancario registrado y contabilizado');
       } else {
@@ -244,6 +249,44 @@ export default function MovimientosBancariosPage() {
       toast.success('Movimiento bancario anulado' + (mov.asientoId ? ' y asiento revertido' : ''));
     } catch (e: any) {
       toast.error(e.message ?? 'Error al anular el movimiento');
+    }
+  };
+
+  // Reclasifica TODO el saldo actual de la cuenta seleccionada a Caja General,
+  // con un único asiento (Debe Caja / Haber Banco) — no toca ningún asiento anterior.
+  const handleReclasificarACaja = async () => {
+    if (!user || !cuentaSelObj?.cuentaContableCodigo || saldoCalculado <= 0) return;
+    setSavingReclasificar(true);
+    try {
+      const fecha = new Date();
+      const concepto = `Reclasificación de saldo de ${cuentaSelObj.banco} a Caja General (pendiente de conciliación bancaria)`;
+      const movId = await registrarMovimientoBancario({
+        cuentaBancariaId: cuentaSel,
+        fecha,
+        descripcion: concepto,
+        tipo: 'debito',
+        monto: saldoCalculado,
+        estado: 'no_conciliado',
+      });
+
+      const asientoId = await crearAsientoReclasificacionCaja({
+        movId, fecha, concepto,
+        monto: saldoCalculado,
+        cuentaBancoCodigo: cuentaSelObj.cuentaContableCodigo,
+        usuarioId: user.uid, usuarioNombre: user.nombre,
+      });
+
+      if (asientoId) {
+        await conciliarMovimiento(movId, asientoId);
+        toast.success(`${currency(saldoCalculado)} reclasificados de ${cuentaSelObj.banco} a Caja General`);
+      } else {
+        toast.warning('El movimiento se registró, pero el asiento contable NO se pudo generar. Revísalo en Contabilidad → Libro Diario.', { duration: 12000 });
+      }
+      setDlgReclasificar(false);
+    } catch (e: any) {
+      toast.error(e.message ?? 'Error al reclasificar el saldo');
+    } finally {
+      setSavingReclasificar(false);
     }
   };
 
@@ -306,6 +349,12 @@ export default function MovimientosBancariosPage() {
                 title={!cuentaSelObj?.cuentaContableCodigo ? 'Primero vincula esta cuenta a una cuenta contable' : undefined}
                 onClick={() => setDlgMov(true)}>
                 <Receipt className="mr-2 h-4 w-4" /> Comisión / Cargo
+              </Button>
+              <Button variant="outline" size="sm"
+                disabled={!cuentaSelObj?.cuentaContableCodigo || saldoCalculado <= 0}
+                title={!cuentaSelObj?.cuentaContableCodigo ? 'Primero vincula esta cuenta a una cuenta contable' : 'Mueve todo el saldo de esta cuenta a Caja General'}
+                onClick={() => setDlgReclasificar(true)}>
+                <ArrowRightLeft className="mr-2 h-4 w-4" /> Reclasificar a Caja
               </Button>
             </div>
           </>
@@ -562,6 +611,42 @@ export default function MovimientosBancariosPage() {
             <Button variant="outline" onClick={() => setDlgMov(false)}>Cancelar</Button>
             <Button onClick={handleRegistrarMov} disabled={savingMov}>
               {savingMov ? 'Registrando…' : 'Registrar'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Dialog reclasificar saldo completo a Caja General */}
+      <Dialog open={dlgReclasificar} onOpenChange={setDlgReclasificar}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Reclasificar saldo a Caja General</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3">
+            <p className="text-sm text-slate-600">
+              Se creará <strong>un solo asiento</strong> que mueve todo el saldo actual de{' '}
+              <strong>{cuentaSelObj?.banco}</strong> a <strong>Caja General</strong>:
+            </p>
+            <div className="bg-slate-50 rounded-lg p-3 text-sm space-y-1.5">
+              <div className="flex justify-between">
+                <span className="text-slate-500">Debe — Caja General</span>
+                <span className="font-semibold text-green-700">{currency(saldoCalculado)}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-slate-500">Haber — {cuentaSelObj?.banco}</span>
+                <span className="font-semibold text-red-600">{currency(saldoCalculado)}</span>
+              </div>
+            </div>
+            <p className="text-xs text-slate-400">
+              La cuenta bancaria queda en $0.00 y el movimiento entra ya conciliado. No se modifica
+              ningún asiento anterior — esto es una reclasificación nueva, con fecha de hoy, que puedes
+              anular después desde "Anular" si hace falta corregirla.
+            </p>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setDlgReclasificar(false)}>Cancelar</Button>
+            <Button onClick={handleReclasificarACaja} disabled={savingReclasificar}>
+              {savingReclasificar ? 'Reclasificando…' : `Reclasificar ${currency(saldoCalculado)}`}
             </Button>
           </DialogFooter>
         </DialogContent>

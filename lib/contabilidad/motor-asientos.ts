@@ -1136,3 +1136,46 @@ export async function crearAsientoMovimientoBancario(p: ParamsMovimientoBancario
     });
   } catch { return null; }
 }
+
+// ─────────────────────────────────────────────────────────────────────────
+// RECLASIFICACIÓN DE SALDO BANCARIO A CAJA GENERAL
+// (cuando el banco no se puede conciliar y se decide llevar todo a Caja)
+// ─────────────────────────────────────────────────────────────────────────
+
+interface ParamsReclasificacionCaja extends ParamsBase {
+  movId:             string;
+  fecha:             Date;
+  concepto:          string;
+  monto:             number;
+  cuentaBancoCodigo: string;
+}
+
+export async function crearAsientoReclasificacionCaja(p: ParamsReclasificacionCaja): Promise<string | null> {
+  try {
+    const config  = await getConfigSegura();
+    if (!config) return null;
+    const cuentas = await getCuentasCached();
+
+    const lineas: AsientoLinea[] = [
+      buildLinea(cuentas, config.cuentaCaja,     p.monto, 0, p.concepto),
+      buildLinea(cuentas, p.cuentaBancoCodigo,   0, p.monto, p.concepto),
+    ];
+
+    return await createAsiento({
+      fecha:          p.fecha,
+      concepto:       p.concepto,
+      tipo:           'manual',
+      referenciaId:   p.movId,
+      referenciaTipo: 'movimiento_bancario',
+      lineas,
+      totalDebe:      lineas.reduce((s, l) => s + l.debe,  0),
+      totalHaber:     lineas.reduce((s, l) => s + l.haber, 0),
+      estado:         'confirmado',
+      bloqueado:      false,
+      editadoManualmente: false,
+      usuarioId:      p.usuarioId,
+      usuarioNombre:  p.usuarioNombre,
+      createdAt:      new Date(),
+    });
+  } catch { return null; }
+}

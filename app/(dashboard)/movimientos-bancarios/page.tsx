@@ -99,6 +99,8 @@ export default function MovimientosBancariosPage() {
   const [dlgRecuperar, setDlgRecuperar] = useState(false);
   const [recuperando, setRecuperando] = useState(false);
   const [progresoRecuperar, setProgresoRecuperar] = useState(0);
+  const [resumenRecuperar, setResumenRecuperar] = useState<{ candidatos: number } | null>(null);
+  const [cargandoResumen, setCargandoResumen] = useState(false);
 
   useEffect(() => {
     const u1 = subscribeToCuentasBancarias(setCuentas);
@@ -345,32 +347,59 @@ export default function MovimientosBancariosPage() {
   // Recupera movimientos bancarios que deberían existir (asientos de cobro/pago
   // que sí tocan una cuenta de banco) pero nunca se guardaron aquí — típicamente
   // porque los permisos de Firestore de esta colección fallaban hasta ahora.
+  // Arma el mapa código-contable → cuenta bancaria y busca en TODO el libro
+  // diario los asientos que tocan esos códigos y todavía no tienen su
+  // movimiento bancario registrado. Compartido entre la vista previa (al
+  // abrir el diálogo) y la ejecución real.
+  const buscarCandidatosRecuperar = async () => {
+    const cuentasActivas = cuentas.filter(c => c.activa);
+    const cuentaPorCodigo = new Map<string, CuentaBancaria>(
+      cuentasActivas.filter(c => c.cuentaContableCodigo).map(c => [c.cuentaContableCodigo as string, c])
+    );
+    // Los cobros/pagos por banco SIEMPRE se contabilizan contra la cuenta de
+    // "Bancos" general de la configuración contable (no contra la cuenta
+    // contable vinculada a cada cuenta bancaria individual) — si solo hay
+    // una cuenta bancaria activa, se le atribuyen esos movimientos a ella.
+    const config = await getOrCreateConfigContable();
+    if (config.cuentaBancos && !cuentaPorCodigo.has(config.cuentaBancos) && cuentasActivas.length === 1) {
+      cuentaPorCodigo.set(config.cuentaBancos, cuentasActivas[0]);
+    }
+    const existentes = new Set(movs.filter(m => m.asientoId).map(m => m.asientoId));
+
+    // OJO: no se filtra por referenciaTipo. Un cobro/pago SIN cobroId/pagoId propio
+    // (ej. una CxC cancelada directo, o un pago registrado junto con la factura)
+    // queda con referenciaTipo 'cxc' o 'factura_proveedor', no 'cobro_cliente'/
+    // 'pago_proveedor' — filtrar por tipo dejaba fuera la mayoría del historial real.
+    // Lo único que importa es si el asiento efectivamente toca una cuenta de banco.
+    const todosAsientos = await getAsientos();
+    const candidatos = todosAsientos.filter(a =>
+      !existentes.has(a.id) &&
+      a.lineas.some(l => cuentaPorCodigo.has(l.cuentaCodigo))
+    );
+    return { candidatos, cuentaPorCodigo };
+  };
+
+  const handleAbrirRecuperar = async () => {
+    setDlgRecuperar(true);
+    setResumenRecuperar(null);
+    setCargandoResumen(true);
+    try {
+      const { candidatos } = await buscarCandidatosRecuperar();
+      setResumenRecuperar({ candidatos: candidatos.length });
+    } catch {
+      setResumenRecuperar(null);
+    } finally {
+      setCargandoResumen(false);
+    }
+  };
+
   const handleRecuperarFaltantes = async () => {
     if (!user) return;
     setRecuperando(true);
     setProgresoRecuperar(0);
     let ok = 0, err = 0;
     try {
-      const cuentasActivas = cuentas.filter(c => c.activa);
-      const cuentaPorCodigo = new Map<string, CuentaBancaria>(
-        cuentasActivas.filter(c => c.cuentaContableCodigo).map(c => [c.cuentaContableCodigo as string, c])
-      );
-      // Los cobros/pagos por banco SIEMPRE se contabilizan contra la cuenta de
-      // "Bancos" general de la configuración contable (no contra la cuenta
-      // contable vinculada a cada cuenta bancaria individual) — si solo hay
-      // una cuenta bancaria activa, se le atribuyen esos movimientos a ella.
-      const config = await getOrCreateConfigContable();
-      if (config.cuentaBancos && !cuentaPorCodigo.has(config.cuentaBancos) && cuentasActivas.length === 1) {
-        cuentaPorCodigo.set(config.cuentaBancos, cuentasActivas[0]);
-      }
-      const existentes = new Set(movs.filter(m => m.asientoId).map(m => m.asientoId));
-
-      const todosAsientos = await getAsientos();
-      const candidatos = todosAsientos.filter(a =>
-        (a.referenciaTipo === 'cobro_cliente' || a.referenciaTipo === 'pago_proveedor') &&
-        !existentes.has(a.id) &&
-        a.lineas.some(l => cuentaPorCodigo.has(l.cuentaCodigo))
-      );
+      const { candidatos, cuentaPorCodigo } = await buscarCandidatosRecuperar();
 
       for (let i = 0; i < candidatos.length; i++) {
         const asiento = candidatos[i];
@@ -640,10 +669,10 @@ export default function MovimientosBancariosPage() {
         {cuentaSel === 'todas' && (
           <>
             <p className="text-xs text-slate-400 max-w-xs">
-              Viendo movimientos de todas las cuentas. Elige una cuenta específica para importar CSV,
-              registrar comisiones o reclasificar a Caja.
+              Viendo movimientos de todas las cuentas ({movs.length} registrado{movs.length === 1 ? '' : 's'}).
+              Elige una cuenta específica para importar CSV, registrar comisiones o reclasificar a Caja.
             </p>
-            <Button variant="outline" size="sm" onClick={() => setDlgRecuperar(true)}>
+            <Button variant="outline" size="sm" onClick={handleAbrirRecuperar}>
               Recuperar movimientos faltantes
             </Button>
           </>
@@ -988,6 +1017,16 @@ export default function MovimientosBancariosPage() {
               nunca quedaron guardados aquí como movimiento — y los reconstruye, ya conciliados con
               su asiento, sin crear ni modificar ningún asiento.
             </p>
+            {cargandoResumen && (
+              <p className="text-sm text-slate-500">Contando asientos pendientes…</p>
+            )}
+            {!cargandoResumen && resumenRecuperar && !recuperando && (
+              <p className="text-sm font-medium">
+                {resumenRecuperar.candidatos === 0
+                  ? 'No se encontró ningún asiento de banco sin su movimiento — ya está todo al día.'
+                  : `Se encontraron ${resumenRecuperar.candidatos} asiento(s) de banco sin movimiento registrado.`}
+              </p>
+            )}
             {recuperando && (
               <p className="text-sm text-slate-500">Revisando asientos… {progresoRecuperar}</p>
             )}

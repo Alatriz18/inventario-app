@@ -271,6 +271,19 @@ export interface PagoFactura {
   anulado?: boolean;
 }
 
+/** Nota de crédito/débito de proveedor aplicada contra el saldo de esta factura. */
+export interface AjusteFacturaProveedor {
+  id: string;
+  tipo: 'nota_credito' | 'nota_debito';
+  docId: string;      // id del DocumentoRecibido origen
+  numero: string;      // número de la NC/ND, para mostrar en el detalle
+  monto: number;
+  fecha: Date;
+  usuarioId: string;
+  usuarioNombre: string;
+  anulado?: boolean;
+}
+
 export interface FacturaProveedor {
   id: string;
   proveedorId: string;
@@ -288,6 +301,7 @@ export interface FacturaProveedor {
   saldoPendiente: number;
   estado: EstadoFacturaProveedor;
   pagos: PagoFactura[];
+  ajustes?: AjusteFacturaProveedor[];
   xmlUrl?: string;
   pdfUrl?: string;
   xmlData?: any;
@@ -429,7 +443,8 @@ export interface DocumentoRecibido {
   proveedorRuc:    string;
   numero:          string;   // 001-001-000000001
   claveAcceso?:    string;
-  docModificado?:  string;   // factura que modifica
+  docModificado?:  string;      // número de la factura que modifica, tal como viene del XML/texto libre
+  facturaProveedorId?: string;  // id real de facturas_proveedor, cuando se logró enlazar y aplicar el ajuste
   fechaEmision:    Date;
   subtotal:        number;
   iva:             number;

@@ -44,10 +44,11 @@ import {
   registrarPago,
   vincularAsientoPago,
   anularPago, editarPago, reactivarPago, reactivarFactura,
+  buscarFacturaPorNumero, aplicarAjusteDocRecibido,
 } from '@/lib/firebase/facturas-proveedor';
 import { editarAsiento, escalarLineasAsiento } from '@/lib/firebase/asientos';
 import { subscribeToCuentasBancarias, registrarMovimientoBancario, conciliarMovimiento } from '@/lib/firebase/cuentas-bancarias';
-import { createDocRecibido } from '@/lib/firebase/docs-recibidos';
+import { createDocRecibido, updateDocRecibido } from '@/lib/firebase/docs-recibidos';
 import { createRetencionRecibida } from '@/lib/firebase/retenciones-recibidas';
 import { subscribeToProveedores, getOrCreateProveedorPorRuc } from '@/lib/firebase/proveedores';
 import { subscribeToComprobantes, Comprobante } from '@/lib/firebase/comprobantes';
@@ -95,6 +96,7 @@ const ESTADO_CONFIG = {
 };
 
 function currency(v: number) { return `$${v.toFixed(2)}`; }
+const TIPO_LABEL_AJUSTE: Record<string, string> = { nota_credito: 'Nota de crédito', nota_debito: 'Nota de débito' };
 function formatFecha(fecha: any) {
   const d = fecha?.toDate?.() ?? new Date(fecha);
   return format(d, 'dd/MM/yyyy', { locale: es });
@@ -449,6 +451,17 @@ export default function FacturasProveedorPage() {
           subtotal: d.subtotal, iva: d.iva, total: d.total,
           usuarioId: user.uid, usuarioNombre: user.nombre,
         });
+        if (d.docModificado) {
+          const facturaMod = await buscarFacturaPorNumero(d.ruc, d.docModificado);
+          if (facturaMod) {
+            await aplicarAjusteDocRecibido(facturaMod.id, {
+              tipo: 'nota_credito', docId, numero: `${d.estab}-${d.ptoEmi}-${d.secuencial}`,
+              monto: d.total, fecha: parseFecha(d.fechaEmision),
+              usuarioId: user.uid, usuarioNombre: user.nombre,
+            });
+            await updateDocRecibido(docId, { facturaProveedorId: facturaMod.id });
+          }
+        }
         if (d.claveAcceso) existentes.add(d.claveAcceso);
         return asientoNcId ? 'ok' : 'ok_sin_asiento';
       }
@@ -472,6 +485,17 @@ export default function FacturasProveedorPage() {
           subtotal: d.subtotal, iva: d.iva, total: d.total,
           usuarioId: user.uid, usuarioNombre: user.nombre,
         });
+        if (d.docModificado) {
+          const facturaMod = await buscarFacturaPorNumero(d.ruc, d.docModificado);
+          if (facturaMod) {
+            await aplicarAjusteDocRecibido(facturaMod.id, {
+              tipo: 'nota_debito', docId, numero: `${d.estab}-${d.ptoEmi}-${d.secuencial}`,
+              monto: d.total, fecha: parseFecha(d.fechaEmision),
+              usuarioId: user.uid, usuarioNombre: user.nombre,
+            });
+            await updateDocRecibido(docId, { facturaProveedorId: facturaMod.id });
+          }
+        }
         if (d.claveAcceso) existentes.add(d.claveAcceso);
         return asientoNdId ? 'ok' : 'ok_sin_asiento';
       }
@@ -1389,6 +1413,30 @@ export default function FacturasProveedorPage() {
                               </Button>
                             )}
                           </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </>
+              )}
+              {(detailDialog.ajustes?.length ?? 0) > 0 && (
+                <>
+                  <Separator />
+                  <div>
+                    <p className="text-sm font-semibold text-slate-700 mb-2">Notas de crédito / débito aplicadas</p>
+                    <div className="space-y-2">
+                      {detailDialog.ajustes!.map((a, i) => (
+                        <div key={i} className={`flex justify-between items-center text-sm py-1.5 border-b last:border-0 ${a.anulado ? 'opacity-50' : ''}`}>
+                          <div>
+                            <p className={`font-medium ${a.anulado ? 'line-through' : ''}`}>
+                              {a.tipo === 'nota_credito' ? '−' : '+'}{currency(a.monto)}
+                            </p>
+                            <p className="text-xs text-slate-400">
+                              {TIPO_LABEL_AJUSTE[a.tipo]} {a.numero}
+                              {a.anulado ? ' — anulada' : ''}
+                            </p>
+                          </div>
+                          <p className="text-xs text-slate-400">{formatFecha(a.fecha)}</p>
                         </div>
                       ))}
                     </div>

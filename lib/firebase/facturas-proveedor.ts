@@ -3,7 +3,7 @@ import {
   query, orderBy, where, getDocs, serverTimestamp, runTransaction, getDoc, limit as fsLimit,
 } from 'firebase/firestore';
 import { db } from '@/lib/firebase/config';
-import { FacturaProveedor, PagoFactura, EstadoFacturaProveedor } from '@/types';
+import { FacturaProveedor, PagoFactura, EstadoFacturaProveedor, AjusteFacturaProveedor } from '@/types';
 
 const COL = 'facturas_proveedor';
 
@@ -133,6 +133,86 @@ export async function registrarPago(
     tx.update(ref, { pagos, saldoPendiente, estado });
   });
   return pagoId;
+}
+
+function calcularSaldoConAjustes(
+  factura:  FacturaProveedor,
+  pagos:    PagoFactura[],
+  ajustes:  AjusteFacturaProveedor[]
+): { saldoPendiente: number; estado: EstadoFacturaProveedor } {
+  const totalPagado = pagos.filter(p => !p.anulado).reduce((s, p) => s + p.monto, 0);
+  const totalNC = ajustes.filter(a => !a.anulado && a.tipo === 'nota_credito').reduce((s, a) => s + a.monto, 0);
+  const totalND = ajustes.filter(a => !a.anulado && a.tipo === 'nota_debito').reduce((s, a) => s + a.monto, 0);
+  const totalConAjustes = factura.total - totalNC + totalND;
+  const saldoPendiente  = Math.max(0, totalConAjustes - totalPagado);
+
+  let estado: EstadoFacturaProveedor = 'pendiente';
+  if (saldoPendiente === 0)         estado = 'pagada';
+  else if (totalPagado > 0)         estado = 'parcial';
+  else if (factura.fechaVencimiento) {
+    const venc = (factura.fechaVencimiento as any)?.toDate?.() ?? new Date(factura.fechaVencimiento);
+    if (venc < new Date()) estado = 'vencida';
+  }
+  return { saldoPendiente, estado };
+}
+
+/**
+ * Busca la factura de proveedor que corresponde a un número de comprobante
+ * (formato "001-001-000000123"), para enlazar automáticamente una NC/ND
+ * recibida con la factura que modifica.
+ */
+export async function buscarFacturaPorNumero(
+  proveedorRuc: string,
+  numeroFactura: string
+): Promise<FacturaProveedor | null> {
+  if (!proveedorRuc || !numeroFactura) return null;
+  const snap = await getDocs(query(
+    collection(db, COL),
+    where('proveedorRuc', '==', proveedorRuc),
+    where('numeroFactura', '==', numeroFactura),
+  ));
+  if (snap.empty) return null;
+  return { id: snap.docs[0].id, ...snap.docs[0].data() } as FacturaProveedor;
+}
+
+/**
+ * Aplica una nota de crédito/débito recibida contra el saldo de la factura
+ * que modifica: NC reduce lo que se debe, ND lo aumenta. Recalcula
+ * saldoPendiente y estado igual que un pago, pero sin tocar `total`
+ * (que debe seguir reflejando el monto original de la factura).
+ */
+export async function aplicarAjusteDocRecibido(
+  facturaId: string,
+  ajuste: Omit<AjusteFacturaProveedor, 'id'>
+): Promise<string> {
+  const ajusteId = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  await runTransaction(db, async (tx) => {
+    const ref  = doc(db, COL, facturaId);
+    const snap = await tx.get(ref);
+    if (!snap.exists()) throw new Error('Factura no encontrada');
+
+    const factura = snap.data() as FacturaProveedor;
+    const ajustes = [...(factura.ajustes ?? []), { ...ajuste, id: ajusteId }];
+    const { saldoPendiente, estado } = calcularSaldoConAjustes(factura, factura.pagos ?? [], ajustes);
+
+    tx.update(ref, { ajustes, saldoPendiente, estado });
+  });
+  return ajusteId;
+}
+
+/** Revierte (anula) un ajuste de NC/ND aplicado por error o al eliminar el documento recibido origen. */
+export async function revertirAjusteDocRecibido(facturaId: string, ajusteId: string): Promise<void> {
+  await runTransaction(db, async (tx) => {
+    const ref  = doc(db, COL, facturaId);
+    const snap = await tx.get(ref);
+    if (!snap.exists()) return;
+
+    const factura = snap.data() as FacturaProveedor;
+    const ajustes = (factura.ajustes ?? []).map(a => a.id === ajusteId ? { ...a, anulado: true } : a);
+    const { saldoPendiente, estado } = calcularSaldoConAjustes(factura, factura.pagos ?? [], ajustes);
+
+    tx.update(ref, { ajustes, saldoPendiente, estado });
+  });
 }
 
 /** Guarda el id del asiento contable generado para un pago específico. */

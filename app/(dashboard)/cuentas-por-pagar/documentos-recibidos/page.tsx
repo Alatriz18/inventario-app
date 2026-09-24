@@ -23,6 +23,7 @@ import {
 import { DocumentoRecibido, TipoDocRecibido } from '@/types';
 import { subscribeToDocsRecibidos, createDocRecibido, updateDocRecibido } from '@/lib/firebase/docs-recibidos';
 import { getOrCreateProveedorPorRuc } from '@/lib/firebase/proveedores';
+import { buscarFacturaPorNumero, aplicarAjusteDocRecibido } from '@/lib/firebase/facturas-proveedor';
 import {
   crearAsientoNotaCreditoRecibida, crearAsientoNotaDebitoRecibida,
 } from '@/lib/contabilidad/motor-asientos';
@@ -142,6 +143,24 @@ export default function DocumentosRecibidosPage() {
     d.numero.includes(search)
   ), [docs, search]);
 
+  // Si el documento trae "factura que modifica", busca esa factura de este
+  // mismo proveedor y le aplica el ajuste (NC reduce saldo, ND lo aumenta).
+  // Si no la encuentra, el documento queda igual solo con docModificado como
+  // referencia de texto — no bloquea el registro del documento.
+  const vincularConFactura = async (
+    docId: string, proveedorRuc: string, docModificado: string,
+    tipo: TipoDocRecibido, numero: string, total: number, fecha: Date,
+  ): Promise<boolean> => {
+    const facturaMod = await buscarFacturaPorNumero(proveedorRuc, docModificado);
+    if (!facturaMod || !user) return false;
+    await aplicarAjusteDocRecibido(facturaMod.id, {
+      tipo, docId, numero, monto: total, fecha,
+      usuarioId: user.uid, usuarioNombre: user.nombre ?? user.email ?? 'Usuario',
+    });
+    await updateDocRecibido(docId, { facturaProveedorId: facturaMod.id });
+    return true;
+  };
+
   const resetDialog = () => {
     setTipo('nota_credito'); setProveedor(''); setProveedorRuc('');
     setNumero(''); setDocModificado(''); setFechaEmision(new Date().toISOString().split('T')[0]);
@@ -184,11 +203,25 @@ export default function DocumentosRecibidosPage() {
         usuarioId: user.uid, usuarioNombre: user.nombre ?? user.email ?? 'Usuario',
       });
 
-      if (asientoId) {
-        await updateDocRecibido(docId, { asientoId });
-        toast.success(`${TIPO_LABEL[tipo]} registrada — contabilizada automáticamente`);
-      } else {
+      if (asientoId) await updateDocRecibido(docId, { asientoId });
+
+      let vinculada = false;
+      if (docModificado.trim()) {
+        try {
+          vinculada = await vincularConFactura(
+            docId, proveedorRuc.trim(), docModificado.trim(), tipo, numero.trim(), total, fecha
+          );
+        } catch { /* no bloquea el registro del documento */ }
+      }
+
+      if (!asientoId) {
         toast.warning(`${TIPO_LABEL[tipo]} registrada, pero el asiento contable NO se pudo generar. Revísala en Contabilidad → Libro Diario.`, { duration: 12000 });
+      } else if (docModificado.trim() && !vinculada) {
+        toast.warning(`${TIPO_LABEL[tipo]} registrada y contabilizada, pero no se encontró la factura ${docModificado.trim()} de este proveedor para enlazar el saldo.`, { duration: 12000 });
+      } else if (vinculada) {
+        toast.success(`${TIPO_LABEL[tipo]} registrada, contabilizada y enlazada al saldo de la factura ${docModificado.trim()}`);
+      } else {
+        toast.success(`${TIPO_LABEL[tipo]} registrada — contabilizada automáticamente`);
       }
       setDialogOpen(false);
       resetDialog();
@@ -257,8 +290,16 @@ export default function DocumentosRecibidosPage() {
           usuarioId: user.uid, usuarioNombre: user.nombre ?? user.email ?? 'Usuario',
         });
 
-        if (asientoId) { await updateDocRecibido(docId, { asientoId }); ok++; }
-        else { ok++; sinAsiento++; }
+        if (asientoId) await updateDocRecibido(docId, { asientoId });
+        if (f.docModificado) {
+          try {
+            await vincularConFactura(
+              docId, f.proveedorRuc, f.docModificado, f.tipo, f.numero, f.total, fecha
+            );
+          } catch { /* no bloquea el registro del documento */ }
+        }
+        ok++;
+        if (!asientoId) sinAsiento++;
       } catch {
         err++;
       }
@@ -340,7 +381,14 @@ export default function DocumentosRecibidosPage() {
                   <p className="text-xs text-slate-400">{d.proveedorRuc}</p>
                 </TableCell>
                 <TableCell className="font-mono text-xs">{d.numero}</TableCell>
-                <TableCell className="font-mono text-xs text-slate-500">{d.docModificado ?? '—'}</TableCell>
+                <TableCell className="font-mono text-xs text-slate-500">
+                  {d.docModificado ?? '—'}
+                  {d.docModificado && (
+                    d.facturaProveedorId
+                      ? <span className="ml-1.5 inline-block text-[10px] px-1.5 py-0.5 rounded-full bg-emerald-50 text-emerald-700 align-middle">enlazada</span>
+                      : <span className="ml-1.5 inline-block text-[10px] px-1.5 py-0.5 rounded-full bg-amber-50 text-amber-700 align-middle">sin enlazar</span>
+                  )}
+                </TableCell>
                 <TableCell className="text-sm text-slate-500">
                   {format((d.fechaEmision as any)?.toDate?.() ?? new Date(d.fechaEmision), 'dd/MM/yyyy')}
                 </TableCell>

@@ -351,9 +351,18 @@ export default function MovimientosBancariosPage() {
     setProgresoRecuperar(0);
     let ok = 0, err = 0;
     try {
-      const cuentaPorCodigo = new Map(
-        cuentas.filter(c => c.activa && c.cuentaContableCodigo).map(c => [c.cuentaContableCodigo as string, c])
+      const cuentasActivas = cuentas.filter(c => c.activa);
+      const cuentaPorCodigo = new Map<string, CuentaBancaria>(
+        cuentasActivas.filter(c => c.cuentaContableCodigo).map(c => [c.cuentaContableCodigo as string, c])
       );
+      // Los cobros/pagos por banco SIEMPRE se contabilizan contra la cuenta de
+      // "Bancos" general de la configuración contable (no contra la cuenta
+      // contable vinculada a cada cuenta bancaria individual) — si solo hay
+      // una cuenta bancaria activa, se le atribuyen esos movimientos a ella.
+      const config = await getOrCreateConfigContable();
+      if (config.cuentaBancos && !cuentaPorCodigo.has(config.cuentaBancos) && cuentasActivas.length === 1) {
+        cuentaPorCodigo.set(config.cuentaBancos, cuentasActivas[0]);
+      }
       const existentes = new Set(movs.filter(m => m.asientoId).map(m => m.asientoId));
 
       const todosAsientos = await getAsientos();
@@ -407,19 +416,24 @@ export default function MovimientosBancariosPage() {
     const bancoCodigo = cuentaSelObj.cuentaContableCodigo;
     try {
       const config = await getOrCreateConfigContable();
-      const cuentaCaja   = planCuentas.find(c => c.codigo === config.cuentaCaja);
-      const cuentaOrigen = planCuentas.find(c => c.codigo === bancoCodigo);
+      const cuentaCaja = planCuentas.find(c => c.codigo === config.cuentaCaja);
       const destino = { codigo: config.cuentaCaja, nombre: cuentaCaja?.nombre ?? 'Caja General' };
-      const origen  = {
-        codigo: bancoCodigo,
-        nombre: cuentaOrigen?.nombre ?? bancoCodigo,
-        id:     cuentaOrigen?.id ?? bancoCodigo,
+      // Devuelve el nombre/id de la cuenta contable de un código, para poder
+      // reconstruirlo exacto si hace falta deshacer la reclasificación después.
+      const origenPorCodigo = (codigo: string) => {
+        const c = planCuentas.find(pc => pc.codigo === codigo);
+        return { codigo, nombre: c?.nombre ?? codigo, id: c?.id ?? codigo };
       };
+
+      // Los cobros/pagos por banco se contabilizan contra la cuenta de "Bancos"
+      // general de la configuración contable, que puede no ser la misma que la
+      // vinculada a esta cuenta bancaria en particular — se buscan ambos códigos.
+      const codigosBanco = new Set([bancoCodigo, config.cuentaBancos].filter(Boolean));
 
       // 1) Todos los asientos del sistema que tocan la cuenta de este banco
       const todosAsientos = await getAsientos();
       const asientosDelBanco = todosAsientos.filter(a =>
-        a.lineas.some(l => l.cuentaCodigo === bancoCodigo)
+        a.lineas.some(l => codigosBanco.has(l.cuentaCodigo))
       );
       const asientosBloqueados = asientosDelBanco.filter(a => a.bloqueado);
       const asientosAProcesar  = asientosDelBanco.filter(a => !a.bloqueado);
@@ -433,8 +447,12 @@ export default function MovimientosBancariosPage() {
       for (let i = 0; i < total; i++) {
         const asiento = asientosAProcesar[i];
         try {
+          // El código que realmente aparece en ESTE asiento puede ser el de la
+          // cuenta bancaria o el genérico de "Bancos" — se usa el que coincida.
+          const codigoEnAsiento = asiento.lineas.find(l => codigosBanco.has(l.cuentaCodigo))?.cuentaCodigo ?? bancoCodigo;
+          const origen = origenPorCodigo(codigoEnAsiento);
           const huboAsiento = await reclasificarCuentaEnAsiento(
-            asiento.id, bancoCodigo, destino, user.uid, user.nombre
+            asiento.id, codigoEnAsiento, destino, user.uid, user.nombre
           );
           if (!huboAsiento) sinAsiento++;
 
@@ -459,6 +477,7 @@ export default function MovimientosBancariosPage() {
 
       // 2) Movimientos bancarios sin ningún asiento vinculado: no hay nada que
       // reclasificar contablemente, pero igual dejan de contar para el saldo.
+      const origenCuentaSel = origenPorCodigo(bancoCodigo);
       for (const mov of movsParaMover) {
         if (mov.asientoId) continue; // ya se procesó (o se procesará) arriba
         try {
@@ -466,7 +485,7 @@ export default function MovimientosBancariosPage() {
           items.push({
             movId: mov.id, estadoMovOriginal: mov.estado, descripcionMovOriginal: mov.descripcion,
             huboAsiento: false,
-            cuentaOrigenCodigo: origen.codigo, cuentaOrigenNombre: origen.nombre, cuentaOrigenId: origen.id,
+            cuentaOrigenCodigo: origenCuentaSel.codigo, cuentaOrigenNombre: origenCuentaSel.nombre, cuentaOrigenId: origenCuentaSel.id,
           });
           sinAsiento++;
         } catch {

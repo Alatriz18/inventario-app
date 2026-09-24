@@ -93,6 +93,13 @@ export default function MovimientosBancariosPage() {
   const [lotes, setLotes] = useState<LoteReclasificacion[]>([]);
   const [revirtiendoLoteId, setRevirtiendoLoteId] = useState<string | null>(null);
 
+  // Dialog recuperar movimientos bancarios faltantes (asientos que sí tocan un
+  // banco pero nunca generaron su registro en esta pantalla — típicamente por
+  // errores de permisos ya corregidos)
+  const [dlgRecuperar, setDlgRecuperar] = useState(false);
+  const [recuperando, setRecuperando] = useState(false);
+  const [progresoRecuperar, setProgresoRecuperar] = useState(0);
+
   useEffect(() => {
     const u1 = subscribeToCuentasBancarias(setCuentas);
     const u2 = subscribeToCuentas(setPlanCuentas);
@@ -335,6 +342,62 @@ export default function MovimientosBancariosPage() {
   //     Bancarios) — se busca directamente en el Libro Diario.
   // No crea ni borra ningún asiento, solo reclasifica la cuenta dentro de
   // cada uno; todo queda registrado en un lote que se puede deshacer.
+  // Recupera movimientos bancarios que deberían existir (asientos de cobro/pago
+  // que sí tocan una cuenta de banco) pero nunca se guardaron aquí — típicamente
+  // porque los permisos de Firestore de esta colección fallaban hasta ahora.
+  const handleRecuperarFaltantes = async () => {
+    if (!user) return;
+    setRecuperando(true);
+    setProgresoRecuperar(0);
+    let ok = 0, err = 0;
+    try {
+      const cuentaPorCodigo = new Map(
+        cuentas.filter(c => c.activa && c.cuentaContableCodigo).map(c => [c.cuentaContableCodigo as string, c])
+      );
+      const existentes = new Set(movs.filter(m => m.asientoId).map(m => m.asientoId));
+
+      const todosAsientos = await getAsientos();
+      const candidatos = todosAsientos.filter(a =>
+        (a.referenciaTipo === 'cobro_cliente' || a.referenciaTipo === 'pago_proveedor') &&
+        !existentes.has(a.id) &&
+        a.lineas.some(l => cuentaPorCodigo.has(l.cuentaCodigo))
+      );
+
+      for (let i = 0; i < candidatos.length; i++) {
+        const asiento = candidatos[i];
+        try {
+          const linea = asiento.lineas.find(l => cuentaPorCodigo.has(l.cuentaCodigo))!;
+          const cuenta = cuentaPorCodigo.get(linea.cuentaCodigo)!;
+          const tipo   = linea.debe > 0 ? 'credito' : 'debito';
+          const monto  = linea.debe > 0 ? linea.debe : linea.haber;
+          await registrarMovimientoBancario({
+            cuentaBancariaId: cuenta.id,
+            fecha: asiento.fecha,
+            descripcion: asiento.concepto,
+            tipo, monto,
+            estado: 'conciliado',
+            asientoId: asiento.id,
+          });
+          ok++;
+        } catch {
+          err++;
+        }
+        setProgresoRecuperar(i + 1);
+      }
+
+      if (candidatos.length === 0) {
+        toast.info('No se encontró ningún cobro/pago de banco sin su movimiento — ya está todo al día.');
+      } else {
+        toast.success(`${ok} movimiento(s) recuperados` + (err ? ` — ${err} con error` : ''), { duration: 10000 });
+      }
+      setDlgRecuperar(false);
+    } catch (e: any) {
+      toast.error(e.message ?? 'Error al recuperar movimientos');
+    } finally {
+      setRecuperando(false);
+    }
+  };
+
   const handleMoverTodoACaja = async () => {
     if (!user || !cuentaSelObj?.cuentaContableCodigo) return;
     setMoviendoTodo(true);
@@ -556,10 +619,15 @@ export default function MovimientosBancariosPage() {
           </>
         )}
         {cuentaSel === 'todas' && (
-          <p className="text-xs text-slate-400 max-w-xs">
-            Viendo movimientos de todas las cuentas. Elige una cuenta específica para importar CSV,
-            registrar comisiones o reclasificar a Caja.
-          </p>
+          <>
+            <p className="text-xs text-slate-400 max-w-xs">
+              Viendo movimientos de todas las cuentas. Elige una cuenta específica para importar CSV,
+              registrar comisiones o reclasificar a Caja.
+            </p>
+            <Button variant="outline" size="sm" onClick={() => setDlgRecuperar(true)}>
+              Recuperar movimientos faltantes
+            </Button>
+          </>
         )}
       </div>
 
@@ -883,6 +951,32 @@ export default function MovimientosBancariosPage() {
             <Button variant="outline" onClick={() => setDlgReclasificar(false)}>Cancelar</Button>
             <Button onClick={handleReclasificarACaja} disabled={savingReclasificar}>
               {savingReclasificar ? 'Reclasificando…' : `Reclasificar ${currency(saldoCalculado)}`}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Dialog recuperar movimientos bancarios faltantes */}
+      <Dialog open={dlgRecuperar} onOpenChange={(o) => !recuperando && setDlgRecuperar(o)}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Recuperar movimientos faltantes</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3">
+            <p className="text-sm text-slate-600">
+              Busca en todo el Libro Diario los cobros y pagos que sí se contabilizaron contra una
+              cuenta bancaria, pero que por algún motivo (ej. un error de permisos ya corregido)
+              nunca quedaron guardados aquí como movimiento — y los reconstruye, ya conciliados con
+              su asiento, sin crear ni modificar ningún asiento.
+            </p>
+            {recuperando && (
+              <p className="text-sm text-slate-500">Revisando asientos… {progresoRecuperar}</p>
+            )}
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setDlgRecuperar(false)} disabled={recuperando}>Cancelar</Button>
+            <Button onClick={handleRecuperarFaltantes} disabled={recuperando}>
+              {recuperando ? 'Recuperando…' : 'Buscar y recuperar'}
             </Button>
           </DialogFooter>
         </DialogContent>

@@ -354,8 +354,36 @@ export default function FacturasProveedorPage() {
     const file = e.target.files?.[0];
     if (!file) return;
     const reader = new FileReader();
-    reader.onload = (ev) => {
+    reader.onload = async (ev) => {
       const xml  = ev.target?.result as string;
+      const tipo = detectarTipoComprobante(xml);
+
+      // Solo la factura pasa por el diálogo de vista previa/confirmación;
+      // NC, ND y retención se procesan directo (como en la carga masiva),
+      // porque antes esta pantalla intentaba leerlos SIEMPRE como factura
+      // y fallaba con "No se pudo leer el XML del SRI".
+      if (tipo !== 'factura') {
+        if (!user) return;
+        setSaving(true);
+        try {
+          const existentes = new Set(facturas.map(f => f.claveAcceso).filter(Boolean) as string[]);
+          const r = await procesarXmlRecibido(xml, existentes);
+          const labelTipo: Record<string, string> = {
+            nota_credito: 'Nota de crédito', nota_debito: 'Nota de débito', retencion: 'Retención',
+          };
+          const label = labelTipo[tipo] ?? 'Documento';
+          if (r === 'ok')                  toast.success(`${label} importada y contabilizada`);
+          else if (r === 'ok_sin_asiento') toast.warning(`${label} importada, pero el asiento contable NO se pudo generar. Revísala en Libro Diario.`, { duration: 10000 });
+          else if (r === 'dup')            toast.warning(`Este documento ya estaba registrado (clave de acceso duplicada)`);
+          else                             toast.error(`No se pudo importar ${label.toLowerCase()} — revisa que el XML sea válido`);
+        } catch {
+          toast.error('Error al importar el documento');
+        } finally {
+          setSaving(false);
+        }
+        return;
+      }
+
       const data = parsearFacturaXML(xml);
       const iva  = extraerIVAdeXML(xml);
       if (!data) { toast.error('No se pudo leer el XML del SRI'); return; }

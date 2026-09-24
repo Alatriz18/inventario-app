@@ -22,7 +22,7 @@ import {
 import { CuentaBancaria, MovimientoBancario, AsientoContable } from '@/types';
 import {
   subscribeToCuentasBancarias,
-  subscribeToMovimientosBancarios, subscribeToMovimientosBancariosTodos,
+  subscribeToMovimientosBancarios, subscribeToMovimientosBancariosDeCuentas,
   conciliarMovimiento, ignorarMovimiento, revertirConciliacion,
 } from '@/lib/firebase/cuentas-bancarias';
 import { subscribeToAsientos } from '@/lib/firebase/asientos';
@@ -48,16 +48,20 @@ export default function ConciliacionBancariaPage() {
 
   useEffect(() => {
     if (!cuentaSel) return;
+    if (cuentaSel === 'todas' && cuentas.length === 0) return; // esperar a que carguen las cuentas
     setLoading(true);
     const onErr = () => {
       toast.error('No se pudieron cargar los movimientos');
       setLoading(false);
     };
     const unsub = cuentaSel === 'todas'
-      ? subscribeToMovimientosBancariosTodos(d => { setMovs(d); setLoading(false); }, onErr)
+      ? subscribeToMovimientosBancariosDeCuentas(
+          cuentas.filter(c => c.activa).map(c => c.id),
+          d => { setMovs(d); setLoading(false); }, onErr
+        )
       : subscribeToMovimientosBancarios(cuentaSel, d => { setMovs(d); setLoading(false); }, onErr);
     return unsub;
-  }, [cuentaSel]);
+  }, [cuentaSel, cuentas]);
 
   const cuentaSelObj = useMemo(
     () => cuentaSel === 'todas' ? null : cuentas.find(c => c.id === cuentaSel) ?? null,

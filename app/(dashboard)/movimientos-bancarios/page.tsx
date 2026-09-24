@@ -21,7 +21,7 @@ import {
 import { CuentaBancaria, MovimientoBancario, CuentaContable, LoteReclasificacion, ItemLoteReclasificacion } from '@/types';
 import {
   subscribeToCuentasBancarias, createCuentaBancaria,
-  subscribeToMovimientosBancarios, subscribeToMovimientosBancariosTodos, importarMovimientosBancarios,
+  subscribeToMovimientosBancarios, subscribeToMovimientosBancariosDeCuentas, importarMovimientosBancarios,
   registrarMovimientoBancario, anularMovimientoBancario, conciliarMovimiento,
   marcarMovimientoReclasificado, restaurarMovimiento,
 } from '@/lib/firebase/cuentas-bancarias';
@@ -101,16 +101,20 @@ export default function MovimientosBancariosPage() {
 
   useEffect(() => {
     if (!cuentaSel) return;
+    if (cuentaSel === 'todas' && cuentas.length === 0) return; // esperar a que carguen las cuentas
     setLoading(true);
     const onErr = () => {
       toast.error('No se pudieron cargar los movimientos');
       setLoading(false);
     };
     const unsub = cuentaSel === 'todas'
-      ? subscribeToMovimientosBancariosTodos(d => { setMovs(d); setLoading(false); }, onErr)
+      ? subscribeToMovimientosBancariosDeCuentas(
+          cuentas.filter(c => c.activa).map(c => c.id),
+          d => { setMovs(d); setLoading(false); }, onErr
+        )
       : subscribeToMovimientosBancarios(cuentaSel, d => { setMovs(d); setLoading(false); }, onErr);
     return unsub;
-  }, [cuentaSel]);
+  }, [cuentaSel, cuentas]);
 
   useEffect(() => {
     if (!cuentaSel || cuentaSel === 'todas') { setLotes([]); return; }

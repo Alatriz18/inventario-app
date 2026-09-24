@@ -1,7 +1,7 @@
 import {
   collection, doc, onSnapshot, query, orderBy, where,
   serverTimestamp, addDoc, updateDoc, deleteDoc, getDoc,
-  writeBatch, QueryDocumentSnapshot, DocumentData, limit as fsLimit,
+  writeBatch, QueryDocumentSnapshot, DocumentData,
 } from 'firebase/firestore';
 import { db } from '@/lib/firebase/config';
 import { CuentaBancaria, MovimientoBancario } from '@/types';
@@ -85,28 +85,33 @@ export function subscribeToMovimientosBancarios(
 /**
  * Trae los movimientos de TODAS las cuentas bancarias juntos (no requiere
  * elegir una cuenta primero) — para la vista general de "Todas las cuentas".
- * Se ordena por fecha con un límite real en la consulta (colección chica
- * de por sí, pero se acota igual por seguridad).
+ * En vez de una consulta sin filtrar (que algunas reglas de seguridad
+ * rechazan por no llevar el where('cuentaBancariaId', ...) que sí validan),
+ * arma un listener por cada cuenta — usando la misma consulta filtrada que
+ * ya funciona — y los combina en el cliente.
  */
-export function subscribeToMovimientosBancariosTodos(
+export function subscribeToMovimientosBancariosDeCuentas(
+  cuentaIds: string[],
   callback: (data: MovimientoBancario[]) => void,
-  onError?: (error: Error) => void,
-  limite = 500
+  onError?: (error: Error) => void
 ): () => void {
-  const q = query(collection(db, COL_MOVS), orderBy('fecha', 'desc'), fsLimit(limite));
-  return onSnapshot(
-    q,
-    (snap) => {
-      callback(snap.docs.map((d: QueryDocumentSnapshot<DocumentData>) => ({
-        id: d.id,
-        ...d.data(),
-      } as MovimientoBancario)));
-    },
-    (error) => {
-      console.error('Error al leer movimientos bancarios (todas las cuentas):', error);
-      onError?.(error);
-    }
+  if (cuentaIds.length === 0) { callback([]); return () => {}; }
+
+  const porCuenta = new Map<string, MovimientoBancario[]>();
+  const emit = () => {
+    const todos = Array.from(porCuenta.values()).flat();
+    todos.sort((a, b) => toDateMov(b.fecha).getTime() - toDateMov(a.fecha).getTime());
+    callback(todos);
+  };
+
+  const unsubs = cuentaIds.map(id =>
+    subscribeToMovimientosBancarios(id, (data) => {
+      porCuenta.set(id, data);
+      emit();
+    }, onError)
   );
+
+  return () => unsubs.forEach(u => u());
 }
 
 export async function importarMovimientosBancarios(

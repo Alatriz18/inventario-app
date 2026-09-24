@@ -1,7 +1,7 @@
 import {
   collection, doc, onSnapshot, query, orderBy, where,
   serverTimestamp, addDoc, updateDoc, deleteDoc, getDoc,
-  writeBatch, QueryDocumentSnapshot, DocumentData,
+  writeBatch, QueryDocumentSnapshot, DocumentData, limit as fsLimit,
 } from 'firebase/firestore';
 import { db } from '@/lib/firebase/config';
 import { CuentaBancaria, MovimientoBancario } from '@/types';
@@ -77,6 +77,33 @@ export function subscribeToMovimientosBancarios(
     },
     (error) => {
       console.error('Error al leer movimientos bancarios:', error);
+      onError?.(error);
+    }
+  );
+}
+
+/**
+ * Trae los movimientos de TODAS las cuentas bancarias juntos (no requiere
+ * elegir una cuenta primero) — para la vista general de "Todas las cuentas".
+ * Se ordena por fecha con un límite real en la consulta (colección chica
+ * de por sí, pero se acota igual por seguridad).
+ */
+export function subscribeToMovimientosBancariosTodos(
+  callback: (data: MovimientoBancario[]) => void,
+  onError?: (error: Error) => void,
+  limite = 500
+): () => void {
+  const q = query(collection(db, COL_MOVS), orderBy('fecha', 'desc'), fsLimit(limite));
+  return onSnapshot(
+    q,
+    (snap) => {
+      callback(snap.docs.map((d: QueryDocumentSnapshot<DocumentData>) => ({
+        id: d.id,
+        ...d.data(),
+      } as MovimientoBancario)));
+    },
+    (error) => {
+      console.error('Error al leer movimientos bancarios (todas las cuentas):', error);
       onError?.(error);
     }
   );

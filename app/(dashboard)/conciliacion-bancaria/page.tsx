@@ -22,7 +22,7 @@ import {
 import { CuentaBancaria, MovimientoBancario, AsientoContable } from '@/types';
 import {
   subscribeToCuentasBancarias,
-  subscribeToMovimientosBancarios,
+  subscribeToMovimientosBancarios, subscribeToMovimientosBancariosTodos,
   conciliarMovimiento, ignorarMovimiento, revertirConciliacion,
 } from '@/lib/firebase/cuentas-bancarias';
 import { subscribeToAsientos } from '@/lib/firebase/asientos';
@@ -31,7 +31,7 @@ const currency = (v: number) => `$${v.toFixed(2)}`;
 
 export default function ConciliacionBancariaPage() {
   const [cuentas,   setCuentas]   = useState<CuentaBancaria[]>([]);
-  const [cuentaSel, setCuentaSel] = useState<string>('');
+  const [cuentaSel, setCuentaSel] = useState<string>('todas');
   const [movs,      setMovs]      = useState<MovimientoBancario[]>([]);
   const [loading,   setLoading]   = useState(false);
   const [asientos,  setAsientos]  = useState<AsientoContable[]>([]);
@@ -49,17 +49,21 @@ export default function ConciliacionBancariaPage() {
   useEffect(() => {
     if (!cuentaSel) return;
     setLoading(true);
-    const unsub = subscribeToMovimientosBancarios(cuentaSel, d => {
-      setMovs(d);
+    const onErr = () => {
+      toast.error('No se pudieron cargar los movimientos');
       setLoading(false);
-    }, () => {
-      toast.error('No se pudieron cargar los movimientos de esta cuenta');
-      setLoading(false);
-    });
+    };
+    const unsub = cuentaSel === 'todas'
+      ? subscribeToMovimientosBancariosTodos(d => { setMovs(d); setLoading(false); }, onErr)
+      : subscribeToMovimientosBancarios(cuentaSel, d => { setMovs(d); setLoading(false); }, onErr);
     return unsub;
   }, [cuentaSel]);
 
-  const cuentaSelObj = useMemo(() => cuentas.find(c => c.id === cuentaSel) ?? null, [cuentas, cuentaSel]);
+  const cuentaSelObj = useMemo(
+    () => cuentaSel === 'todas' ? null : cuentas.find(c => c.id === cuentaSel) ?? null,
+    [cuentas, cuentaSel]
+  );
+  const cuentaPorId = useMemo(() => new Map(cuentas.map(c => [c.id, c])), [cuentas]);
 
   const movsAgrupados = useMemo(() => ({
     pendientes: movs.filter(m => m.estado === 'no_conciliado'),
@@ -67,11 +71,18 @@ export default function ConciliacionBancariaPage() {
     ignorados:  movs.filter(m => m.estado === 'ignorado'),
   }), [movs]);
 
+  // Cuenta bancaria dueña del movimiento que se está por conciliar (puede ser
+  // distinta a cuentaSelObj cuando se está viendo "Todas las cuentas").
+  const cuentaDeMovConciliar = useMemo(
+    () => movConciliar ? cuentaPorId.get(movConciliar.cuentaBancariaId) ?? null : null,
+    [movConciliar, cuentaPorId]
+  );
+
   // Asientos candidatos para un movimiento bancario: los que tocan la cuenta
   // contable de la cuenta bancaria, en el lado correcto (crédito→debe, débito→haber).
   const asientosCandidatos = useMemo(() => {
-    if (!movConciliar || !cuentaSelObj?.cuentaContableCodigo) return [];
-    const code = cuentaSelObj.cuentaContableCodigo;
+    if (!movConciliar || !cuentaDeMovConciliar?.cuentaContableCodigo) return [];
+    const code = cuentaDeMovConciliar.cuentaContableCodigo;
     const yaConciliados = new Set(movs.filter(m => m.asientoId).map(m => m.asientoId));
     return asientos
       .map(a => {
@@ -91,7 +102,8 @@ export default function ConciliacionBancariaPage() {
     id ? (asientos.find(a => a.id === id)?.numero ?? id) : '—';
 
   const abrirConciliar = (mov: MovimientoBancario) => {
-    if (!cuentaSelObj?.cuentaContableCodigo) {
+    const cuentaDelMov = cuentaPorId.get(mov.cuentaBancariaId);
+    if (!cuentaDelMov?.cuentaContableCodigo) {
       toast.error('Primero vincula esta cuenta bancaria a una cuenta contable en Movimientos Bancarios.');
       return;
     }
@@ -156,6 +168,7 @@ export default function ConciliacionBancariaPage() {
               <SelectValue placeholder="Seleccionar cuenta…" />
             </SelectTrigger>
             <SelectContent>
+              <SelectItem value="todas">Todas las cuentas</SelectItem>
               {cuentas.filter(c => c.activa).map(c => (
                 <SelectItem key={c.id} value={c.id}>
                   <span className="font-medium">{c.banco}</span>
@@ -173,15 +186,13 @@ export default function ConciliacionBancariaPage() {
         )}
       </div>
 
-      {!cuentaSel ? (
+      {cuentas.length === 0 ? (
         <div className="bg-white rounded-xl border flex flex-col items-center justify-center py-20 text-slate-400">
           <Building2 className="h-12 w-12 mb-3 opacity-30" />
-          <p className="text-sm">Selecciona una cuenta bancaria para ver sus movimientos</p>
-          {cuentas.length === 0 && (
-            <Link href="/movimientos-bancarios">
-              <Button className="mt-4" size="sm">Crear primera cuenta bancaria</Button>
-            </Link>
-          )}
+          <p className="text-sm">Todavía no tienes cuentas bancarias registradas</p>
+          <Link href="/movimientos-bancarios">
+            <Button className="mt-4" size="sm">Crear primera cuenta bancaria</Button>
+          </Link>
         </div>
       ) : (
         <Tabs defaultValue="pendientes">
@@ -205,6 +216,7 @@ export default function ConciliacionBancariaPage() {
                   <TableHeader>
                     <TableRow className="bg-slate-50">
                       <TableHead>Fecha</TableHead>
+                      {cuentaSel === 'todas' && <TableHead>Cuenta</TableHead>}
                       <TableHead>Descripción</TableHead>
                       <TableHead>Referencia</TableHead>
                       <TableHead className="text-center">Tipo</TableHead>
@@ -216,13 +228,13 @@ export default function ConciliacionBancariaPage() {
                   <TableBody>
                     {loading ? (
                       Array.from({ length: 5 }).map((_, i) => (
-                        <TableRow key={i}>{Array.from({ length: 7 }).map((_, j) => (
+                        <TableRow key={i}>{Array.from({ length: cuentaSel === 'todas' ? 8 : 7 }).map((_, j) => (
                           <TableCell key={j}><Skeleton className="h-4 w-full" /></TableCell>
                         ))}</TableRow>
                       ))
                     ) : movsAgrupados[tab].length === 0 ? (
                       <TableRow>
-                        <TableCell colSpan={7} className="text-center py-10 text-slate-400">
+                        <TableCell colSpan={cuentaSel === 'todas' ? 8 : 7} className="text-center py-10 text-slate-400">
                           No hay movimientos en esta categoría.
                         </TableCell>
                       </TableRow>
@@ -231,6 +243,11 @@ export default function ConciliacionBancariaPage() {
                         <TableCell className="text-sm text-slate-500">
                           {format((m.fecha as any)?.toDate?.() ?? new Date(m.fecha), 'dd/MM/yyyy')}
                         </TableCell>
+                        {cuentaSel === 'todas' && (
+                          <TableCell className="text-xs text-slate-500">
+                            {cuentaPorId.get(m.cuentaBancariaId)?.banco ?? '—'}
+                          </TableCell>
+                        )}
                         <TableCell className="text-sm max-w-64 truncate">{m.descripcion}</TableCell>
                         <TableCell className="text-xs font-mono text-slate-500">{m.referencia ?? '—'}</TableCell>
                         <TableCell className="text-center">
@@ -308,7 +325,8 @@ export default function ConciliacionBancariaPage() {
                 </span>
               </div>
               <p className="text-xs text-slate-500">
-                Asientos que afectan la cuenta <span className="font-mono">{cuentaSelObj?.cuentaContableCodigo}</span>.
+                {cuentaDeMovConciliar?.banco} — Asientos que afectan la cuenta{' '}
+                <span className="font-mono">{cuentaDeMovConciliar?.cuentaContableCodigo}</span>.
                 Ordenados por coincidencia de monto.
               </p>
               {asientosCandidatos.length === 0 ? (

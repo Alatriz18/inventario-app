@@ -21,7 +21,7 @@ import {
 import { CuentaBancaria, MovimientoBancario, CuentaContable, LoteReclasificacion, ItemLoteReclasificacion } from '@/types';
 import {
   subscribeToCuentasBancarias, createCuentaBancaria,
-  subscribeToMovimientosBancarios, importarMovimientosBancarios,
+  subscribeToMovimientosBancarios, subscribeToMovimientosBancariosTodos, importarMovimientosBancarios,
   registrarMovimientoBancario, anularMovimientoBancario, conciliarMovimiento,
   marcarMovimientoReclasificado, restaurarMovimiento,
 } from '@/lib/firebase/cuentas-bancarias';
@@ -49,7 +49,9 @@ const ESTADO_COLOR: Record<string, string> = {
 export default function MovimientosBancariosPage() {
   const { user } = useAuth();
   const [cuentas,   setCuentas]   = useState<CuentaBancaria[]>([]);
-  const [cuentaSel, setCuentaSel] = useState<string>('');
+  // 'todas' = ver movimientos de todas las cuentas juntos (vista por defecto,
+  // no obliga a elegir una cuenta primero para poder ver algo).
+  const [cuentaSel, setCuentaSel] = useState<string>('todas');
   const [movs,      setMovs]      = useState<MovimientoBancario[]>([]);
   const [loading,   setLoading]   = useState(false);
   const [filtroEstado, setFiltroEstado] = useState('todos');
@@ -100,22 +102,26 @@ export default function MovimientosBancariosPage() {
   useEffect(() => {
     if (!cuentaSel) return;
     setLoading(true);
-    const unsub = subscribeToMovimientosBancarios(cuentaSel, d => {
-      setMovs(d);
+    const onErr = () => {
+      toast.error('No se pudieron cargar los movimientos');
       setLoading(false);
-    }, () => {
-      toast.error('No se pudieron cargar los movimientos de esta cuenta');
-      setLoading(false);
-    });
+    };
+    const unsub = cuentaSel === 'todas'
+      ? subscribeToMovimientosBancariosTodos(d => { setMovs(d); setLoading(false); }, onErr)
+      : subscribeToMovimientosBancarios(cuentaSel, d => { setMovs(d); setLoading(false); }, onErr);
     return unsub;
   }, [cuentaSel]);
 
   useEffect(() => {
-    if (!cuentaSel) { setLotes([]); return; }
+    if (!cuentaSel || cuentaSel === 'todas') { setLotes([]); return; }
     return subscribeToLotesReclasificacion(cuentaSel, setLotes);
   }, [cuentaSel]);
 
-  const cuentaSelObj = useMemo(() => cuentas.find(c => c.id === cuentaSel) ?? null, [cuentas, cuentaSel]);
+  const cuentaSelObj = useMemo(
+    () => cuentaSel === 'todas' ? null : cuentas.find(c => c.id === cuentaSel) ?? null,
+    [cuentas, cuentaSel]
+  );
+  const cuentaPorId = useMemo(() => new Map(cuentas.map(c => [c.id, c])), [cuentas]);
 
   const movsFiltrados = useMemo(() => {
     if (filtroEstado === 'todos') return movs;
@@ -495,6 +501,7 @@ export default function MovimientosBancariosPage() {
               <SelectValue placeholder="Seleccionar cuenta…" />
             </SelectTrigger>
             <SelectContent>
+              <SelectItem value="todas">Todas las cuentas</SelectItem>
               {cuentas.filter(c => c.activa).map(c => (
                 <SelectItem key={c.id} value={c.id}>
                   <span className="font-medium">{c.banco}</span>
@@ -504,7 +511,7 @@ export default function MovimientosBancariosPage() {
             </SelectContent>
           </Select>
         </div>
-        {cuentaSel && (
+        {cuentaSel && cuentaSel !== 'todas' && (
           <>
             <div className="text-sm">
               <p className="text-xs text-slate-400">Saldo calculado</p>
@@ -544,25 +551,29 @@ export default function MovimientosBancariosPage() {
             </div>
           </>
         )}
+        {cuentaSel === 'todas' && (
+          <p className="text-xs text-slate-400 max-w-xs">
+            Viendo movimientos de todas las cuentas. Elige una cuenta específica para importar CSV,
+            registrar comisiones o reclasificar a Caja.
+          </p>
+        )}
       </div>
 
       {/* Formato CSV info */}
-      {cuentaSel && (
+      {cuentaSel && cuentaSel !== 'todas' && (
         <div className="bg-slate-50 border rounded-xl p-3 text-xs text-slate-500">
           Formato CSV esperado: <code className="font-mono bg-white px-1 py-0.5 rounded border">fecha,descripcion,tipo,monto,saldo,referencia</code>
           &nbsp;— tipo: <em>credito</em> o <em>debito</em> — fecha: dd/MM/yyyy — saldo y referencia (n° de comprobante) son opcionales
         </div>
       )}
 
-      {!cuentaSel ? (
+      {cuentas.length === 0 ? (
         <div className="bg-white rounded-xl border flex flex-col items-center justify-center py-20 text-slate-400">
           <Building2 className="h-12 w-12 mb-3 opacity-30" />
-          <p className="text-sm">Selecciona una cuenta bancaria para ver sus movimientos</p>
-          {cuentas.length === 0 && (
-            <Button className="mt-4" size="sm" onClick={() => setDlgCuenta(true)}>
-              Crear primera cuenta bancaria
-            </Button>
-          )}
+          <p className="text-sm">Todavía no tienes cuentas bancarias registradas</p>
+          <Button className="mt-4" size="sm" onClick={() => setDlgCuenta(true)}>
+            Crear primera cuenta bancaria
+          </Button>
         </div>
       ) : (
         <div className="bg-white rounded-xl border overflow-hidden">
@@ -584,6 +595,7 @@ export default function MovimientosBancariosPage() {
               <TableHeader>
                 <TableRow className="bg-slate-50">
                   <TableHead>Fecha</TableHead>
+                  {cuentaSel === 'todas' && <TableHead>Cuenta</TableHead>}
                   <TableHead>Descripción</TableHead>
                   <TableHead>Referencia</TableHead>
                   <TableHead className="text-center">Tipo</TableHead>
@@ -596,13 +608,13 @@ export default function MovimientosBancariosPage() {
               <TableBody>
                 {loading ? (
                   Array.from({ length: 5 }).map((_, i) => (
-                    <TableRow key={i}>{Array.from({ length: 8 }).map((_, j) => (
+                    <TableRow key={i}>{Array.from({ length: cuentaSel === 'todas' ? 9 : 8 }).map((_, j) => (
                       <TableCell key={j}><Skeleton className="h-4 w-full" /></TableCell>
                     ))}</TableRow>
                   ))
                 ) : movsFiltrados.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={8} className="text-center py-10 text-slate-400">
+                    <TableCell colSpan={cuentaSel === 'todas' ? 9 : 8} className="text-center py-10 text-slate-400">
                       No hay movimientos en esta categoría.
                     </TableCell>
                   </TableRow>
@@ -611,6 +623,11 @@ export default function MovimientosBancariosPage() {
                     <TableCell className="text-sm text-slate-500">
                       {format((m.fecha as any)?.toDate?.() ?? new Date(m.fecha), 'dd/MM/yyyy')}
                     </TableCell>
+                    {cuentaSel === 'todas' && (
+                      <TableCell className="text-xs text-slate-500">
+                        {cuentaPorId.get(m.cuentaBancariaId)?.banco ?? '—'}
+                      </TableCell>
+                    )}
                     <TableCell className={`text-sm max-w-64 truncate ${m.estado === 'anulado' ? 'line-through' : ''}`}>{m.descripcion}</TableCell>
                     <TableCell className="text-xs font-mono text-slate-500">{m.referencia ?? '—'}</TableCell>
                     <TableCell className="text-center">

@@ -18,10 +18,12 @@ import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from '@/components/ui/table';
 
-import { Venta, FacturaProveedor, RetencionEmitida } from '@/types';
+import { Venta, FacturaProveedor, RetencionEmitida, RetencionRecibida, DocumentoRecibido } from '@/types';
 import { subscribeToVentas }              from '@/lib/firebase/ventas';
 import { subscribeToFacturasProveedor }   from '@/lib/firebase/facturas-proveedor';
 import { subscribeToRetencionesEmitidas } from '@/lib/firebase/retenciones-emitidas';
+import { subscribeToRetencionesRecibidas } from '@/lib/firebase/retenciones-recibidas';
+import { subscribeToDocsRecibidos }       from '@/lib/firebase/docs-recibidos';
 import { subscribeToComprobantes, Comprobante } from '@/lib/firebase/comprobantes';
 import { getConfigSRI }                   from '@/lib/firebase/config-sri';
 
@@ -60,6 +62,8 @@ export default function ATSPage() {
   const [ventas,      setVentas]      = useState<Venta[]>([]);
   const [compras,     setCompras]     = useState<FacturaProveedor[]>([]);
   const [retenciones, setRetenciones] = useState<RetencionEmitida[]>([]);
+  const [retRecibidas,setRetRecibidas]= useState<RetencionRecibida[]>([]);
+  const [docsRecibidos,setDocsRecibidos]= useState<DocumentoRecibido[]>([]);
   const [comprobantes,setComprobantes]= useState<Comprobante[]>([]);
   const [loading,     setLoading]     = useState(true);
   const [anio,      setAnio]      = useState(String(new Date().getFullYear()));
@@ -74,7 +78,9 @@ export default function ATSPage() {
     const u2 = subscribeToFacturasProveedor(setCompras, { desde, hasta });
     const u3 = subscribeToRetencionesEmitidas(setRetenciones, { desde, hasta });
     const u4 = subscribeToComprobantes(setComprobantes, { desde, hasta });
-    return () => { u1(); u2(); u3(); u4(); };
+    const u5 = subscribeToRetencionesRecibidas(setRetRecibidas, { desde, hasta });
+    const u6 = subscribeToDocsRecibidos(setDocsRecibidos, { desde, hasta });
+    return () => { u1(); u2(); u3(); u4(); u5(); u6(); };
   }, [anio, mes]);
 
   // Mapa: facturaProveedorId → retención (fuente / IVA) que emitimos
@@ -89,6 +95,16 @@ export default function ATSPage() {
     return m;
   }, [retenciones]);
 
+  // Mapa: ventaId → retención (fuente / IVA) que nos hizo el cliente al pagar
+  const retRecibidaPorVenta = useMemo(() => {
+    const m = new Map<string, { retFuente: number; retIVA: number }>();
+    retRecibidas.forEach(r => {
+      const prev = m.get(r.ventaId) ?? { retFuente: 0, retIVA: 0 };
+      m.set(r.ventaId, { retFuente: prev.retFuente + r.retFuente, retIVA: prev.retIVA + r.retIVA });
+    });
+    return m;
+  }, [retRecibidas]);
+
   const filtrar = (items: any[]) => {
     return items.filter(item => {
       const fecha = item.fecha?.toDate?.() ?? item.fechaEmision?.toDate?.()
@@ -100,6 +116,7 @@ export default function ATSPage() {
   const ventasMes  = useMemo(() => filtrar(ventas.filter(v => v.estado !== 'anulada')), [ventas, anio, mes]);
   const comprasMes = useMemo(() => filtrar(compras.filter(f => f.estado !== 'anulada')), [compras, anio, mes]);
   const retencionesMes = useMemo(() => filtrar(retenciones), [retenciones, anio, mes]);
+  const docsRecibidosMes = useMemo(() => filtrar(docsRecibidos), [docsRecibidos, anio, mes]);
   const totalRetenido  = useMemo(() => retencionesMes.reduce((s, r) => s + r.totalRetenido, 0), [retencionesMes]);
   const anuladosMes    = useMemo(
     () => filtrar(comprobantes.filter((c: Comprobante) => c.estado === 'anulado')),
@@ -260,6 +277,7 @@ export default function ATSPage() {
       const grupoVentas = new Map<string, {
         tpId:string; idCliente:string; tipoComp:string;
         base0:number; base15:number; iva:number; total:number; num:number;
+        retFuente: number; retIVA: number;
       }>();
 
       ventasMes.forEach(v => {
@@ -267,14 +285,17 @@ export default function ATSPage() {
           : v.clienteIdentificacion?.length === 13 ? '04' : '05';
         const tipoComp = '18'; // nota de venta default
         const key = `${v.clienteIdentificacion}-${tipoComp}`;
+        const ret = retRecibidaPorVenta.get(v.id!) ?? { retFuente: 0, retIVA: 0 };
         const prev = grupoVentas.get(key) ?? { tpId, idCliente:v.clienteIdentificacion,
-          tipoComp, base0:0, base15:0, iva:0, total:0, num:0 };
+          tipoComp, base0:0, base15:0, iva:0, total:0, num:0, retFuente: 0, retIVA: 0 };
         grupoVentas.set(key, {
           ...prev,
           base15: prev.base15 + v.subtotal,
           iva:    prev.iva    + (v.total - v.subtotal),
           total:  prev.total  + v.total,
           num:    prev.num    + 1,
+          retFuente: prev.retFuente + ret.retFuente,
+          retIVA:    prev.retIVA    + ret.retIVA,
         });
       });
 
@@ -291,9 +312,53 @@ export default function ATSPage() {
         det.ele('baseImpGrav').txt(g.base15.toFixed(2));
         det.ele('montoIva').txt(g.iva.toFixed(2));
         det.ele('montoIce').txt('0.00');
-        det.ele('valorRetIva').txt('0.00');
-        det.ele('valorRetRenta').txt('0.00');
+        det.ele('valorRetIva').txt(g.retIVA.toFixed(2));
+        det.ele('valorRetRenta').txt(g.retFuente.toFixed(2));
         det.ele('formasDePago').ele('formaPago').txt('20');
+      });
+
+      // Notas de crédito / débito de proveedor recibidas en el período. Las que
+      // sí se enlazaron a su factura original (ver Documentos Recibidos) van
+      // como su propio detalleCompras con tipoComprobante 04/05 — el SRI las
+      // espera reportadas, no solo descontadas del saldo interno de la factura.
+      docsRecibidosMes.forEach(d => {
+        const numParts = d.numero.split('-');
+        const det = comprasNode.ele('detalleCompras');
+        det.ele('codSustento').txt('01');
+        det.ele('tpIdProv').txt('01');
+        det.ele('idProv').txt(d.proveedorRuc);
+        det.ele('tipoComprobante').txt(d.tipo === 'nota_debito' ? '05' : '04');
+        det.ele('parteRel').txt('NO');
+        det.ele('fechaRegistro').txt(formatFecha(d.fechaEmision));
+        det.ele('establecimiento').txt((numParts[0] ?? '001').padStart(3,'0'));
+        det.ele('puntoEmision').txt((numParts[1] ?? '001').padStart(3,'0'));
+        det.ele('secuencial').txt((numParts[2] ?? '000000001').padStart(9,'0'));
+        det.ele('fechaEmision').txt(formatFecha(d.fechaEmision));
+        det.ele('autorizacion').txt(d.claveAcceso ?? d.numero);
+        det.ele('baseNoGraIva').txt('0.00');
+        det.ele('baseImponible').txt('0.00');
+        det.ele('baseImpGrav').txt(d.subtotal.toFixed(2));
+        det.ele('baseImpExe').txt('0.00');
+        det.ele('montoIce').txt('0.00');
+        det.ele('montoIva').txt(d.iva.toFixed(2));
+        det.ele('valRetBien10').txt('0.00');
+        det.ele('valRetServ20').txt('0.00');
+        det.ele('valorRetBienes').txt('0.00');
+        det.ele('valRetServ50').txt('0.00');
+        det.ele('valorRetServicios').txt('0.00');
+        det.ele('valRetServ100').txt('0.00');
+        det.ele('valorRetencionNc').txt('0.00');
+        det.ele('totbasesImpReemb').txt('0.00');
+        const pagoExt = det.ele('pagoExterior');
+        pagoExt.ele('pagoLocExt').txt('01');
+        pagoExt.ele('paisEfecPago').txt('NA');
+        pagoExt.ele('aplicConvDobTrib').txt('NA');
+        pagoExt.ele('pagExtSujRetNorLeg').txt('NA');
+        const da = det.ele('air').ele('detalleAir');
+        da.ele('codRetAir').txt('332');
+        da.ele('baseImpAir').txt('0.00');
+        da.ele('porcentajeAir').txt('0.00');
+        da.ele('valRetAir').txt('0.00');
       });
 
       // Total de ventas por establecimiento (bloque separado, no va dentro de detalleVentas)

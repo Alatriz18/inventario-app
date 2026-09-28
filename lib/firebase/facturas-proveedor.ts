@@ -81,6 +81,12 @@ export function subscribeToFacturasProveedorActivas(
   return () => { u1(); u2(); };
 }
 
+/** Lectura puntual de TODAS las facturas — para reparaciones/auditorías masivas, no para pantallas. */
+export async function getFacturasProveedor(): Promise<FacturaProveedor[]> {
+  const snap = await getDocs(collection(db, COL));
+  return snap.docs.map(d => ({ id: d.id, ...d.data() } as FacturaProveedor));
+}
+
 export async function createFacturaProveedor(
   data: Omit<FacturaProveedor, 'id'>
 ): Promise<string> {

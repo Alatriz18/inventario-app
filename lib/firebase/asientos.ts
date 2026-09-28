@@ -1,6 +1,7 @@
 import {
   collection, doc, addDoc, updateDoc, getDoc, onSnapshot,
   query, orderBy, where, getDocs, serverTimestamp, Timestamp, limit as fsLimit,
+  runTransaction,
 } from 'firebase/firestore';
 import { db } from '@/lib/firebase/config';
 import { AsientoContable, AsientoLinea, TipoAsiento } from '@/types';
@@ -78,20 +79,33 @@ export async function getAsientoByReferencia(
 export async function createAsiento(
   data: Omit<AsientoContable, 'id' | 'numero'>
 ): Promise<string> {
-  const snap  = await getDocs(collection(db, COL));
-  const num   = String(snap.size + 1).padStart(6, '0');
+  // Antes se hacia un getDocs() de TODA la coleccion en cada asiento (venta,
+  // pago, cobro...) solo para contar cuantos habia y numerar el siguiente —
+  // con miles de asientos eso volvia cada operacion mas lenta y cara en
+  // lecturas a medida que crecia la coleccion, y en importaciones masivas
+  // (cientos de facturas seguidas) el riesgo de que una lectura fallara a
+  // mitad de camino dejaba facturas sin su asiento. Ahora se usa un contador
+  // atomico por año en una transaccion, sin leer la coleccion completa.
   const fechaAsiento = data.fecha instanceof Date ? data.fecha : new Date(data.fecha);
-  const anio  = fechaAsiento.getFullYear();
-  const numero = `AJ-${anio}-${num}`;
+  const anio = fechaAsiento.getFullYear();
+  const counterRef = doc(db, 'contadores', `asientos_${anio}`);
+  const nuevoRef = doc(collection(db, COL));
 
-  const ref = await addDoc(collection(db, COL), {
-    ...data,
-    numero,
-    bloqueado:          data.bloqueado          ?? false,
-    editadoManualmente: data.editadoManualmente ?? false,
-    createdAt: serverTimestamp(),
+  await runTransaction(db, async (tx) => {
+    const counterSnap = await tx.get(counterRef);
+    const siguiente = (counterSnap.exists() ? (counterSnap.data().valor as number) : 0) + 1;
+    const numero = `AJ-${anio}-${String(siguiente).padStart(6, '0')}`;
+
+    tx.set(counterRef, { valor: siguiente }, { merge: true });
+    tx.set(nuevoRef, {
+      ...data,
+      numero,
+      bloqueado:          data.bloqueado          ?? false,
+      editadoManualmente: data.editadoManualmente ?? false,
+      createdAt: serverTimestamp(),
+    });
   });
-  return ref.id;
+  return nuevoRef.id;
 }
 
 // ── Confirmación ──────────────────────────────────────────────────────────

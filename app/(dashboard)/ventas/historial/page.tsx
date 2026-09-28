@@ -15,7 +15,7 @@ import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from '@/components/ui/select';
 import {
-  Dialog, DialogContent, DialogHeader, DialogTitle,
+  Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from '@/components/ui/dialog';
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
@@ -26,13 +26,15 @@ import {
 } from '@/components/ui/table';
 
 import { Venta, MetodoPago, Producto, Categoria, ItemVenta } from '@/types';
-import { subscribeToVentas, anularVenta, repararVenta } from '@/lib/firebase/ventas';
+import { subscribeToVentas, anularVenta, repararVenta, getVentas } from '@/lib/firebase/ventas';
 import { subscribeToProductos } from '@/lib/firebase/productos';
 import { subscribeToCategorias } from '@/lib/firebase/categorias';
 import { getConfigSRI } from '@/lib/firebase/config-sri';
 import { descargarTicket } from '@/lib/pdf/ticket-venta';
 import { useAuth } from '@/context/AuthContext';
 import { toast } from 'sonner';
+import { crearAsientoVenta } from '@/lib/contabilidad/motor-asientos';
+import { getAsientos } from '@/lib/firebase/asientos';
 
 const METODO_LABELS: Record<string, string> = {
   efectivo:      'Efectivo',
@@ -67,6 +69,17 @@ export default function HistorialVentasPage() {
   const [repMetodo,   setRepMetodo]   = useState<MetodoPago>('efectivo');
   const [repDias,     setRepDias]     = useState('30');
   const [reparando,   setReparando]   = useState(false);
+
+  // Diálogo "Reparar asientos de venta faltantes" — ventas registradas que
+  // quedaron sin su asiento contable (crearAsientoVenta se llamaba sin esperar
+  // su resultado, y createAsiento releía toda la colección en cada venta; con
+  // volumen alto de POS eso podía fallar en silencio). Explica por qué el
+  // Estado de Resultados puede mostrar menos ventas que el reporte real.
+  const [dlgReparar,   setDlgReparar]   = useState(false);
+  const [reparandoAsientos, setReparandoAsientos] = useState(false);
+  const [progresoReparar, setProgresoReparar] = useState(0);
+  const [resumenReparar, setResumenReparar] = useState<{ faltantes: number } | null>(null);
+  const [cargandoResumenReparar, setCargandoResumenReparar] = useState(false);
 
   useEffect(() => {
     setLoading(true);
@@ -133,6 +146,66 @@ export default function HistorialVentasPage() {
   const totalVentas    = filtered.filter(v => v.estado === 'completada').reduce((s, v) => s + totalesVenta(v).total, 0);
   const totalGanancias = filtered.filter(v => v.estado === 'completada').reduce((s, v) => s + totalesVenta(v).ganancia, 0);
 
+  const buscarVentasSinAsiento = async () => {
+    const [todasVentas, todosAsientos] = await Promise.all([getVentas(), getAsientos()]);
+    const conAsiento = new Set(
+      todosAsientos.filter(a => a.referenciaTipo === 'venta').map(a => a.referenciaId)
+    );
+    return todasVentas.filter(v => v.estado !== 'anulada' && !conAsiento.has(v.id));
+  };
+
+  const handleAbrirReparar = async () => {
+    setDlgReparar(true);
+    setResumenReparar(null);
+    setCargandoResumenReparar(true);
+    try {
+      const faltantes = await buscarVentasSinAsiento();
+      setResumenReparar({ faltantes: faltantes.length });
+    } catch {
+      setResumenReparar(null);
+    } finally {
+      setCargandoResumenReparar(false);
+    }
+  };
+
+  const handleRepararAsientos = async () => {
+    if (!user) return;
+    setReparandoAsientos(true);
+    setProgresoReparar(0);
+    let ok = 0, err = 0;
+    try {
+      const faltantes = await buscarVentasSinAsiento();
+      for (let i = 0; i < faltantes.length; i++) {
+        const v = faltantes[i];
+        try {
+          const iva = +(v.total - v.subtotal).toFixed(2);
+          const costoVenta = v.afectaInventario !== false
+            ? v.items.reduce((s, it) => s + it.precioCompra * it.cantidad, 0)
+            : 0;
+          const asientoId = await crearAsientoVenta({
+            ventaId: v.id, fecha: (v.fecha as any)?.toDate?.() ?? new Date(v.fecha),
+            clienteNombre: v.clienteNombre, tieneIVA: iva > 0,
+            subtotal: v.subtotal, iva, total: v.total,
+            costoVenta, esCxC: v.esCxC,
+            usuarioId: user.uid, usuarioNombre: user.nombre,
+          });
+          if (asientoId) ok++; else err++;
+        } catch { err++; }
+        setProgresoReparar(i + 1);
+      }
+      if (faltantes.length === 0) {
+        toast.info('No se encontró ninguna venta sin su asiento — ya está todo al día.');
+      } else {
+        toast.success(`${ok} asiento(s) generados` + (err ? ` — ${err} con error` : ''), { duration: 10000 });
+      }
+      setDlgReparar(false);
+    } catch (e: any) {
+      toast.error(e.message ?? 'Error al reparar los asientos');
+    } finally {
+      setReparandoAsientos(false);
+    }
+  };
+
   const confirmarAnulacion = async () => {
     if (!anulando || !user) return;
     try {
@@ -175,6 +248,12 @@ export default function HistorialVentasPage() {
       <PageHeader
         title="Historial de Ventas"
         description="Registro completo de todas las transacciones"
+        action={
+          <Button variant="outline" size="sm" onClick={handleAbrirReparar}
+            title="Busca ventas registradas que quedaron sin su asiento contable y los genera">
+            <Wrench className="mr-2 h-4 w-4" /> Reparar asientos faltantes
+          </Button>
+        }
       />
 
       {/* KPIs */}
@@ -531,6 +610,41 @@ export default function HistorialVentasPage() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      {/* Dialog reparar ventas sin asiento contable */}
+      <Dialog open={dlgReparar} onOpenChange={(o) => !reparandoAsientos && setDlgReparar(o)}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Reparar asientos de venta faltantes</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3">
+            <p className="text-sm text-slate-600">
+              Busca entre TODAS las ventas registradas (no solo el período visible) las que no tienen
+              su asiento contable y genera el que les falta. No crea ni duplica ventas, solo su
+              contabilización. Útil si el Estado de Resultados muestra menos ventas que el reporte real.
+            </p>
+            {cargandoResumenReparar && (
+              <p className="text-sm text-slate-500">Revisando ventas…</p>
+            )}
+            {!cargandoResumenReparar && resumenReparar && !reparandoAsientos && (
+              <p className="text-sm font-medium">
+                {resumenReparar.faltantes === 0
+                  ? 'No se encontró ninguna venta sin su asiento — ya está todo al día.'
+                  : `Se encontraron ${resumenReparar.faltantes} venta(s) sin asiento contable.`}
+              </p>
+            )}
+            {reparandoAsientos && (
+              <p className="text-sm text-slate-500">Generando asientos… {progresoReparar}</p>
+            )}
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setDlgReparar(false)} disabled={reparandoAsientos}>Cancelar</Button>
+            <Button onClick={handleRepararAsientos} disabled={reparandoAsientos}>
+              {reparandoAsientos ? 'Reparando…' : 'Buscar y generar asientos'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

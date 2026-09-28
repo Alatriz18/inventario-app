@@ -186,6 +186,13 @@ service cloud.firestore {
       allow delete: if isAdmin() || hasRole('vendedor');
     }
 
+    // Contador atomico usado por createAsiento() para numerar "AJ-{anio}-{num}"
+    // sin tener que leer toda la coleccion de asientos en cada operacion.
+    match /contadores/{id} {
+      allow read:  if isStaff();
+      allow write: if isContador() || hasRole('finanzas') || hasRole('vendedor');
+    }
+
     match /periodos_contables/{id} {
       allow read: if isStaff();
       allow write: if isContador();

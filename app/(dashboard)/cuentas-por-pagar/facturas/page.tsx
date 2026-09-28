@@ -39,6 +39,7 @@ import {
 import { FacturaProveedor, Proveedor, CuentaBancaria } from '@/types';
 import {
   subscribeToFacturasProveedorActivas,
+  getFacturasProveedor,
   createFacturaProveedor,
   updateFacturaProveedor,
   registrarPago,
@@ -46,7 +47,7 @@ import {
   anularPago, editarPago, reactivarPago, reactivarFactura,
   buscarFacturaPorNumero, aplicarAjusteDocRecibido,
 } from '@/lib/firebase/facturas-proveedor';
-import { editarAsiento, escalarLineasAsiento } from '@/lib/firebase/asientos';
+import { editarAsiento, escalarLineasAsiento, getAsientos } from '@/lib/firebase/asientos';
 import { subscribeToCuentasBancarias, registrarMovimientoBancario, conciliarMovimiento } from '@/lib/firebase/cuentas-bancarias';
 import { createDocRecibido, updateDocRecibido } from '@/lib/firebase/docs-recibidos';
 import { createRetencionRecibida } from '@/lib/firebase/retenciones-recibidas';
@@ -199,6 +200,15 @@ export default function FacturasProveedorPage() {
   const [bulkImporting, setBulkImporting] = useState(false);
   const xmlRef  = useRef<HTMLInputElement>(null);
   const bulkRef = useRef<HTMLInputElement>(null);
+
+  // Diálogo "Reparar asientos de compra faltantes" — facturas que quedaron
+  // registradas pero sin su asiento contable (ej. por el bug de createAsiento
+  // leyendo toda la colección en cada importación masiva, ya corregido).
+  const [dlgReparar,    setDlgReparar]    = useState(false);
+  const [reparando,     setReparando]     = useState(false);
+  const [progresoReparar, setProgresoReparar] = useState(0);
+  const [resumenReparar, setResumenReparar] = useState<{ faltantes: number } | null>(null);
+  const [cargandoResumenReparar, setCargandoResumenReparar] = useState(false);
 
   // Importación TXT "Comprobantes Recibidos" del SRI
   const [txtDialogOpen, setTxtDialogOpen] = useState(false);
@@ -694,6 +704,64 @@ export default function FacturasProveedorPage() {
     setTxtFilas([]);
   };
 
+  // Busca, entre TODAS las facturas (no solo las cargadas en pantalla), las
+  // que quedaron sin su asiento de compra — típicamente por el bug de
+  // createAsiento() que releía toda la colección de asientos en cada
+  // importación (ya corregido) y podía fallar a mitad de una carga masiva.
+  const buscarFacturasSinAsiento = async () => {
+    const [todasFacturas, todosAsientos] = await Promise.all([getFacturasProveedor(), getAsientos()]);
+    const conAsiento = new Set(
+      todosAsientos.filter(a => a.referenciaTipo === 'factura_proveedor').map(a => a.referenciaId)
+    );
+    return todasFacturas.filter(f => f.estado !== 'anulada' && !conAsiento.has(f.id));
+  };
+
+  const handleAbrirReparar = async () => {
+    setDlgReparar(true);
+    setResumenReparar(null);
+    setCargandoResumenReparar(true);
+    try {
+      const faltantes = await buscarFacturasSinAsiento();
+      setResumenReparar({ faltantes: faltantes.length });
+    } catch {
+      setResumenReparar(null);
+    } finally {
+      setCargandoResumenReparar(false);
+    }
+  };
+
+  const handleReparar = async () => {
+    if (!user) return;
+    setReparando(true);
+    setProgresoReparar(0);
+    let ok = 0, err = 0;
+    try {
+      const faltantes = await buscarFacturasSinAsiento();
+      for (let i = 0; i < faltantes.length; i++) {
+        const f = faltantes[i];
+        try {
+          const asientoId = await crearAsientoCompraFactura({
+            facturaId: f.id, fecha: (f.fechaEmision as any)?.toDate?.() ?? new Date(f.fechaEmision),
+            proveedorNombre: f.proveedorNombre, subtotal: f.subtotal12 + f.subtotal0, iva: f.iva, total: f.total,
+            usuarioId: user.uid, usuarioNombre: user.nombre,
+          });
+          if (asientoId) ok++; else err++;
+        } catch { err++; }
+        setProgresoReparar(i + 1);
+      }
+      if (faltantes.length === 0) {
+        toast.info('No se encontró ninguna factura sin su asiento — ya está todo al día.');
+      } else {
+        toast.success(`${ok} asiento(s) generados` + (err ? ` — ${err} con error` : ''), { duration: 10000 });
+      }
+      setDlgReparar(false);
+    } catch (e: any) {
+      toast.error(e.message ?? 'Error al reparar los asientos');
+    } finally {
+      setReparando(false);
+    }
+  };
+
   // ── Traer facturas directamente del CORREO (IMAP) sin entrar al SRI ──
   const handleImportarCorreo = async () => {
     if (!user) return;
@@ -1026,6 +1094,9 @@ export default function FacturasProveedorPage() {
             </Button>
             <Button variant="outline" onClick={descargarTodosXML}>
               <Download className="mr-2 h-4 w-4" /> Descargar todos (ZIP)
+            </Button>
+            <Button variant="outline" onClick={handleAbrirReparar} title="Busca facturas registradas que quedaron sin su asiento contable y los genera">
+              <FileCheck className="mr-2 h-4 w-4" /> Reparar asientos faltantes
             </Button>
             <Button variant="outline" onClick={abrirPagoBanco}>
               <Banknote className="mr-2 h-4 w-4" /> Pago bancario (TXT)
@@ -1814,6 +1885,41 @@ export default function FacturasProveedorPage() {
             <Button onClick={procesarPagoBanco} disabled={procesandoPago || seleccionadas.size === 0}>
               <Banknote className="mr-2 h-4 w-4" />
               {procesandoPago ? 'Procesando...' : `Pagar y generar archivo (${seleccionadas.size})`}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Dialog reparar facturas sin asiento contable */}
+      <Dialog open={dlgReparar} onOpenChange={(o) => !reparando && setDlgReparar(o)}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Reparar asientos de compra faltantes</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3">
+            <p className="text-sm text-slate-600">
+              Busca entre todas las facturas de proveedor registradas las que no tienen su asiento
+              contable (típicamente por fallas durante una importación masiva grande) y genera el
+              asiento que les falta. No crea ni duplica facturas, solo su contabilización.
+            </p>
+            {cargandoResumenReparar && (
+              <p className="text-sm text-slate-500">Revisando facturas…</p>
+            )}
+            {!cargandoResumenReparar && resumenReparar && !reparando && (
+              <p className="text-sm font-medium">
+                {resumenReparar.faltantes === 0
+                  ? 'No se encontró ninguna factura sin su asiento — ya está todo al día.'
+                  : `Se encontraron ${resumenReparar.faltantes} factura(s) sin asiento contable.`}
+              </p>
+            )}
+            {reparando && (
+              <p className="text-sm text-slate-500">Generando asientos… {progresoReparar}</p>
+            )}
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setDlgReparar(false)} disabled={reparando}>Cancelar</Button>
+            <Button onClick={handleReparar} disabled={reparando}>
+              {reparando ? 'Reparando…' : 'Buscar y generar asientos'}
             </Button>
           </DialogFooter>
         </DialogContent>

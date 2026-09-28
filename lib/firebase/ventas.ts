@@ -136,6 +136,12 @@ export async function createVenta(
   });
 }
 
+/** Lectura puntual de TODAS las ventas — para reparaciones/auditorías masivas, no para pantallas. */
+export async function getVentas(): Promise<Venta[]> {
+  const snap = await getDocs(collection(db, COL));
+  return snap.docs.map(d => ({ id: d.id, ...d.data() } as Venta));
+}
+
 export async function getVentaById(id: string): Promise<Venta | null> {
   const { getDoc } = await import('firebase/firestore');
   const snap = await getDoc(doc(db, COL, id));

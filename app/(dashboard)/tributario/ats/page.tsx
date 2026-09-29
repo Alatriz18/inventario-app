@@ -332,7 +332,9 @@ export default function ATSPage() {
         const numParts = d.numero.split('-');
         const facturaOrigen = d.facturaProveedorId ? facturaPorId.get(d.facturaProveedorId) : undefined;
         const modParts = (facturaOrigen?.numeroFactura ?? d.docModificado ?? '').split('-');
-        if (!facturaOrigen) ncSinEnlazar++;
+        const autorizacionMod = facturaOrigen?.claveAcceso ?? facturaOrigen?.numeroAutorizacion
+          ?? d.autorizacionModificado ?? '';
+        if (!autorizacionMod) ncSinEnlazar++;
 
         const det = comprasNode.ele('detalleCompras');
         det.ele('codSustento').txt('01');
@@ -378,7 +380,7 @@ export default function ATSPage() {
         det.ele('estabModificado').txt((modParts[0] ?? '001').padStart(3,'0'));
         det.ele('ptoEmiModificado').txt((modParts[1] ?? '001').padStart(3,'0'));
         det.ele('secModificado').txt((modParts[2] ?? '000000001').padStart(9,'0'));
-        det.ele('autModificado').txt(facturaOrigen?.claveAcceso ?? facturaOrigen?.numeroAutorizacion ?? '');
+        det.ele('autModificado').txt(autorizacionMod);
       });
 
       // Total de ventas por establecimiento (bloque separado, no va dentro de detalleVentas)
@@ -414,9 +416,10 @@ export default function ATSPage() {
       toast.success('XML ATS generado — vuelve a validarlo en DIMM');
       if (ncSinEnlazar > 0) {
         toast.warning(
-          `${ncSinEnlazar} nota(s) de crédito/débito no se pudieron enlazar a su factura original, ` +
-          `así que van sin número de autorización del documento modificado (DIMM probablemente las marque ` +
-          `con error). Revísalas en Cuentas por Pagar → Documentos Recibidos.`,
+          `${ncSinEnlazar} nota(s) de crédito/débito van sin número de autorización del documento ` +
+          `modificado (DIMM las va a marcar con error) porque su factura original no está registrada ` +
+          `en el sistema. Andá a Documentos Recibidos y usá "Vincular manual" para pegar la autorización ` +
+          `de esa factura (la encontrás en el portal del SRI, en "Documentos relacionados" de la nota).`,
           { duration: 15000 }
         );
       }

@@ -134,6 +134,34 @@ export default function DocumentosRecibidosPage() {
   const [txtProgreso,   setTxtProgreso]   = useState(0);
   const [txtResultado,  setTxtResultado]  = useState<{ ok: number; sinAsiento: number; err: number } | null>(null);
 
+  // Dialog "vincular manual" — para NC/ND cuya factura original no está
+  // registrada en el sistema (no se pudo enlazar automáticamente), pero el
+  // usuario sí tiene su número de autorización/clave de acceso (ej. desde el
+  // portal del SRI) y el ATS lo exige igual.
+  const [vincularDoc,    setVincularDoc]    = useState<DocumentoRecibido | null>(null);
+  const [autModificado,  setAutModificado]  = useState('');
+  const [savingVincular, setSavingVincular] = useState(false);
+
+  const abrirVincularManual = (d: DocumentoRecibido) => {
+    setVincularDoc(d);
+    setAutModificado(d.autorizacionModificado ?? '');
+  };
+
+  const guardarVinculoManual = async () => {
+    if (!vincularDoc) return;
+    if (!autModificado.trim()) { toast.error('Ingresa el número de autorización'); return; }
+    setSavingVincular(true);
+    try {
+      await updateDocRecibido(vincularDoc.id, { autorizacionModificado: autModificado.trim() });
+      toast.success('Autorización guardada — ya se incluirá en el próximo ATS que generes');
+      setVincularDoc(null);
+    } catch (e: any) {
+      toast.error(e.message ?? 'Error al guardar');
+    } finally {
+      setSavingVincular(false);
+    }
+  };
+
   useEffect(() => subscribeToDocsRecibidos(d => { setDocs(d); setLoading(false); }, { limite: 500 }), []);
 
   const filtrados = useMemo(() => docs.filter(d =>
@@ -353,18 +381,19 @@ export default function DocumentosRecibidosPage() {
               <TableHead className="text-right">Subtotal</TableHead>
               <TableHead className="text-right">IVA</TableHead>
               <TableHead className="text-right">Total</TableHead>
+              <TableHead></TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
             {loading ? (
               Array.from({ length: 4 }).map((_, i) => (
-                <TableRow key={i}>{Array.from({ length: 8 }).map((_, j) => (
+                <TableRow key={i}>{Array.from({ length: 9 }).map((_, j) => (
                   <TableCell key={j}><Skeleton className="h-4 w-full" /></TableCell>
                 ))}</TableRow>
               ))
             ) : filtrados.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={8} className="text-center py-12 text-slate-400">
+                <TableCell colSpan={9} className="text-center py-12 text-slate-400">
                   <FileX className="h-10 w-10 mx-auto mb-2 opacity-30" />
                   No hay notas de crédito/débito recibidas.
                 </TableCell>
@@ -395,6 +424,14 @@ export default function DocumentosRecibidosPage() {
                 <TableCell className="text-right text-sm">{currency(d.subtotal)}</TableCell>
                 <TableCell className="text-right text-sm">{currency(d.iva)}</TableCell>
                 <TableCell className="text-right font-semibold">{currency(d.total)}</TableCell>
+                <TableCell>
+                  {d.docModificado && !d.facturaProveedorId && (
+                    <Button variant="outline" size="sm" className="h-7 text-xs"
+                      onClick={() => abrirVincularManual(d)}>
+                      {d.autorizacionModificado ? 'Editar autorización' : 'Vincular manual'}
+                    </Button>
+                  )}
+                </TableCell>
               </TableRow>
             ))}
           </TableBody>
@@ -556,6 +593,37 @@ export default function DocumentosRecibidosPage() {
               </Table>
             </div>
           </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Dialog vincular manual: autorización de la factura original cuando no está en el sistema */}
+      <Dialog open={!!vincularDoc} onOpenChange={(o) => !o && setVincularDoc(null)}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Vincular con la factura original</DialogTitle>
+          </DialogHeader>
+          {vincularDoc && (
+            <div className="space-y-3">
+              <p className="text-sm text-slate-600">
+                No se encontró la factura <strong>{vincularDoc.docModificado}</strong> de{' '}
+                <strong>{vincularDoc.proveedorNombre}</strong> registrada en el sistema, así que no se
+                pudo enlazar automáticamente. El ATS exige igual el número de autorización (clave de
+                acceso) de esa factura — podés obtenerlo en el portal del SRI, en "Documentos
+                relacionados" de esta nota.
+              </p>
+              <div>
+                <Label>Número de autorización / clave de acceso de la factura original *</Label>
+                <Input value={autModificado} onChange={e => setAutModificado(e.target.value)}
+                  placeholder="49 dígitos" className="mt-1 font-mono text-xs" />
+              </div>
+            </div>
+          )}
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setVincularDoc(null)} disabled={savingVincular}>Cancelar</Button>
+            <Button onClick={guardarVinculoManual} disabled={savingVincular}>
+              {savingVincular ? 'Guardando…' : 'Guardar'}
+            </Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
     </div>

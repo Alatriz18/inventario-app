@@ -419,6 +419,7 @@ const METODO_COBRO_LABEL: Record<string, string> = {
   transferencia: 'Transferencia',
   tarjeta:       'Tarjeta',
   efectivo:      'Efectivo',
+  nota_credito:  'Nota de crédito',
 };
 
 function buildLineasCobro(
@@ -426,9 +427,22 @@ function buildLineasCobro(
   config:  Awaited<ReturnType<typeof getOrCreateConfigContable>>,
   p:       ParamsCobro
 ): AsientoLinea[] {
-  const cuentaEntrada = p.usaBanco ? config.cuentaBancos : config.cuentaCaja;
   const lineas: AsientoLinea[] = [];
   const metodoDesc = p.metodoCobro ? (METODO_COBRO_LABEL[p.metodoCobro] ?? p.metodoCobro) : 'Cobro';
+
+  // Cancelación con Nota de Crédito: no entra dinero, así que en vez de
+  // debitar Caja/Bancos se debita Ventas (reversa el ingreso), igual que al
+  // emitir la NC formalmente. No aplica retención — esa solo tiene sentido
+  // sobre dinero cobrado.
+  if (p.metodoCobro === 'nota_credito') {
+    lineas.push(buildLinea(cuentas, config.cuentaVentas12, p.monto, 0,
+      `Cancelación CxC con NC - ${p.clienteNombre}`));
+    lineas.push(buildLinea(cuentas, config.cuentaCxCClientes, 0, p.monto,
+      `Cancelación CxC ${p.clienteNombre}`));
+    return lineas;
+  }
+
+  const cuentaEntrada = p.usaBanco ? config.cuentaBancos : config.cuentaCaja;
 
   // DB: Banco (neto cobrado)
   const netoCobrado = p.monto - (p.retFuente ?? 0) - (p.retIVA ?? 0);

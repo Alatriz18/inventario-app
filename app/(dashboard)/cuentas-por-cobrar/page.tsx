@@ -237,7 +237,9 @@ export default function CxCPage() {
       };
       const cobroId = await registrarCobroCxC(cxcSel.id, cobro, user.uid, user.nombre ?? user.email ?? 'Usuario');
 
-      const usaBanco = cuentaBancariaId !== 'caja' && !!cuentaBancariaId;
+      // Con nota de crédito no entra dinero — no hay cuenta bancaria/Caja ni retención.
+      const esNotaCredito = metodoPago === 'nota_credito';
+      const usaBanco = !esNotaCredito && cuentaBancariaId !== 'caja' && !!cuentaBancariaId;
 
       // Asiento contable
       const asientoId = await crearAsientoCobro({
@@ -248,8 +250,8 @@ export default function CxCPage() {
         monto,
         usaBanco,
         metodoCobro:  metodoPago,
-        retFuente:    rf,
-        retIVA:       ri,
+        retFuente:    esNotaCredito ? 0 : rf,
+        retIVA:       esNotaCredito ? 0 : ri,
         usuarioId:    user.uid,
         usuarioNombre:user.nombre ?? user.email ?? 'Usuario',
       });
@@ -642,6 +644,7 @@ export default function CxCPage() {
                       <SelectItem value="cheque">Cheque</SelectItem>
                       <SelectItem value="transferencia">Transferencia</SelectItem>
                       <SelectItem value="tarjeta">Tarjeta</SelectItem>
+                      <SelectItem value="nota_credito">Nota de crédito</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>
@@ -650,39 +653,48 @@ export default function CxCPage() {
                   <Input value={refCobro} onChange={e => setRefCobro(e.target.value)}
                     placeholder="Opcional" className="mt-1" />
                 </div>
-                <div className="col-span-2">
-                  <Label>¿Dónde se registra el dinero?</Label>
-                  <Select value={cuentaBancariaId} onValueChange={setCuentaBancariaId}>
-                    <SelectTrigger className="mt-1">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="caja">Caja General</SelectItem>
-                      {cuentasBancarias.filter(c => c.activa).map(c => (
-                        <SelectItem key={c.id} value={c.id}>
-                          {c.banco} — {c.numeroCuenta}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                  <p className="text-xs text-slate-400 mt-1">
-                    {cuentaBancariaId === 'caja'
-                      ? 'Se contabiliza en Caja General, sin generar movimiento bancario.'
-                      : 'Se registra ya conciliado en Movimientos Bancarios / Conciliación Bancaria.'}
+                {metodoPago === 'nota_credito' ? (
+                  <p className="col-span-2 text-xs text-slate-400">
+                    No entra dinero: se cancela el saldo con una nota de crédito, reversando la venta
+                    contra este cliente. No genera movimiento bancario ni de Caja.
                   </p>
-                </div>
-                <div>
-                  <Label>Ret. Fuente recibida ($)</Label>
-                  <Input type="number" step="0.01" value={retFuente}
-                    onChange={e => setRetFuente(e.target.value)}
-                    placeholder="0.00" className="mt-1" />
-                </div>
-                <div>
-                  <Label>Ret. IVA recibida ($)</Label>
-                  <Input type="number" step="0.01" value={retIVA}
-                    onChange={e => setRetIVA(e.target.value)}
-                    placeholder="0.00" className="mt-1" />
-                </div>
+                ) : (
+                  <>
+                    <div className="col-span-2">
+                      <Label>¿Dónde se registra el dinero?</Label>
+                      <Select value={cuentaBancariaId} onValueChange={setCuentaBancariaId}>
+                        <SelectTrigger className="mt-1">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="caja">Caja General</SelectItem>
+                          {cuentasBancarias.filter(c => c.activa).map(c => (
+                            <SelectItem key={c.id} value={c.id}>
+                              {c.banco} — {c.numeroCuenta}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                      <p className="text-xs text-slate-400 mt-1">
+                        {cuentaBancariaId === 'caja'
+                          ? 'Se contabiliza en Caja General, sin generar movimiento bancario.'
+                          : 'Se registra ya conciliado en Movimientos Bancarios / Conciliación Bancaria.'}
+                      </p>
+                    </div>
+                    <div>
+                      <Label>Ret. Fuente recibida ($)</Label>
+                      <Input type="number" step="0.01" value={retFuente}
+                        onChange={e => setRetFuente(e.target.value)}
+                        placeholder="0.00" className="mt-1" />
+                    </div>
+                    <div>
+                      <Label>Ret. IVA recibida ($)</Label>
+                      <Input type="number" step="0.01" value={retIVA}
+                        onChange={e => setRetIVA(e.target.value)}
+                        placeholder="0.00" className="mt-1" />
+                    </div>
+                  </>
+                )}
               </div>
             </div>
           )}

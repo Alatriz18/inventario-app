@@ -23,7 +23,7 @@ import {
 import { DocumentoRecibido, TipoDocRecibido } from '@/types';
 import { subscribeToDocsRecibidos, createDocRecibido, updateDocRecibido } from '@/lib/firebase/docs-recibidos';
 import { getOrCreateProveedorPorRuc } from '@/lib/firebase/proveedores';
-import { buscarFacturaPorNumero, aplicarAjusteDocRecibido } from '@/lib/firebase/facturas-proveedor';
+import { buscarFacturaPorNumero, aplicarAjusteDocRecibido, getFacturasProveedor } from '@/lib/firebase/facturas-proveedor';
 import {
   crearAsientoNotaCreditoRecibida, crearAsientoNotaDebitoRecibida,
 } from '@/lib/contabilidad/motor-asientos';
@@ -159,6 +159,52 @@ export default function DocumentosRecibidosPage() {
       toast.error(e.message ?? 'Error al guardar');
     } finally {
       setSavingVincular(false);
+    }
+  };
+
+  // "Reintentar enlaces automáticos" — el enlace solo corre al importar la
+  // NC/ND; si la factura original se registra DESPUÉS, nadie vuelve a
+  // intentarlo. Este botón revisa todas las NC/ND sin enlazar contra TODAS
+  // las facturas actuales (no solo las cargadas en pantalla) y aplica el
+  // ajuste de saldo donde ahora sí exista un match por RUC + número.
+  const [reintentando, setReintentando] = useState(false);
+
+  const handleReintentarEnlaces = async () => {
+    if (!user) return;
+    const pendientes = docs.filter(d => d.docModificado && !d.facturaProveedorId);
+    if (pendientes.length === 0) {
+      toast.info('No hay notas sin enlazar — nada que reintentar.');
+      return;
+    }
+    setReintentando(true);
+    let enlazadas = 0, err = 0;
+    try {
+      const todasFacturas = await getFacturasProveedor();
+      const facturaPorClave = new Map(
+        todasFacturas.map(f => [`${f.proveedorRuc}|${f.numeroFactura}`, f])
+      );
+      for (const d of pendientes) {
+        const facturaMod = facturaPorClave.get(`${d.proveedorRuc}|${d.docModificado}`);
+        if (!facturaMod) continue;
+        try {
+          await aplicarAjusteDocRecibido(facturaMod.id, {
+            tipo: d.tipo, docId: d.id, numero: d.numero, monto: d.total,
+            fecha: (d.fechaEmision as any)?.toDate?.() ?? new Date(d.fechaEmision),
+            usuarioId: user.uid, usuarioNombre: user.nombre ?? user.email ?? 'Usuario',
+          });
+          await updateDocRecibido(d.id, { facturaProveedorId: facturaMod.id });
+          enlazadas++;
+        } catch { err++; }
+      }
+      if (enlazadas === 0) {
+        toast.info('Ninguna factura nueva coincide todavía — si ya importaste la factura original, revisa que el número coincida exacto.');
+      } else {
+        toast.success(`${enlazadas} nota(s) enlazadas automáticamente` + (err ? ` — ${err} con error` : ''), { duration: 10000 });
+      }
+    } catch (e: any) {
+      toast.error(e.message ?? 'Error al reintentar los enlaces');
+    } finally {
+      setReintentando(false);
     }
   };
 
@@ -351,6 +397,10 @@ export default function DocumentosRecibidosPage() {
               <Upload className="mr-2 h-4 w-4" /> Importar TXT del SRI
             </Button>
             <input ref={txtRef} type="file" accept=".txt" className="hidden" onChange={handleTxtUpload} />
+            <Button size="sm" variant="outline" onClick={handleReintentarEnlaces} disabled={reintentando}
+              title="Revisa las NC/ND sin enlazar contra todas las facturas registradas, por si su factura original ya se importó">
+              {reintentando ? 'Reintentando…' : 'Reintentar enlaces automáticos'}
+            </Button>
             <Button size="sm" onClick={() => { resetDialog(); setDialogOpen(true); }}>
               <Plus className="mr-2 h-4 w-4" /> Registrar manualmente
             </Button>

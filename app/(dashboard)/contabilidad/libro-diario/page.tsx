@@ -38,7 +38,7 @@ export default function LibroDiarioPage() {
     setLoading(true);
     const desde = new Date(dateFrom + 'T00:00:00');
     const hasta = new Date(dateTo   + 'T23:59:59');
-    return subscribeToAsientos(d => { setAsientos(d); setLoading(false); }, 100000, { desde, hasta });
+    return subscribeToAsientos(d => { setAsientos(d); setLoading(false); }, 10000, { desde, hasta });
   }, [dateFrom, dateTo]);
 
   const filtrados = useMemo(() => {

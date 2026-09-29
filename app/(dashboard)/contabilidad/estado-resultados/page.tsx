@@ -29,7 +29,7 @@ export default function EstadoResultadosPage() {
     setLoading(true);
     const desde = new Date(dateFrom + 'T00:00:00');
     const hasta = new Date(dateTo   + 'T23:59:59');
-    const u1 = subscribeToAsientos(d => { setAsientos(d); setLoading(false); }, 100000, { desde, hasta });
+    const u1 = subscribeToAsientos(d => { setAsientos(d); setLoading(false); }, 10000, { desde, hasta });
     const u2 = subscribeToCuentas(setCuentas);
     return () => { u1(); u2(); };
   }, [dateFrom, dateTo]);

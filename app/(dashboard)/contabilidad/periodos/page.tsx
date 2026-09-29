@@ -63,7 +63,7 @@ export default function PeriodosPage() {
 
   useEffect(() => {
     const u1 = subscribeToPeriodos(d => { setPeriodos(d); setLoading(false); });
-    const u2 = subscribeToAsientos(setAsientos, 100000);
+    const u2 = subscribeToAsientos(setAsientos, 10000);
     const u3 = subscribeToCuentas(setCuentas);
     return () => { u1(); u2(); u3(); };
   }, []);

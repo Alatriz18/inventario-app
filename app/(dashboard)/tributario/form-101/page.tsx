@@ -55,7 +55,7 @@ export default function Form101Page() {
     setLoading(true);
     const u1 = subscribeToVentas(d => { setVentas(d); setLoading(false); }, { desde, hasta });
     const u2 = subscribeToFacturasProveedor(setFacturas, { desde, hasta });
-    const u3 = subscribeToAsientos(setAsientos, 100000, { desde, hasta });
+    const u3 = subscribeToAsientos(setAsientos, 10000, { desde, hasta });
     return () => { u1(); u2(); u3(); };
   }, [anio]);
 

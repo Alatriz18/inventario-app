@@ -42,7 +42,7 @@ export default function ConciliacionBancariaPage() {
 
   useEffect(() => {
     const u1 = subscribeToCuentasBancarias(setCuentas);
-    const u2 = subscribeToAsientos(setAsientos, 100000);
+    const u2 = subscribeToAsientos(setAsientos, 10000);
     return () => { u1(); u2(); };
   }, []);
 

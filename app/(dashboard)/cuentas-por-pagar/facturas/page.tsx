@@ -224,6 +224,20 @@ export default function FacturasProveedorPage() {
   const [procesandoPago,setProcesandoPago]= useState(false);
 
   const facturaForm = useForm<FacturaForm>({ resolver: zodResolver(facturaSchema) as any });
+  // Recalcula IVA/Total cuando cambian las bases — por watch(), no por un
+  // onChange que además llame setValue() sobre el MISMO campo que se está
+  // tipeando: eso pisaba el valor mientras el usuario escribía el punto
+  // decimal (un "123." intermedio se leía como 0 y perdía el entero).
+  const subtotal12Watch = facturaForm.watch('subtotal12');
+  const subtotal0Watch  = facturaForm.watch('subtotal0');
+  useEffect(() => {
+    const s12 = Number(subtotal12Watch) || 0;
+    const s0  = Number(subtotal0Watch)  || 0;
+    const iva = s12 * 0.15;
+    facturaForm.setValue('iva',   parseFloat(iva.toFixed(2)));
+    facturaForm.setValue('total', parseFloat((s12 + s0 + iva).toFixed(2)));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [subtotal12Watch, subtotal0Watch]);
   const pagoForm    = useForm<PagoForm>({
     resolver: zodResolver(pagoSchema) as any,
     defaultValues: { metodoPago: 'transferencia', fecha: new Date().toISOString().split('T')[0] },
@@ -1280,14 +1294,6 @@ export default function FacturasProveedorPage() {
                 <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-sm">$</span>
                 <Input type="number" step="0.01" min="0" className="pl-7"
                   {...facturaForm.register('subtotal12')}
-                  onChange={e => {
-                    const s12 = Number(e.target.value);
-                    const s0  = facturaForm.getValues('subtotal0');
-                    const iva = s12 * 0.15;
-                    facturaForm.setValue('subtotal12', s12);
-                    facturaForm.setValue('iva',   parseFloat(iva.toFixed(2)));
-                    facturaForm.setValue('total', parseFloat((s12 + s0 + iva).toFixed(2)));
-                  }}
                 />
               </div>
             </div>
@@ -1297,13 +1303,6 @@ export default function FacturasProveedorPage() {
                 <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-sm">$</span>
                 <Input type="number" step="0.01" min="0" className="pl-7"
                   {...facturaForm.register('subtotal0')}
-                  onChange={e => {
-                    const s0  = Number(e.target.value);
-                    const s12 = facturaForm.getValues('subtotal12');
-                    const iva = s12 * 0.15;
-                    facturaForm.setValue('subtotal0', s0);
-                    facturaForm.setValue('total', parseFloat((s12 + s0 + iva).toFixed(2)));
-                  }}
                 />
               </div>
             </div>

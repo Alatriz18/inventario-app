@@ -24,6 +24,7 @@ import { subscribeToFacturasProveedor }   from '@/lib/firebase/facturas-proveedo
 import { subscribeToRetencionesEmitidas } from '@/lib/firebase/retenciones-emitidas';
 import { subscribeToRetencionesRecibidas } from '@/lib/firebase/retenciones-recibidas';
 import { subscribeToDocsRecibidos }       from '@/lib/firebase/docs-recibidos';
+import { getFacturasProveedor }           from '@/lib/firebase/facturas-proveedor';
 import { subscribeToComprobantes, Comprobante } from '@/lib/firebase/comprobantes';
 import { getConfigSRI }                   from '@/lib/firebase/config-sri';
 
@@ -317,12 +318,22 @@ export default function ATSPage() {
         det.ele('formasDePago').ele('formaPago').txt('20');
       });
 
-      // Notas de crédito / débito de proveedor recibidas en el período. Las que
-      // sí se enlazaron a su factura original (ver Documentos Recibidos) van
-      // como su propio detalleCompras con tipoComprobante 04/05 — el SRI las
-      // espera reportadas, no solo descontadas del saldo interno de la factura.
+      // Notas de crédito / débito de proveedor recibidas en el período. El SRI
+      // las espera reportadas como su propio detalleCompras (tipoComprobante
+      // 04/05), y ADEMÁS exige identificar la factura que modifican (tipo,
+      // establecimiento, punto de emisión, secuencial y autorización de ESA
+      // factura, no de la NC/ND). Solo se puede completar la autorización si
+      // la NC/ND logró enlazarse a su factura original (Documentos Recibidos).
+      const facturasParaModificado = await getFacturasProveedor();
+      const facturaPorId = new Map(facturasParaModificado.map(f => [f.id, f]));
+      let ncSinEnlazar = 0;
+
       docsRecibidosMes.forEach(d => {
         const numParts = d.numero.split('-');
+        const facturaOrigen = d.facturaProveedorId ? facturaPorId.get(d.facturaProveedorId) : undefined;
+        const modParts = (facturaOrigen?.numeroFactura ?? d.docModificado ?? '').split('-');
+        if (!facturaOrigen) ncSinEnlazar++;
+
         const det = comprasNode.ele('detalleCompras');
         det.ele('codSustento').txt('01');
         det.ele('tpIdProv').txt('01');
@@ -335,6 +346,12 @@ export default function ATSPage() {
         det.ele('secuencial').txt((numParts[2] ?? '000000001').padStart(9,'0'));
         det.ele('fechaEmision').txt(formatFecha(d.fechaEmision));
         det.ele('autorizacion').txt(d.claveAcceso ?? d.numero);
+        // Documento que esta NC/ND modifica (factura original)
+        det.ele('tipoDocModificado').txt('01');
+        det.ele('estabModificado').txt((modParts[0] ?? '001').padStart(3,'0'));
+        det.ele('ptoEmiModificado').txt((modParts[1] ?? '001').padStart(3,'0'));
+        det.ele('secModificado').txt((modParts[2] ?? '000000001').padStart(9,'0'));
+        det.ele('autModificado').txt(facturaOrigen?.claveAcceso ?? facturaOrigen?.numeroAutorizacion ?? '');
         det.ele('baseNoGraIva').txt('0.00');
         det.ele('baseImponible').txt('0.00');
         det.ele('baseImpGrav').txt(d.subtotal.toFixed(2));
@@ -391,7 +408,15 @@ export default function ATSPage() {
       a.download   = `ATS_${anio}_${mes.padStart(2,'0')}.xml`;
       a.click();
       URL.revokeObjectURL(url);
-      toast.success('XML ATS generado correctamente para DIMM');
+      toast.success('XML ATS generado — vuelve a validarlo en DIMM');
+      if (ncSinEnlazar > 0) {
+        toast.warning(
+          `${ncSinEnlazar} nota(s) de crédito/débito no se pudieron enlazar a su factura original, ` +
+          `así que van sin número de autorización del documento modificado (DIMM probablemente las marque ` +
+          `con error). Revísalas en Cuentas por Pagar → Documentos Recibidos.`,
+          { duration: 15000 }
+        );
+      }
     } catch (err: any) {
       toast.error(err.message ?? 'Error al generar XML');
     } finally {

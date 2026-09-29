@@ -346,12 +346,6 @@ export default function ATSPage() {
         det.ele('secuencial').txt((numParts[2] ?? '000000001').padStart(9,'0'));
         det.ele('fechaEmision').txt(formatFecha(d.fechaEmision));
         det.ele('autorizacion').txt(d.claveAcceso ?? d.numero);
-        // Documento que esta NC/ND modifica (factura original)
-        det.ele('tipoDocModificado').txt('01');
-        det.ele('estabModificado').txt((modParts[0] ?? '001').padStart(3,'0'));
-        det.ele('ptoEmiModificado').txt((modParts[1] ?? '001').padStart(3,'0'));
-        det.ele('secModificado').txt((modParts[2] ?? '000000001').padStart(9,'0'));
-        det.ele('autModificado').txt(facturaOrigen?.claveAcceso ?? facturaOrigen?.numeroAutorizacion ?? '');
         det.ele('baseNoGraIva').txt('0.00');
         det.ele('baseImponible').txt('0.00');
         det.ele('baseImpGrav').txt(d.subtotal.toFixed(2));
@@ -376,6 +370,15 @@ export default function ATSPage() {
         da.ele('baseImpAir').txt('0.00');
         da.ele('porcentajeAir').txt('0.00');
         da.ele('valRetAir').txt('0.00');
+        // Documento que esta NC/ND modifica (factura original) — según la
+        // ficha técnica del SRI (sección Compras) este bloque va después de
+        // los campos de retención/pago al exterior, no junto a la identidad
+        // propia de la NC/ND.
+        det.ele('docModificado').txt('01');
+        det.ele('estabModificado').txt((modParts[0] ?? '001').padStart(3,'0'));
+        det.ele('ptoEmiModificado').txt((modParts[1] ?? '001').padStart(3,'0'));
+        det.ele('secModificado').txt((modParts[2] ?? '000000001').padStart(9,'0'));
+        det.ele('autModificado').txt(facturaOrigen?.claveAcceso ?? facturaOrigen?.numeroAutorizacion ?? '');
       });
 
       // Total de ventas por establecimiento (bloque separado, no va dentro de detalleVentas)

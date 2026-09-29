@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useMemo, useRef } from 'react';
 import { format } from 'date-fns';
-import { FileX, Plus, Upload, FileSpreadsheet, CheckCircle2, XCircle } from 'lucide-react';
+import { FileX, Plus, Upload, FileSpreadsheet, CheckCircle2, XCircle, Pencil, Ban, RotateCcw } from 'lucide-react';
 import { toast } from 'sonner';
 
 import PageHeader  from '@/components/shared/PageHeader';
@@ -23,9 +23,12 @@ import {
 import { DocumentoRecibido, TipoDocRecibido } from '@/types';
 import { subscribeToDocsRecibidos, createDocRecibido, updateDocRecibido } from '@/lib/firebase/docs-recibidos';
 import { getOrCreateProveedorPorRuc } from '@/lib/firebase/proveedores';
-import { buscarFacturaPorNumero, aplicarAjusteDocRecibido, getFacturasProveedor } from '@/lib/firebase/facturas-proveedor';
 import {
-  crearAsientoNotaCreditoRecibida, crearAsientoNotaDebitoRecibida,
+  buscarFacturaPorNumero, aplicarAjusteDocRecibido, getFacturasProveedor, getFacturaProveedorById,
+  revertirAjusteDocRecibido,
+} from '@/lib/firebase/facturas-proveedor';
+import {
+  crearAsientoNotaCreditoRecibida, crearAsientoNotaDebitoRecibida, crearAsientoReversion,
 } from '@/lib/contabilidad/motor-asientos';
 import { useAuth } from '@/context/AuthContext';
 
@@ -205,6 +208,112 @@ export default function DocumentosRecibidosPage() {
       toast.error(e.message ?? 'Error al reintentar los enlaces');
     } finally {
       setReintentando(false);
+    }
+  };
+
+  // Dialog "Editar" — corrige datos básicos de un documento ya registrado
+  // (no toca el asiento ni el ajuste; si el monto cambia, avisa para que se
+  // anule y se vuelva a registrar en vez de dejar la contabilidad descuadrada).
+  const [editDoc,       setEditDoc]       = useState<DocumentoRecibido | null>(null);
+  const [editProveedor, setEditProveedor] = useState('');
+  const [editNumero,    setEditNumero]    = useState('');
+  const [editDocMod,    setEditDocMod]    = useState('');
+  const [editClave,     setEditClave]     = useState('');
+  const [editFecha,     setEditFecha]     = useState('');
+  const [savingEdit,    setSavingEdit]    = useState(false);
+
+  const abrirEditar = (d: DocumentoRecibido) => {
+    setEditDoc(d);
+    setEditProveedor(d.proveedorNombre);
+    setEditNumero(d.numero);
+    setEditDocMod(d.docModificado ?? '');
+    setEditClave(d.claveAcceso ?? '');
+    setEditFecha(format((d.fechaEmision as any)?.toDate?.() ?? new Date(d.fechaEmision), 'yyyy-MM-dd'));
+  };
+
+  const guardarEdicion = async () => {
+    if (!editDoc) return;
+    if (!editProveedor.trim() || !editNumero.trim() || !editFecha) {
+      toast.error('Completa proveedor, número y fecha'); return;
+    }
+    setSavingEdit(true);
+    try {
+      await updateDocRecibido(editDoc.id, {
+        proveedorNombre: editProveedor.trim(),
+        numero:          editNumero.trim(),
+        fechaEmision:    new Date(editFecha + 'T12:00:00'),
+        ...(editClave.trim()  ? { claveAcceso:   editClave.trim() }  : {}),
+        ...(editDocMod.trim() ? { docModificado: editDocMod.trim() } : {}),
+      });
+      toast.success('Documento actualizado');
+      setEditDoc(null);
+    } catch (e: any) {
+      toast.error(e.message ?? 'Error al guardar');
+    } finally {
+      setSavingEdit(false);
+    }
+  };
+
+  // Anular: reversa el asiento contable (sin borrarlo, como en el resto del
+  // sistema) y, si estaba enlazada a una factura, revierte el ajuste de
+  // saldo que le había aplicado — para que no quede nada descuadrado.
+  const [anulando, setAnulando] = useState<string | null>(null);
+
+  const handleAnular = async (d: DocumentoRecibido) => {
+    if (!user) return;
+    setAnulando(d.id);
+    try {
+      if (d.facturaProveedorId) {
+        const factura = await getFacturaProveedorById(d.facturaProveedorId);
+        const ajuste = factura?.ajustes?.find(a => a.docId === d.id && !a.anulado);
+        if (ajuste) await revertirAjusteDocRecibido(d.facturaProveedorId, ajuste.id);
+      }
+      const referenciaTipo = d.tipo === 'nota_credito' ? 'nota_credito_recibida' : 'nota_debito_recibida';
+      const rev = await crearAsientoReversion({
+        referenciaId: d.id, referenciaTipo, fecha: new Date(),
+        concepto: `Anulación ${TIPO_LABEL[d.tipo]} ${d.numero} - ${d.proveedorNombre}`,
+        usuarioId: user.uid, usuarioNombre: user.nombre ?? user.email ?? 'Usuario',
+      });
+      await updateDocRecibido(d.id, { anulado: true });
+      if (!rev.ok) {
+        toast.warning(`Documento anulado, pero el asiento no se pudo reversar automáticamente: ${rev.advertencia}. Revísalo en Libro Diario.`, { duration: 12000 });
+      } else {
+        toast.success('Documento anulado y asiento reversado');
+      }
+    } catch (e: any) {
+      toast.error(e.message ?? 'Error al anular');
+    } finally {
+      setAnulando(null);
+    }
+  };
+
+  const handleReactivar = async (d: DocumentoRecibido) => {
+    if (!user) return;
+    setAnulando(d.id);
+    try {
+      if (d.facturaProveedorId) {
+        await aplicarAjusteDocRecibido(d.facturaProveedorId, {
+          tipo: d.tipo, docId: d.id, numero: d.numero, monto: d.total,
+          fecha: (d.fechaEmision as any)?.toDate?.() ?? new Date(d.fechaEmision),
+          usuarioId: user.uid, usuarioNombre: user.nombre ?? user.email ?? 'Usuario',
+        });
+      }
+      const referenciaTipo = d.tipo === 'nota_credito' ? 'nota_credito_recibida' : 'nota_debito_recibida';
+      const rev = await crearAsientoReversion({
+        referenciaId: d.id, referenciaTipo: `${referenciaTipo}_anulacion`, fecha: new Date(),
+        concepto: `Reactivación ${TIPO_LABEL[d.tipo]} ${d.numero} - ${d.proveedorNombre}`,
+        usuarioId: user.uid, usuarioNombre: user.nombre ?? user.email ?? 'Usuario',
+      });
+      await updateDocRecibido(d.id, { anulado: false });
+      if (!rev.ok) {
+        toast.warning(`Documento reactivado, pero el asiento no se pudo restaurar automáticamente: ${rev.advertencia}. Revísalo en Libro Diario.`, { duration: 12000 });
+      } else {
+        toast.success('Documento reactivado');
+      }
+    } catch (e: any) {
+      toast.error(e.message ?? 'Error al reactivar');
+    } finally {
+      setAnulando(null);
     }
   };
 
@@ -449,14 +558,17 @@ export default function DocumentosRecibidosPage() {
                 </TableCell>
               </TableRow>
             ) : filtrados.map(d => (
-              <TableRow key={d.id}>
+              <TableRow key={d.id} className={d.anulado ? 'opacity-50' : ''}>
                 <TableCell>
                   <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${TIPO_COLOR[d.tipo] ?? ''}`}>
                     {TIPO_LABEL[d.tipo] ?? d.tipo}
                   </span>
+                  {d.anulado && (
+                    <span className="ml-1.5 inline-block text-[10px] px-1.5 py-0.5 rounded-full bg-red-50 text-red-700 align-middle">anulada</span>
+                  )}
                 </TableCell>
                 <TableCell>
-                  <p className="font-medium text-sm">{d.proveedorNombre}</p>
+                  <p className={`font-medium text-sm ${d.anulado ? 'line-through' : ''}`}>{d.proveedorNombre}</p>
                   <p className="text-xs text-slate-400">{d.proveedorRuc}</p>
                 </TableCell>
                 <TableCell className="font-mono text-xs">{d.numero}</TableCell>
@@ -473,14 +585,34 @@ export default function DocumentosRecibidosPage() {
                 </TableCell>
                 <TableCell className="text-right text-sm">{currency(d.subtotal)}</TableCell>
                 <TableCell className="text-right text-sm">{currency(d.iva)}</TableCell>
-                <TableCell className="text-right font-semibold">{currency(d.total)}</TableCell>
+                <TableCell className={`text-right font-semibold ${d.anulado ? 'line-through' : ''}`}>{currency(d.total)}</TableCell>
                 <TableCell>
-                  {d.docModificado && !d.facturaProveedorId && (
-                    <Button variant="outline" size="sm" className="h-7 text-xs"
-                      onClick={() => abrirVincularManual(d)}>
-                      {d.autorizacionModificado ? 'Editar autorización' : 'Vincular manual'}
-                    </Button>
-                  )}
+                  <div className="flex items-center justify-end gap-1">
+                    {!d.anulado && d.docModificado && !d.facturaProveedorId && (
+                      <Button variant="outline" size="sm" className="h-7 text-xs"
+                        onClick={() => abrirVincularManual(d)}>
+                        {d.autorizacionModificado ? 'Editar autorización' : 'Vincular manual'}
+                      </Button>
+                    )}
+                    {!d.anulado && (
+                      <>
+                        <Button variant="ghost" size="icon" className="h-7 w-7 text-slate-400 hover:text-blue-600"
+                          title="Editar datos" onClick={() => abrirEditar(d)}>
+                          <Pencil className="h-3.5 w-3.5" />
+                        </Button>
+                        <Button variant="ghost" size="icon" className="h-7 w-7 text-slate-400 hover:text-red-600"
+                          title="Anular" disabled={anulando === d.id} onClick={() => handleAnular(d)}>
+                          <Ban className="h-3.5 w-3.5" />
+                        </Button>
+                      </>
+                    )}
+                    {d.anulado && (
+                      <Button variant="ghost" size="icon" className="h-7 w-7 text-slate-400 hover:text-blue-600"
+                        title="Reactivar" disabled={anulando === d.id} onClick={() => handleReactivar(d)}>
+                        <RotateCcw className="h-3.5 w-3.5" />
+                      </Button>
+                    )}
+                  </div>
                 </TableCell>
               </TableRow>
             ))}
@@ -672,6 +804,57 @@ export default function DocumentosRecibidosPage() {
             <Button variant="outline" onClick={() => setVincularDoc(null)} disabled={savingVincular}>Cancelar</Button>
             <Button onClick={guardarVinculoManual} disabled={savingVincular}>
               {savingVincular ? 'Guardando…' : 'Guardar'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Dialog editar datos básicos */}
+      <Dialog open={!!editDoc} onOpenChange={(o) => !o && setEditDoc(null)}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Editar documento</DialogTitle>
+          </DialogHeader>
+          {editDoc && (
+            <div className="space-y-3">
+              <p className="text-xs text-amber-700 bg-amber-50 rounded-md px-3 py-2">
+                Esto corrige datos de identificación, no el monto ni la contabilización. Si el
+                subtotal/IVA está mal, anula el documento y regístralo de nuevo con el valor correcto.
+              </p>
+              <div>
+                <Label>Proveedor *</Label>
+                <Input value={editProveedor} onChange={e => setEditProveedor(e.target.value)} className="mt-1" />
+              </div>
+              <div>
+                <Label>Número *</Label>
+                <Input value={editNumero} onChange={e => setEditNumero(e.target.value)} className="mt-1 font-mono text-xs" />
+              </div>
+              <div>
+                <Label>Fecha de emisión *</Label>
+                <Input type="date" value={editFecha} max={new Date().toISOString().split('T')[0]}
+                  onChange={e => setEditFecha(e.target.value)} className="mt-1" />
+              </div>
+              <div>
+                <Label>Factura que modifica</Label>
+                <Input value={editDocMod} onChange={e => setEditDocMod(e.target.value)}
+                  placeholder="001-001-000000100 (opcional)" className="mt-1 font-mono text-xs" />
+                {editDoc.facturaProveedorId && (
+                  <p className="text-xs text-amber-600 mt-1">
+                    Ya está enlazada a una factura — cambiar este número no mueve el enlace ni el ajuste ya aplicado.
+                  </p>
+                )}
+              </div>
+              <div>
+                <Label>Clave de acceso</Label>
+                <Input value={editClave} onChange={e => setEditClave(e.target.value)}
+                  placeholder="49 dígitos (opcional)" className="mt-1 font-mono text-xs" />
+              </div>
+            </div>
+          )}
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setEditDoc(null)} disabled={savingEdit}>Cancelar</Button>
+            <Button onClick={guardarEdicion} disabled={savingEdit}>
+              {savingEdit ? 'Guardando…' : 'Guardar'}
             </Button>
           </DialogFooter>
         </DialogContent>

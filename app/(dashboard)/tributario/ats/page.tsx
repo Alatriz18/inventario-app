@@ -117,7 +117,7 @@ export default function ATSPage() {
   const ventasMes  = useMemo(() => filtrar(ventas.filter(v => v.estado !== 'anulada')), [ventas, anio, mes]);
   const comprasMes = useMemo(() => filtrar(compras.filter(f => f.estado !== 'anulada')), [compras, anio, mes]);
   const retencionesMes = useMemo(() => filtrar(retenciones), [retenciones, anio, mes]);
-  const docsRecibidosMes = useMemo(() => filtrar(docsRecibidos), [docsRecibidos, anio, mes]);
+  const docsRecibidosMes = useMemo(() => filtrar(docsRecibidos.filter(d => !d.anulado)), [docsRecibidos, anio, mes]);
   const totalRetenido  = useMemo(() => retencionesMes.reduce((s, r) => s + r.totalRetenido, 0), [retencionesMes]);
   const anuladosMes    = useMemo(
     () => filtrar(comprobantes.filter((c: Comprobante) => c.estado === 'anulado')),

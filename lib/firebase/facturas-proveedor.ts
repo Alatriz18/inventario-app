@@ -87,6 +87,12 @@ export async function getFacturasProveedor(): Promise<FacturaProveedor[]> {
   return snap.docs.map(d => ({ id: d.id, ...d.data() } as FacturaProveedor));
 }
 
+export async function getFacturaProveedorById(id: string): Promise<FacturaProveedor | null> {
+  const snap = await getDoc(doc(db, COL, id));
+  if (!snap.exists()) return null;
+  return { id: snap.id, ...snap.data() } as FacturaProveedor;
+}
+
 export async function createFacturaProveedor(
   data: Omit<FacturaProveedor, 'id'>
 ): Promise<string> {

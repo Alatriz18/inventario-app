@@ -446,6 +446,7 @@ export interface DocumentoRecibido {
   docModificado?:  string;      // número de la factura que modifica, tal como viene del XML/texto libre
   facturaProveedorId?: string;  // id real de facturas_proveedor, cuando se logró enlazar y aplicar el ajuste
   autorizacionModificado?: string; // clave de acceso/autorización de la factura original, cuando NO está registrada en el sistema (ATS la exige igual)
+  anulado?:        boolean;
   fechaEmision:    Date;
   subtotal:        number;
   iva:             number;

@@ -22,7 +22,7 @@ import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from '@/components/ui/select';
 
-import { RetencionRecibida, LineaRetencionRecibida } from '@/types';
+import { RetencionRecibida, LineaRetencionRecibida, Venta } from '@/types';
 import {
   subscribeToRetencionesRecibidas,
   createRetencionRecibida,
@@ -31,6 +31,7 @@ import {
 import { crearAsientoRetencionRecibida } from '@/lib/contabilidad/motor-asientos';
 import { parsearRetencionXML, detectarTipoComprobante } from '@/lib/sri/xmlParser';
 import { subscribeToComprobantes, Comprobante } from '@/lib/firebase/comprobantes';
+import { subscribeToVentas } from '@/lib/firebase/ventas';
 import { getCxCByVentaId, registrarCobroCxC, vincularAsientoCobro } from '@/lib/firebase/cuentas-cobrar';
 import { useAuth } from '@/context/AuthContext';
 
@@ -73,11 +74,20 @@ export default function RetencionesRecibidasPage() {
   const { user } = useAuth();
   const [retenciones, setRetenciones] = useState<RetencionRecibida[]>([]);
   const [comprobantesEmitidos, setComprobantesEmitidos] = useState<Comprobante[]>([]);
+  const [ventas,      setVentas]      = useState<Venta[]>([]);
   const [loading,     setLoading]     = useState(true);
   const [dialogOpen,  setDialogOpen]  = useState(false);
   const [saving,      setSaving]      = useState(false);
   const [importing,   setImporting]   = useState(false);
   const xmlRef = useRef<HTMLInputElement>(null);
+
+  // Dialog "Vincular venta" — para retenciones que quedaron con ventaId vacío
+  // (ej. una registrada a mano sin llenar la referencia, o una importada por
+  // XML cuyo comprobante emitido no se pudo emparejar automáticamente). Sin
+  // ventaId el ATS no puede sumarle las retenciones a esa venta.
+  const [vincularRet,   setVincularRet]   = useState<RetencionRecibida | null>(null);
+  const [ventaElegida,  setVentaElegida]  = useState('');
+  const [savingVincularVenta, setSavingVincularVenta] = useState(false);
 
   // Form state
   const [clienteNombre,        setClienteNombre]        = useState('');
@@ -91,8 +101,34 @@ export default function RetencionesRecibidasPage() {
   useEffect(() => {
     const u1 = subscribeToRetencionesRecibidas(d => { setRetenciones(d); setLoading(false); }, { limite: 500 });
     const u2 = subscribeToComprobantes(setComprobantesEmitidos, { limite: 1000 });
-    return () => { u1(); u2(); };
+    const u3 = subscribeToVentas(setVentas, { limite: 3000 });
+    return () => { u1(); u2(); u3(); };
   }, []);
+
+  const abrirVincularVenta = (r: RetencionRecibida) => {
+    setVincularRet(r);
+    setVentaElegida(r.ventaId || '');
+  };
+
+  const guardarVinculoVenta = async () => {
+    if (!vincularRet || !ventaElegida) { toast.error('Selecciona una venta'); return; }
+    setSavingVincularVenta(true);
+    try {
+      await updateRetencionRecibida(vincularRet.id, { ventaId: ventaElegida });
+      toast.success('Retención vinculada a la venta — ya se va a incluir en el próximo ATS que generes');
+      setVincularRet(null);
+    } catch (e: any) {
+      toast.error(e.message ?? 'Error al vincular');
+    } finally {
+      setSavingVincularVenta(false);
+    }
+  };
+
+  // Ventas candidatas para vincular: mismo cliente (por identificación), lo
+  // más reciente primero — normalmente son muy pocas para elegir a simple vista.
+  const ventasCandidatas = vincularRet
+    ? ventas.filter(v => v.clienteIdentificacion === vincularRet.clienteIdentificacion)
+    : [];
 
   // ── Importar XML(s) de comprobantes de retención que nos entregan los clientes ──
   const handleImportarXML = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -297,20 +333,21 @@ export default function RetencionesRecibidasPage() {
               <TableHead className="text-right">Ret. IVA</TableHead>
               <TableHead className="text-right">Total</TableHead>
               <TableHead className="text-center">Asiento</TableHead>
+              <TableHead>Venta (para ATS)</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
             {loading ? (
               Array.from({ length: 4 }).map((_, i) => (
                 <TableRow key={i}>
-                  {Array.from({ length: 8 }).map((_, j) => (
+                  {Array.from({ length: 9 }).map((_, j) => (
                     <TableCell key={j}><Skeleton className="h-5 w-full" /></TableCell>
                   ))}
                 </TableRow>
               ))
             ) : retenciones.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={8} className="text-center py-12 text-slate-400">
+                <TableCell colSpan={9} className="text-center py-12 text-slate-400">
                   <FileText className="h-8 w-8 mx-auto mb-2 opacity-30" />
                   <p className="text-sm">No hay retenciones recibidas registradas</p>
                 </TableCell>
@@ -335,6 +372,16 @@ export default function RetencionesRecibidasPage() {
                   {r.asientoId
                     ? <Badge variant="default" className="bg-green-100 text-green-700">Sí</Badge>
                     : <Badge variant="secondary">No</Badge>}
+                </TableCell>
+                <TableCell>
+                  {r.ventaId ? (
+                    <span className="text-xs px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700">vinculada</span>
+                  ) : (
+                    <Button variant="outline" size="sm" className="h-7 text-xs"
+                      onClick={() => abrirVincularVenta(r)}>
+                      Vincular venta
+                    </Button>
+                  )}
                 </TableCell>
               </TableRow>
             ))}
@@ -383,9 +430,29 @@ export default function RetencionesRecibidasPage() {
             </div>
 
             <div className="space-y-1.5">
-              <Label>Referencia de Venta (opcional)</Label>
-              <Input value={ventaRef} onChange={e => setVentaRef(e.target.value)}
-                placeholder="ID de la venta relacionada" />
+              <Label>Venta que paga esta retención</Label>
+              {(() => {
+                const candidatas = clienteIdentificacion
+                  ? ventas.filter(v => v.clienteIdentificacion === clienteIdentificacion) : [];
+                if (!clienteIdentificacion) {
+                  return <p className="text-xs text-slate-400">Ingresa el RUC/cédula del cliente para buscar sus ventas.</p>;
+                }
+                if (candidatas.length === 0) {
+                  return <p className="text-xs text-amber-600">No se encontró ninguna venta con esa identificación — la retención se puede registrar igual, pero no se podrá incluir en el ATS hasta vincularla ("Vincular venta" en la tabla).</p>;
+                }
+                return (
+                  <Select value={ventaRef} onValueChange={setVentaRef}>
+                    <SelectTrigger><SelectValue placeholder="Selecciona la venta (opcional)" /></SelectTrigger>
+                    <SelectContent>
+                      {candidatas.map(v => (
+                        <SelectItem key={v.id} value={v.id}>
+                          {format((v.fecha as any)?.toDate?.() ?? new Date(v.fecha), 'dd/MM/yyyy')} — {currency(v.total)}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                );
+              })()}
             </div>
 
             {/* Líneas de retención */}
@@ -479,6 +546,46 @@ export default function RetencionesRecibidasPage() {
             </Button>
             <Button onClick={handleSave} disabled={saving}>
               {saving ? 'Guardando...' : 'Registrar Retención'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Dialog vincular con la venta */}
+      <Dialog open={!!vincularRet} onOpenChange={(o) => !o && setVincularRet(null)}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Vincular con la venta</DialogTitle>
+          </DialogHeader>
+          {vincularRet && (
+            <div className="space-y-3">
+              <p className="text-sm text-slate-600">
+                Sin la venta vinculada, el ATS no puede sumarle esta retención al comprobante que
+                corresponde. Elegí la venta de <strong>{vincularRet.clienteNombre}</strong> que esta
+                retención está pagando.
+              </p>
+              {ventasCandidatas.length === 0 ? (
+                <p className="text-sm text-amber-600">
+                  No se encontró ninguna venta registrada con la identificación {vincularRet.clienteIdentificacion}.
+                </p>
+              ) : (
+                <Select value={ventaElegida} onValueChange={setVentaElegida}>
+                  <SelectTrigger><SelectValue placeholder="Selecciona la venta" /></SelectTrigger>
+                  <SelectContent>
+                    {ventasCandidatas.map(v => (
+                      <SelectItem key={v.id} value={v.id}>
+                        {format((v.fecha as any)?.toDate?.() ?? new Date(v.fecha), 'dd/MM/yyyy')} — {currency(v.total)}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              )}
+            </div>
+          )}
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setVincularRet(null)} disabled={savingVincularVenta}>Cancelar</Button>
+            <Button onClick={guardarVinculoVenta} disabled={savingVincularVenta || ventasCandidatas.length === 0}>
+              {savingVincularVenta ? 'Guardando…' : 'Guardar'}
             </Button>
           </DialogFooter>
         </DialogContent>

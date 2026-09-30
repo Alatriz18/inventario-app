@@ -60,6 +60,7 @@ import {
   parsearNotaCreditoXML, parsearNotaDebitoXML, parsearRetencionXML,
 } from '@/lib/sri/xmlParser';
 import { descargarZip } from '@/lib/utils/zip';
+import { leerTextoDetectandoCodificacion } from '@/lib/utils/leer-texto';
 import {
   BancoPago, PagoBancario, BANCOS_PAGO, descargarTxtPagos,
 } from '@/lib/bancos/pagos-txt';
@@ -655,12 +656,11 @@ export default function FacturasProveedorPage() {
   };
 
   // ── Importar el reporte "Comprobantes Recibidos" (TXT) descargado del SRI ──
-  const handleTxtUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleTxtUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
-    const reader = new FileReader();
-    reader.onload = (ev) => {
-      const texto = ev.target?.result as string;
+    try {
+      const texto = await leerTextoDetectandoCodificacion(file);
       const clavesExistentes = new Set(facturas.map(f => f.claveAcceso).filter(Boolean) as string[]);
       const rucsExistentes   = new Set(proveedores.map(p => p.ruc));
       const filas = parseRecibidosTxt(texto, clavesExistentes, rucsExistentes);
@@ -670,9 +670,9 @@ export default function FacturasProveedorPage() {
       }
       setTxtFilas(filas);
       setTxtDialogOpen(true);
-    };
-    reader.readAsText(file);
-    if (txtRef.current) txtRef.current.value = '';
+    } finally {
+      if (txtRef.current) txtRef.current.value = '';
+    }
   };
 
   const confirmarImportTxt = async () => {

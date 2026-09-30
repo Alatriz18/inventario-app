@@ -31,6 +31,7 @@ import {
   crearAsientoNotaCreditoRecibida, crearAsientoNotaDebitoRecibida, crearAsientoReversion,
 } from '@/lib/contabilidad/motor-asientos';
 import { useAuth } from '@/context/AuthContext';
+import { leerTextoDetectandoCodificacion } from '@/lib/utils/leer-texto';
 
 const currency = (v: number) => `$${(v ?? 0).toFixed(2)}`;
 const TIPO_LABEL: Record<string, string> = { nota_credito: 'Nota de crédito', nota_debito: 'Nota de débito' };
@@ -415,27 +416,24 @@ export default function DocumentosRecibidosPage() {
     }
   };
 
-  const handleTxtUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleTxtUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
-    const reader = new FileReader();
-    reader.onload = (ev) => {
-      try {
-        const texto = String(ev.target?.result ?? '');
-        const parsed = parseDocsRecibidosTxt(texto);
-        if (parsed.length === 0) {
-          toast.error('No se encontraron notas de crédito/débito en este TXT (o no coincide el formato del SRI)');
-          return;
-        }
-        setTxtFilas(parsed);
-        setTxtResultado(null);
-        setTxtDialogOpen(true);
-      } catch {
-        toast.error('No se pudo leer el archivo TXT.');
+    try {
+      const texto = await leerTextoDetectandoCodificacion(file);
+      const parsed = parseDocsRecibidosTxt(texto);
+      if (parsed.length === 0) {
+        toast.error('No se encontraron notas de crédito/débito en este TXT (o no coincide el formato del SRI)');
+        return;
       }
-    };
-    reader.readAsText(file, 'utf-8');
-    if (txtRef.current) txtRef.current.value = '';
+      setTxtFilas(parsed);
+      setTxtResultado(null);
+      setTxtDialogOpen(true);
+    } catch {
+      toast.error('No se pudo leer el archivo TXT.');
+    } finally {
+      if (txtRef.current) txtRef.current.value = '';
+    }
   };
 
   const txtValidas = txtFilas.filter(f => !f.error);

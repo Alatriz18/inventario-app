@@ -75,6 +75,26 @@ export default function BalanceComprobacionPage() {
   );
   const cuadra = Math.abs(totales.debe - totales.haber) < 0.01;
 
+  // Cada asiento tiene que cuadrar debe=haber por sí solo (partida doble). Si
+  // el total general no cuadra pero ya no es ruido de redondeo, el problema
+  // real está en algún asiento puntual — se listan los que no cuadran para
+  // encontrarlo directo en vez de adivinar.
+  const asientosDescuadrados = useMemo(() => {
+    const from = new Date(dateFrom + 'T00:00:00');
+    const to   = new Date(dateTo   + 'T23:59:59');
+    return asientos
+      .filter(a => {
+        const f = (a.fecha as any)?.toDate?.() ?? new Date(a.fecha);
+        return f >= from && f <= to;
+      })
+      .map(a => {
+        const debe  = round2(a.lineas.reduce((s, l) => s + (l.debe ?? 0), 0));
+        const haber = round2(a.lineas.reduce((s, l) => s + (l.haber ?? 0), 0));
+        return { asiento: a, debe, haber, diferencia: round2(debe - haber) };
+      })
+      .filter(r => Math.abs(r.diferencia) >= 0.01);
+  }, [asientos, dateFrom, dateTo]);
+
   const exportar = () => {
     const rows = balance.map(r => ({
       Código:  r.cuenta.codigo,
@@ -118,6 +138,28 @@ export default function BalanceComprobacionPage() {
           </Badge>
         )}
       </div>
+
+      {asientosDescuadrados.length > 0 && (
+        <div className="bg-red-50 border border-red-200 rounded-xl p-4 mb-4">
+          <p className="text-sm font-semibold text-red-700 mb-2">
+            {asientosDescuadrados.length} asiento(s) con Debe ≠ Haber dentro de sí mismos — acá está el descuadre real:
+          </p>
+          <div className="space-y-1.5">
+            {asientosDescuadrados.map(r => (
+              <div key={r.asiento.id} className="text-xs flex flex-wrap items-center gap-2 bg-white rounded-md px-3 py-2 border border-red-100">
+                <span className="font-mono text-slate-400">{r.asiento.numero}</span>
+                <span className="text-slate-600">
+                  {format((r.asiento.fecha as any)?.toDate?.() ?? new Date(r.asiento.fecha), 'dd/MM/yyyy')}
+                </span>
+                <span className="text-slate-700 flex-1 min-w-[150px]">{r.asiento.concepto}</span>
+                <span className="text-slate-500">Debe: ${r.debe.toFixed(2)}</span>
+                <span className="text-slate-500">Haber: ${r.haber.toFixed(2)}</span>
+                <span className="font-semibold text-red-600">Dif: ${r.diferencia.toFixed(2)}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       <div className="bg-white rounded-xl border overflow-hidden">
         <div className="overflow-x-auto">

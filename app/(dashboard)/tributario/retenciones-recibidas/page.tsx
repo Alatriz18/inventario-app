@@ -149,12 +149,18 @@ export default function RetencionesRecibidasPage() {
         const numeroRet = `${d.estab}-${d.ptoEmi}-${d.secuencial}`;
 
         let ventaId = '', numeroComprobante = '';
-        if (d.numDocSustento && d.numDocSustento.length === 15) {
+        // El XML de la retención trae la autorización/clave de acceso de la
+        // factura que sustenta (numAutDocSustento) — es un match exacto y
+        // confiable, a diferencia de armar la serie a partir del número.
+        let comp = d.numAutDocSustento
+          ? comprobantesEmitidos.find(c => c.claveAcceso === d.numAutDocSustento || c.numeroAutorizacion === d.numAutDocSustento)
+          : undefined;
+        if (!comp && d.numDocSustento && d.numDocSustento.length === 15) {
           const serieBuscada = `${d.numDocSustento.slice(0, 3)}-${d.numDocSustento.slice(3, 6)}`;
           const secBuscado   = d.numDocSustento.slice(6);
-          const comp = comprobantesEmitidos.find(c => c.serie === serieBuscada && c.secuencial === secBuscado);
-          if (comp) { ventaId = comp.ventaId ?? ''; numeroComprobante = `${comp.serie}-${comp.secuencial}`; }
+          comp = comprobantesEmitidos.find(c => c.serie === serieBuscada && c.secuencial === secBuscado);
         }
+        if (comp) { ventaId = comp.ventaId ?? ''; numeroComprobante = `${comp.serie}-${comp.secuencial}`; }
 
         const retId = await createRetencionRecibida({
           ventaId, numeroComprobante,

@@ -16,6 +16,10 @@ import { subscribeToAsientos } from '@/lib/firebase/asientos';
 import { subscribeToCuentas }  from '@/lib/firebase/plan-cuentas';
 
 function currency(v: number) { return v < 0 ? `($${Math.abs(v).toFixed(2)})` : `$${v.toFixed(2)}`; }
+// Redondea a centavos en cada paso de la suma — sumar miles de decimales en
+// JS sin esto acumula unos pocos centavos de error de punto flotante, que
+// terminaban mostrando "No cuadra" por una diferencia que no es contable.
+function round2(v: number) { return Math.round((v + Number.EPSILON) * 100) / 100; }
 
 export default function BalanceGeneralPage() {
   const [asientos, setAsientos] = useState<AsientoContable[]>([]);
@@ -43,9 +47,9 @@ export default function BalanceGeneralPage() {
           const cuenta = cuentas.find(c => c.codigo === l.cuentaCodigo);
           if (!cuenta || !cuenta.aceptaMovimientos) return;
           const prev   = mapa.get(cuenta.codigo) ?? { cuenta, saldo: 0 };
-          const saldo  = cuenta.naturaleza === 'deudora'
+          const saldo  = round2(cuenta.naturaleza === 'deudora'
             ? prev.saldo + l.debe - l.haber
-            : prev.saldo + l.haber - l.debe;
+            : prev.saldo + l.haber - l.debe);
           mapa.set(cuenta.codigo, { cuenta, saldo });
         });
       });
@@ -61,10 +65,10 @@ export default function BalanceGeneralPage() {
     // cerrado formalmente) aparece como una línea más de Patrimonio — si no,
     // Activo queda descuadrado contra Pasivo + Patrimonio por exactamente esa
     // utilidad/pérdida, que es justo lo que se estaba viendo.
-    const totalIngresos = items.filter(r => r.cuenta.tipo === 'ingreso').reduce((s, r) => s + r.saldo, 0);
-    const totalCostos   = items.filter(r => r.cuenta.tipo === 'costo').reduce((s, r) => s + r.saldo, 0);
-    const totalGastos   = items.filter(r => r.cuenta.tipo === 'gasto').reduce((s, r) => s + r.saldo, 0);
-    const resultadoEjercicio = totalIngresos - totalCostos - totalGastos;
+    const totalIngresos = round2(items.filter(r => r.cuenta.tipo === 'ingreso').reduce((s, r) => s + r.saldo, 0));
+    const totalCostos   = round2(items.filter(r => r.cuenta.tipo === 'costo').reduce((s, r) => s + r.saldo, 0));
+    const totalGastos   = round2(items.filter(r => r.cuenta.tipo === 'gasto').reduce((s, r) => s + r.saldo, 0));
+    const resultadoEjercicio = round2(totalIngresos - totalCostos - totalGastos);
 
     if (Math.abs(resultadoEjercicio) >= 0.01) {
       patrimonio.push({
@@ -76,9 +80,9 @@ export default function BalanceGeneralPage() {
       });
     }
 
-    const totalActivo    = activos.reduce((s, r) => s + r.saldo, 0);
-    const totalPasivo    = pasivos.reduce((s, r) => s + r.saldo, 0);
-    const totalPatrimonio= patrimonio.reduce((s, r) => s + r.saldo, 0);
+    const totalActivo    = round2(activos.reduce((s, r) => s + r.saldo, 0));
+    const totalPasivo    = round2(pasivos.reduce((s, r) => s + r.saldo, 0));
+    const totalPatrimonio= round2(patrimonio.reduce((s, r) => s + r.saldo, 0));
 
     return { activos, pasivos, patrimonio, totalActivo, totalPasivo, totalPatrimonio };
   }, [asientos, cuentas, dateTo]);

@@ -17,6 +17,10 @@ import { subscribeToAsientos } from '@/lib/firebase/asientos';
 import { subscribeToCuentas }  from '@/lib/firebase/plan-cuentas';
 
 function currency(v: number) { return `$${Math.abs(v).toFixed(2)}`; }
+// Redondea a centavos en cada paso de la suma — evita que sumar miles de
+// decimales en JS acumule unos pocos centavos de diferencia frente a
+// Balance General (que calcula el mismo resultado del ejercicio).
+function round2(v: number) { return Math.round((v + Number.EPSILON) * 100) / 100; }
 
 export default function EstadoResultadosPage() {
   const [asientos, setAsientos] = useState<AsientoContable[]>([]);
@@ -50,9 +54,9 @@ export default function EstadoResultadosPage() {
           if (!cuenta || !cuenta.aceptaMovimientos) return;
           if (!['ingreso','costo','gasto'].includes(cuenta.tipo)) return;
           const prev  = mapa.get(cuenta.codigo) ?? { cuenta, saldo: 0 };
-          const saldo = cuenta.naturaleza === 'deudora'
+          const saldo = round2(cuenta.naturaleza === 'deudora'
             ? prev.saldo + l.debe - l.haber
-            : prev.saldo + l.haber - l.debe;
+            : prev.saldo + l.haber - l.debe);
           mapa.set(cuenta.codigo, { cuenta, saldo });
         });
       });
@@ -62,11 +66,11 @@ export default function EstadoResultadosPage() {
     const costos   = items.filter(r => r.cuenta.tipo === 'costo').sort((a,b) => a.cuenta.codigo.localeCompare(b.cuenta.codigo));
     const gastos   = items.filter(r => r.cuenta.tipo === 'gasto').sort((a,b) => a.cuenta.codigo.localeCompare(b.cuenta.codigo));
 
-    const totalIngresos = ingresos.reduce((s, r) => s + r.saldo, 0);
-    const totalCostos   = costos.reduce((s, r) => s + r.saldo, 0);
-    const totalGastos   = gastos.reduce((s, r) => s + r.saldo, 0);
-    const utilidadBruta = totalIngresos - totalCostos;
-    const utilidadNeta  = utilidadBruta - totalGastos;
+    const totalIngresos = round2(ingresos.reduce((s, r) => s + r.saldo, 0));
+    const totalCostos   = round2(costos.reduce((s, r) => s + r.saldo, 0));
+    const totalGastos   = round2(gastos.reduce((s, r) => s + r.saldo, 0));
+    const utilidadBruta = round2(totalIngresos - totalCostos);
+    const utilidadNeta  = round2(utilidadBruta - totalGastos);
 
     return { ingresos, costos, gastos, totalIngresos, totalCostos, totalGastos, utilidadBruta, utilidadNeta };
   }, [asientos, cuentas, dateFrom, dateTo]);

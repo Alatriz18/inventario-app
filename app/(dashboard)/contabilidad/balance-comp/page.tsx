@@ -19,6 +19,10 @@ import { subscribeToAsientos } from '@/lib/firebase/asientos';
 import { subscribeToCuentas }  from '@/lib/firebase/plan-cuentas';
 
 function currency(v: number) { return v !== 0 ? `$${Math.abs(v).toFixed(2)}` : '—'; }
+// Redondea a centavos en cada paso de la suma — sumar miles de decimales en
+// JS sin esto acumula unos pocos centavos de error de punto flotante, que
+// terminaban mostrando "No cuadra" por una diferencia que no es contable.
+function round2(v: number) { return Math.round((v + Number.EPSILON) * 100) / 100; }
 
 export default function BalanceComprobacionPage() {
   const [asientos, setAsientos] = useState<AsientoContable[]>([]);
@@ -54,8 +58,8 @@ export default function BalanceComprobacionPage() {
           const prev = mapa.get(cuenta.codigo) ?? { cuenta, debe: 0, haber: 0 };
           mapa.set(cuenta.codigo, {
             cuenta,
-            debe:  prev.debe  + l.debe,
-            haber: prev.haber + l.haber,
+            debe:  round2(prev.debe  + l.debe),
+            haber: round2(prev.haber + l.haber),
           });
         });
       });
@@ -66,7 +70,7 @@ export default function BalanceComprobacionPage() {
   }, [asientos, cuentas, dateFrom, dateTo]);
 
   const totales = balance.reduce(
-    (t, r) => ({ debe: t.debe + r.debe, haber: t.haber + r.haber }),
+    (t, r) => ({ debe: round2(t.debe + r.debe), haber: round2(t.haber + r.haber) }),
     { debe: 0, haber: 0 }
   );
   const cuadra = Math.abs(totales.debe - totales.haber) < 0.01;

@@ -279,6 +279,10 @@ export default function RetencionesRecibidasPage() {
       const retFuente  = lineasCalc.filter(l => l.tipo === 'fuente_ir').reduce((s, l) => s + l.valorRetenido, 0);
       const retIVA     = lineasCalc.filter(l => l.tipo === 'iva').reduce((s, l) => s + l.valorRetenido, 0);
       const total      = parseFloat((retFuente + retIVA).toFixed(2));
+      // new Date('2026-02-04') (input type=date da "yyyy-MM-dd") parsea como
+      // medianoche UTC — en Ecuador eso cae un día antes en hora local.
+      const [fy, fm, fd] = fechaEmision.split('-').map(Number);
+      const fechaSegura = new Date(fy, fm - 1, fd, 12);
 
       // Require obligadoContabilidad setting — always create asiento
       const id = await createRetencionRecibida({
@@ -288,7 +292,7 @@ export default function RetencionesRecibidasPage() {
         clienteNombre,
         clienteIdentificacion,
         numeroRetencion,
-        fechaEmision:         new Date(fechaEmision),
+        fechaEmision:         fechaSegura,
         ejercicioFiscal,
         lineas:               lineasCalc,
         totalRetenido:        total,
@@ -300,7 +304,7 @@ export default function RetencionesRecibidasPage() {
 
       const asientoId = await crearAsientoRetencionRecibida({
         retencionId:   id,
-        fecha:         new Date(fechaEmision),
+        fecha:         fechaSegura,
         clienteNombre,
         retFuente,
         retIVA,

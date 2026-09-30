@@ -49,7 +49,7 @@ import {
 } from '@/lib/firebase/facturas-proveedor';
 import { editarAsiento, escalarLineasAsiento, getAsientos } from '@/lib/firebase/asientos';
 import { subscribeToCuentasBancarias, registrarMovimientoBancario, conciliarMovimiento } from '@/lib/firebase/cuentas-bancarias';
-import { createDocRecibido, updateDocRecibido } from '@/lib/firebase/docs-recibidos';
+import { createDocRecibido, updateDocRecibido, getDocsRecibidos } from '@/lib/firebase/docs-recibidos';
 import { createRetencionRecibida } from '@/lib/firebase/retenciones-recibidas';
 import { subscribeToProveedores, getOrCreateProveedorPorRuc } from '@/lib/firebase/proveedores';
 import { subscribeToComprobantes, Comprobante } from '@/lib/firebase/comprobantes';
@@ -209,6 +209,17 @@ export default function FacturasProveedorPage() {
   const [progresoReparar, setProgresoReparar] = useState(0);
   const [resumenReparar, setResumenReparar] = useState<{ faltantes: number } | null>(null);
   const [cargandoResumenReparar, setCargandoResumenReparar] = useState(false);
+
+  // Diálogo "Corregir fechas desfasadas" — new Date(`${yyyy}-${MM}-${dd}`)
+  // (ya corregido en el código) parseaba como medianoche UTC; en Ecuador
+  // (UTC-5) eso corría cada fecha importada un día hacia atrás. Este
+  // reparador recalcula la fecha real desde el XML original guardado
+  // (xmlRaw) y corrige lo que ya se importó con la fecha corrida.
+  const [dlgFechas,    setDlgFechas]    = useState(false);
+  const [corrigiendoFechas, setCorrigiendoFechas] = useState(false);
+  const [progresoFechas, setProgresoFechas] = useState(0);
+  const [resumenFechas, setResumenFechas] = useState<{ desfasadas: number } | null>(null);
+  const [cargandoResumenFechas, setCargandoResumenFechas] = useState(false);
 
   // Importación TXT "Comprobantes Recibidos" del SRI
   const [txtDialogOpen, setTxtDialogOpen] = useState(false);
@@ -444,7 +455,12 @@ export default function FacturasProveedorPage() {
    */
   const parseFecha = (s: string): Date => {
     const [dd, MM, yyyy] = (s || '').split('/');
-    return yyyy ? new Date(`${yyyy}-${MM}-${dd}`) : new Date();
+    // OJO: new Date(`${yyyy}-${MM}-${dd}`) parsea como medianoche UTC — en
+    // Ecuador (UTC-5) eso cae en el día anterior al leerlo con getMonth/
+    // getDate/format (todos en hora local), corriendo documentos del día 1
+    // de un mes hacia el último día del mes anterior. Se usa el constructor
+    // (año, mes, día, hora) que siempre es en hora local.
+    return yyyy ? new Date(Number(yyyy), Number(MM) - 1, Number(dd), 12) : new Date();
   };
 
   const procesarXmlRecibido = async (
@@ -773,6 +789,85 @@ export default function FacturasProveedorPage() {
       toast.error(e.message ?? 'Error al reparar los asientos');
     } finally {
       setReparando(false);
+    }
+  };
+
+  // Recalcula la fecha real desde el XML original (xmlRaw) de cada factura
+  // y documento recibido (NC/ND), y corrige la guardada si quedó un día
+  // atrás por el bug de zona horaria. Solo toca registros que sí tienen su
+  // XML guardado — no adivina fechas de nada más.
+  const buscarFechasDesfasadas = async () => {
+    const [todasFacturas, todosDocs] = await Promise.all([getFacturasProveedor(), getDocsRecibidos()]);
+    const cambios: Array<{ tipo: 'factura' | 'doc'; id: string; fechaCorrecta: Date }> = [];
+
+    for (const f of todasFacturas) {
+      if (!f.xmlRaw) continue;
+      try {
+        const data = parsearFacturaXML(f.xmlRaw);
+        if (!data?.infoFactura?.fechaEmision) continue;
+        const correcta = parseFecha(data.infoFactura.fechaEmision);
+        const actual = (f.fechaEmision as any)?.toDate?.() ?? new Date(f.fechaEmision);
+        if (Math.abs(correcta.getTime() - actual.getTime()) > 60_000) {
+          cambios.push({ tipo: 'factura', id: f.id, fechaCorrecta: correcta });
+        }
+      } catch { /* xml no parseable, se omite */ }
+    }
+
+    for (const d of todosDocs) {
+      if (!d.xmlRaw) continue;
+      try {
+        const parser = d.tipo === 'nota_debito' ? parsearNotaDebitoXML : parsearNotaCreditoXML;
+        const data = parser(d.xmlRaw);
+        if (!data?.fechaEmision) continue;
+        const correcta = parseFecha(data.fechaEmision);
+        const actual = (d.fechaEmision as any)?.toDate?.() ?? new Date(d.fechaEmision);
+        if (Math.abs(correcta.getTime() - actual.getTime()) > 60_000) {
+          cambios.push({ tipo: 'doc', id: d.id, fechaCorrecta: correcta });
+        }
+      } catch { /* xml no parseable, se omite */ }
+    }
+    return cambios;
+  };
+
+  const handleAbrirCorregirFechas = async () => {
+    setDlgFechas(true);
+    setResumenFechas(null);
+    setCargandoResumenFechas(true);
+    try {
+      const cambios = await buscarFechasDesfasadas();
+      setResumenFechas({ desfasadas: cambios.length });
+    } catch {
+      setResumenFechas(null);
+    } finally {
+      setCargandoResumenFechas(false);
+    }
+  };
+
+  const handleCorregirFechas = async () => {
+    setCorrigiendoFechas(true);
+    setProgresoFechas(0);
+    let ok = 0, err = 0;
+    try {
+      const cambios = await buscarFechasDesfasadas();
+      for (let i = 0; i < cambios.length; i++) {
+        const c = cambios[i];
+        try {
+          if (c.tipo === 'factura') await updateFacturaProveedor(c.id, { fechaEmision: c.fechaCorrecta });
+          else await updateDocRecibido(c.id, { fechaEmision: c.fechaCorrecta });
+          ok++;
+        } catch { err++; }
+        setProgresoFechas(i + 1);
+      }
+      if (cambios.length === 0) {
+        toast.info('No se encontró ninguna fecha desfasada — ya está todo correcto.');
+      } else {
+        toast.success(`${ok} fecha(s) corregidas` + (err ? ` — ${err} con error` : ''), { duration: 10000 });
+      }
+      setDlgFechas(false);
+    } catch (e: any) {
+      toast.error(e.message ?? 'Error al corregir las fechas');
+    } finally {
+      setCorrigiendoFechas(false);
     }
   };
 
@@ -1111,6 +1206,10 @@ export default function FacturasProveedorPage() {
             </Button>
             <Button variant="outline" onClick={handleAbrirReparar} title="Busca facturas registradas que quedaron sin su asiento contable y los genera">
               <FileCheck className="mr-2 h-4 w-4" /> Reparar asientos faltantes
+            </Button>
+            <Button variant="outline" onClick={handleAbrirCorregirFechas}
+              title="Recalcula la fecha real desde el XML guardado y corrige las que quedaron un día atrás por husos horarios">
+              <FileCheck className="mr-2 h-4 w-4" /> Corregir fechas desfasadas
             </Button>
             <Button variant="outline" onClick={abrirPagoBanco}>
               <Banknote className="mr-2 h-4 w-4" /> Pago bancario (TXT)
@@ -1919,6 +2018,42 @@ export default function FacturasProveedorPage() {
             <Button variant="outline" onClick={() => setDlgReparar(false)} disabled={reparando}>Cancelar</Button>
             <Button onClick={handleReparar} disabled={reparando}>
               {reparando ? 'Reparando…' : 'Buscar y generar asientos'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Dialog corregir fechas desfasadas por huso horario */}
+      <Dialog open={dlgFechas} onOpenChange={(o) => !corrigiendoFechas && setDlgFechas(o)}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Corregir fechas desfasadas</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3">
+            <p className="text-sm text-slate-600">
+              Un bug ya corregido guardaba la fecha de emisión un día antes de la real en las
+              facturas y NC/ND importadas por XML (por cómo se interpretaba la zona horaria).
+              Esto recalcula la fecha real desde el XML original guardado de cada documento y
+              corrige la que haya quedado mal — no toca nada que no tenga su XML guardado.
+            </p>
+            {cargandoResumenFechas && (
+              <p className="text-sm text-slate-500">Revisando documentos…</p>
+            )}
+            {!cargandoResumenFechas && resumenFechas && !corrigiendoFechas && (
+              <p className="text-sm font-medium">
+                {resumenFechas.desfasadas === 0
+                  ? 'No se encontró ninguna fecha desfasada — ya está todo correcto.'
+                  : `Se encontraron ${resumenFechas.desfasadas} documento(s) con fecha desfasada.`}
+              </p>
+            )}
+            {corrigiendoFechas && (
+              <p className="text-sm text-slate-500">Corrigiendo fechas… {progresoFechas}</p>
+            )}
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setDlgFechas(false)} disabled={corrigiendoFechas}>Cancelar</Button>
+            <Button onClick={handleCorregirFechas} disabled={corrigiendoFechas}>
+              {corrigiendoFechas ? 'Corrigiendo…' : 'Buscar y corregir fechas'}
             </Button>
           </DialogFooter>
         </DialogContent>

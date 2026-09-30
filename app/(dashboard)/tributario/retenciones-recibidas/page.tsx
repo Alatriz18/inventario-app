@@ -38,7 +38,9 @@ const currency = (v: number) => `$${v.toFixed(2)}`;
 
 function parseFechaXml(s: string): Date {
   const [dd, MM, yyyy] = (s || '').split('/');
-  return yyyy ? new Date(`${yyyy}-${MM}-${dd}`) : new Date();
+  // new Date(`${yyyy}-${MM}-${dd}`) parsea como medianoche UTC — en Ecuador
+  // (UTC-5) eso corre el documento al día anterior al leerlo en hora local.
+  return yyyy ? new Date(Number(yyyy), Number(MM) - 1, Number(dd), 12) : new Date();
 }
 
 const CODIGOS_FUENTE = [

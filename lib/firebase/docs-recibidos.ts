@@ -22,6 +22,12 @@ export function subscribeToDocsRecibidos(
   });
 }
 
+/** Lectura puntual de TODOS los documentos — para reparaciones/auditorías masivas, no para pantallas. */
+export async function getDocsRecibidos(): Promise<DocumentoRecibido[]> {
+  const snap = await getDocs(collection(db, COL));
+  return snap.docs.map(d => ({ id: d.id, ...d.data() } as DocumentoRecibido));
+}
+
 export async function existeDocRecibido(claveAcceso?: string): Promise<boolean> {
   if (!claveAcceso) return false;
   const s = await getDocs(query(collection(db, COL), where('claveAcceso', '==', claveAcceso)));

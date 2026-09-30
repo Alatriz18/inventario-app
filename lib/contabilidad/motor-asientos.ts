@@ -66,6 +66,8 @@ export function invalidarCacheConfigContable(): void {
 
 // ── Helper para construir una línea ──────────────────────────────────────
 
+function round2(v: number): number { return Math.round((v + Number.EPSILON) * 100) / 100; }
+
 function buildLinea(
   cuentas:     CuentaContable[],
   codigo:      string,
@@ -124,9 +126,15 @@ function buildLineasVenta(
   const cuentaVentas = p.tieneIVA ? config.cuentaVentas12 : config.cuentaVentas0;
   lineas.push(buildLinea(cuentas, cuentaVentas, 0, p.subtotal, 'Ingresos por ventas'));
 
-  // CR: IVA Ventas
-  if (p.tieneIVA && p.iva > 0) {
-    lineas.push(buildLinea(cuentas, config.cuentaIVAVentas, 0, p.iva, 'IVA cobrado 15%'));
+  // CR: IVA Ventas — el total de la venta es el dato real (lo que efectivamente
+  // se cobró); si por redondeo subtotal+iva no da exacto el total, se absorbe
+  // la diferencia en el IVA (nunca en el subtotal, que es la base declarada)
+  // para que el asiento cuadre exacto en vez de quedar a un centavo de Debe≠Haber.
+  if (p.tieneIVA) {
+    const ivaAjustado = round2(p.total - p.subtotal);
+    if (ivaAjustado > 0) {
+      lineas.push(buildLinea(cuentas, config.cuentaIVAVentas, 0, ivaAjustado, 'IVA cobrado 15%'));
+    }
   }
 
   // DB: Costo de ventas / CR: Inventario
@@ -215,9 +223,14 @@ function buildLineasCompra(
   const lineas: AsientoLinea[] = [];
   lineas.push(buildLinea(cuentas, config.cuentaInventario,
     p.subtotal, 0, 'Compra de mercaderías'));
-  if (p.iva > 0) {
+  // El total de la factura (lo que realmente se le debe al proveedor) es el
+  // dato real; si el SRI redondeó cada línea y subtotal+iva no da exacto el
+  // total, se absorbe la diferencia en el IVA (no en el subtotal) para que
+  // el asiento cuadre exacto en vez de quedar a un centavo de Debe≠Haber.
+  const ivaAjustado = round2(p.total - p.subtotal);
+  if (ivaAjustado > 0) {
     lineas.push(buildLinea(cuentas, config.cuentaIVACompras,
-      p.iva, 0, 'IVA en compras 15%'));
+      ivaAjustado, 0, 'IVA en compras 15%'));
   }
   lineas.push(buildLinea(cuentas, config.cuentaCxPProveedores,
     0, p.total, `CxP ${p.proveedorNombre}`));
@@ -718,9 +731,11 @@ export async function crearAsientoNotaCreditoRecibida(p: ParamsDocRecibido): Pro
     // CR: Inventario (reversa de la compra)
     lineas.push(buildLinea(cuentas, config.cuentaInventario, 0, p.subtotal,
       'Reversa de compra (NC proveedor)'));
-    // CR: IVA en compras (reversa del crédito tributario)
-    if (p.iva > 0) {
-      lineas.push(buildLinea(cuentas, config.cuentaIVACompras, 0, p.iva, 'Reversa IVA en compras'));
+    // CR: IVA en compras (reversa del crédito tributario) — absorbe cualquier
+    // redondeo de 1 centavo del SRI para que el asiento cuadre exacto.
+    const ivaAjustadoNc = round2(p.total - p.subtotal);
+    if (ivaAjustadoNc > 0) {
+      lineas.push(buildLinea(cuentas, config.cuentaIVACompras, 0, ivaAjustadoNc, 'Reversa IVA en compras'));
     }
 
     return await createAsiento({
@@ -756,9 +771,11 @@ export async function crearAsientoNotaDebitoRecibida(p: ParamsDocRecibido): Prom
     // DB: Inventario / gasto (cargo adicional del proveedor)
     lineas.push(buildLinea(cuentas, config.cuentaInventario, p.subtotal, 0,
       `ND recibida de ${p.proveedorNombre}`));
-    // DB: IVA en compras
-    if (p.iva > 0) {
-      lineas.push(buildLinea(cuentas, config.cuentaIVACompras, p.iva, 0, 'IVA ND recibida'));
+    // DB: IVA en compras — absorbe cualquier redondeo de 1 centavo del SRI
+    // para que el asiento cuadre exacto.
+    const ivaAjustadoNd = round2(p.total - p.subtotal);
+    if (ivaAjustadoNd > 0) {
+      lineas.push(buildLinea(cuentas, config.cuentaIVACompras, ivaAjustadoNd, 0, 'IVA ND recibida'));
     }
     // CR: CxP Proveedores (aumenta la deuda)
     lineas.push(buildLinea(cuentas, config.cuentaCxPProveedores, 0, p.total,

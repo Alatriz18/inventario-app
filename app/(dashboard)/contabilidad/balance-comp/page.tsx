@@ -14,9 +14,12 @@ import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from '@/components/ui/table';
 
-import { AsientoContable, CuentaContable } from '@/types';
-import { subscribeToAsientos } from '@/lib/firebase/asientos';
+import { toast } from 'sonner';
+
+import { AsientoContable, CuentaContable, AsientoLinea } from '@/types';
+import { subscribeToAsientos, editarAsiento } from '@/lib/firebase/asientos';
 import { subscribeToCuentas }  from '@/lib/firebase/plan-cuentas';
+import { useAuth } from '@/context/AuthContext';
 
 function currency(v: number) { return v !== 0 ? `$${Math.abs(v).toFixed(2)}` : '—'; }
 // Redondea a centavos en cada paso de la suma — sumar miles de decimales en
@@ -25,11 +28,13 @@ function currency(v: number) { return v !== 0 ? `$${Math.abs(v).toFixed(2)}` : '
 function round2(v: number) { return Math.round((v + Number.EPSILON) * 100) / 100; }
 
 export default function BalanceComprobacionPage() {
+  const { user } = useAuth();
   const [asientos, setAsientos] = useState<AsientoContable[]>([]);
   const [cuentas,  setCuentas]  = useState<CuentaContable[]>([]);
   const [loading,  setLoading]  = useState(true);
   const [dateFrom, setDateFrom] = useState(format(startOfYear(new Date()), 'yyyy-MM-dd'));
   const [dateTo,   setDateTo]   = useState(format(new Date(), 'yyyy-MM-dd'));
+  const [corrigiendo, setCorrigiendo] = useState(false);
 
   useEffect(() => {
     setLoading(true);
@@ -95,6 +100,40 @@ export default function BalanceComprobacionPage() {
       .filter(r => Math.abs(r.diferencia) >= 0.01);
   }, [asientos, dateFrom, dateTo]);
 
+  // Absorbe el centavo de diferencia en una línea de IVA del propio asiento
+  // (o, si no hay ninguna con "IVA" en la descripción, en la última línea del
+  // lado corto) — el mismo criterio que ya se usa al generar asientos nuevos,
+  // para no inventar una cuenta ni cambiar el sentido económico del asiento.
+  const handleCorregirDescuadres = async () => {
+    if (!user) return;
+    setCorrigiendo(true);
+    let ok = 0, err = 0;
+    try {
+      for (const { asiento, diferencia } of asientosDescuadrados) {
+        try {
+          const nuevas: AsientoLinea[] = asiento.lineas.map(l => ({ ...l }));
+          const esIva = (l: AsientoLinea) => /iva/i.test(l.descripcion ?? '');
+          if (diferencia < 0) {
+            // Debe < Haber: falta debe
+            const target = nuevas.find(l => esIva(l) && l.debe > 0)
+              ?? [...nuevas].reverse().find(l => l.debe > 0);
+            if (target) target.debe = round2(target.debe + Math.abs(diferencia));
+          } else if (diferencia > 0) {
+            // Haber < Debe: falta haber
+            const target = nuevas.find(l => esIva(l) && l.haber > 0)
+              ?? [...nuevas].reverse().find(l => l.haber > 0);
+            if (target) target.haber = round2(target.haber + diferencia);
+          }
+          await editarAsiento(asiento.id, { lineas: nuevas }, user.uid, user.nombre ?? user.email ?? 'Usuario');
+          ok++;
+        } catch { err++; }
+      }
+      toast.success(`${ok} asiento(s) corregidos` + (err ? ` — ${err} con error` : ''), { duration: 10000 });
+    } finally {
+      setCorrigiendo(false);
+    }
+  };
+
   const exportar = () => {
     const rows = balance.map(r => ({
       Código:  r.cuenta.codigo,
@@ -141,9 +180,15 @@ export default function BalanceComprobacionPage() {
 
       {asientosDescuadrados.length > 0 && (
         <div className="bg-red-50 border border-red-200 rounded-xl p-4 mb-4">
-          <p className="text-sm font-semibold text-red-700 mb-2">
-            {asientosDescuadrados.length} asiento(s) con Debe ≠ Haber dentro de sí mismos — acá está el descuadre real:
-          </p>
+          <div className="flex items-center justify-between gap-3 mb-2">
+            <p className="text-sm font-semibold text-red-700">
+              {asientosDescuadrados.length} asiento(s) con Debe ≠ Haber dentro de sí mismos — acá está el descuadre real:
+            </p>
+            <Button size="sm" variant="outline" onClick={handleCorregirDescuadres} disabled={corrigiendo}
+              title="Absorbe la diferencia de 1 centavo en la línea de IVA de cada asiento (mismo criterio que usan los asientos nuevos)">
+              {corrigiendo ? 'Corrigiendo…' : 'Corregir automáticamente'}
+            </Button>
+          </div>
           <div className="space-y-1.5">
             {asientosDescuadrados.map(r => (
               <div key={r.asiento.id} className="text-xs flex flex-wrap items-center gap-2 bg-white rounded-md px-3 py-2 border border-red-100">

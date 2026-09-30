@@ -15,7 +15,7 @@ import { AsientoContable, CuentaContable } from '@/types';
 import { subscribeToAsientos } from '@/lib/firebase/asientos';
 import { subscribeToCuentas }  from '@/lib/firebase/plan-cuentas';
 
-function currency(v: number) { return `$${Math.abs(v).toFixed(2)}`; }
+function currency(v: number) { return v < 0 ? `($${Math.abs(v).toFixed(2)})` : `$${v.toFixed(2)}`; }
 
 export default function BalanceGeneralPage() {
   const [asientos, setAsientos] = useState<AsientoContable[]>([]);
@@ -55,6 +55,26 @@ export default function BalanceGeneralPage() {
     const activos    = items.filter(r => r.cuenta.tipo === 'activo').sort((a,b) => a.cuenta.codigo.localeCompare(b.cuenta.codigo));
     const pasivos    = items.filter(r => r.cuenta.tipo === 'pasivo').sort((a,b) => a.cuenta.codigo.localeCompare(b.cuenta.codigo));
     const patrimonio = items.filter(r => r.cuenta.tipo === 'patrimonio').sort((a,b) => a.cuenta.codigo.localeCompare(b.cuenta.codigo));
+
+    // El balance solo cuadra si el resultado del ejercicio (ingresos - costos
+    // - gastos, todavía no trasladado a Patrimonio porque el período no se ha
+    // cerrado formalmente) aparece como una línea más de Patrimonio — si no,
+    // Activo queda descuadrado contra Pasivo + Patrimonio por exactamente esa
+    // utilidad/pérdida, que es justo lo que se estaba viendo.
+    const totalIngresos = items.filter(r => r.cuenta.tipo === 'ingreso').reduce((s, r) => s + r.saldo, 0);
+    const totalCostos   = items.filter(r => r.cuenta.tipo === 'costo').reduce((s, r) => s + r.saldo, 0);
+    const totalGastos   = items.filter(r => r.cuenta.tipo === 'gasto').reduce((s, r) => s + r.saldo, 0);
+    const resultadoEjercicio = totalIngresos - totalCostos - totalGastos;
+
+    if (Math.abs(resultadoEjercicio) >= 0.01) {
+      patrimonio.push({
+        cuenta: {
+          id: '__resultado_ejercicio__', codigo: '3.9', nombre: 'Resultado del ejercicio (no distribuido)',
+          tipo: 'patrimonio', naturaleza: 'acreedora', nivel: 2, aceptaMovimientos: true, activa: true,
+        },
+        saldo: resultadoEjercicio,
+      });
+    }
 
     const totalActivo    = activos.reduce((s, r) => s + r.saldo, 0);
     const totalPasivo    = pasivos.reduce((s, r) => s + r.saldo, 0);

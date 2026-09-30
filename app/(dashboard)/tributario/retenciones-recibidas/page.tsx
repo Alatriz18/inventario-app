@@ -135,8 +135,24 @@ export default function RetencionesRecibidasPage() {
     const files = Array.from(e.target.files ?? []);
     if (!files.length || !user) return;
     setImporting(true);
-    let ok = 0, dup = 0, err = 0, sinAsiento = 0;
+    let ok = 0, dup = 0, err = 0, sinAsiento = 0, reenlazadas = 0;
     const existentes = new Set(retenciones.map(r => r.claveAcceso).filter(Boolean) as string[]);
+
+    // El XML de la retención trae la autorización/clave de acceso de la
+    // factura que sustenta (numAutDocSustento) — es un match exacto y
+    // confiable, a diferencia de armar la serie a partir del número.
+    const buscarComprobante = (d: ReturnType<typeof parsearRetencionXML>) => {
+      if (!d) return undefined;
+      let comp = d.numAutDocSustento
+        ? comprobantesEmitidos.find(c => c.claveAcceso === d.numAutDocSustento || c.numeroAutorizacion === d.numAutDocSustento)
+        : undefined;
+      if (!comp && d.numDocSustento && d.numDocSustento.length === 15) {
+        const serieBuscada = `${d.numDocSustento.slice(0, 3)}-${d.numDocSustento.slice(3, 6)}`;
+        const secBuscado   = d.numDocSustento.slice(6);
+        comp = comprobantesEmitidos.find(c => c.serie === serieBuscada && c.secuencial === secBuscado);
+      }
+      return comp;
+    };
 
     for (const file of files) {
       try {
@@ -144,23 +160,30 @@ export default function RetencionesRecibidasPage() {
         if (detectarTipoComprobante(xml) !== 'retencion') { err++; continue; }
         const d = parsearRetencionXML(xml);
         if (!d) { err++; continue; }
-        if (d.claveAcceso && existentes.has(d.claveAcceso)) { dup++; continue; }
+        if (d.claveAcceso && existentes.has(d.claveAcceso)) {
+          // Ya estaba importada — si en su momento no se pudo enlazar a la
+          // venta (ej. por el bug de emparejamiento ya corregido), se
+          // completa ahora con el mismo XML en vez de solo marcarla como
+          // duplicada y no hacer nada.
+          const existente = retenciones.find(r => r.claveAcceso === d.claveAcceso);
+          if (existente && !existente.ventaId) {
+            const comp = buscarComprobante(d);
+            if (comp?.ventaId) {
+              try {
+                await updateRetencionRecibida(existente.id, {
+                  ventaId: comp.ventaId, numeroComprobante: `${comp.serie}-${comp.secuencial}`,
+                });
+                reenlazadas++;
+              } catch { /* se deja para vincular manual */ }
+            }
+          }
+          dup++; continue;
+        }
 
         const numeroRet = `${d.estab}-${d.ptoEmi}-${d.secuencial}`;
-
-        let ventaId = '', numeroComprobante = '';
-        // El XML de la retención trae la autorización/clave de acceso de la
-        // factura que sustenta (numAutDocSustento) — es un match exacto y
-        // confiable, a diferencia de armar la serie a partir del número.
-        let comp = d.numAutDocSustento
-          ? comprobantesEmitidos.find(c => c.claveAcceso === d.numAutDocSustento || c.numeroAutorizacion === d.numAutDocSustento)
-          : undefined;
-        if (!comp && d.numDocSustento && d.numDocSustento.length === 15) {
-          const serieBuscada = `${d.numDocSustento.slice(0, 3)}-${d.numDocSustento.slice(3, 6)}`;
-          const secBuscado   = d.numDocSustento.slice(6);
-          comp = comprobantesEmitidos.find(c => c.serie === serieBuscada && c.secuencial === secBuscado);
-        }
-        if (comp) { ventaId = comp.ventaId ?? ''; numeroComprobante = `${comp.serie}-${comp.secuencial}`; }
+        const comp = buscarComprobante(d);
+        const ventaId = comp?.ventaId ?? '';
+        const numeroComprobante = comp ? `${comp.serie}-${comp.secuencial}` : '';
 
         const retId = await createRetencionRecibida({
           ventaId, numeroComprobante,
@@ -206,7 +229,11 @@ export default function RetencionesRecibidasPage() {
 
     setImporting(false);
     if (xmlRef.current) xmlRef.current.value = '';
-    toast.success(`Importadas: ${ok} · Duplicadas: ${dup}${err ? ` · Con error: ${err}` : ''}`);
+    toast.success(
+      `Importadas: ${ok} · Duplicadas: ${dup}` +
+      `${reenlazadas ? ` (${reenlazadas} de esas se enlazaron a su venta ahora)` : ''}` +
+      `${err ? ` · Con error: ${err}` : ''}`
+    );
     if (sinAsiento > 0) {
       toast.warning(`${sinAsiento} retención(es) se importaron pero NO generaron asiento contable. Revísalas en Libro Diario.`, { duration: 12000 });
     }

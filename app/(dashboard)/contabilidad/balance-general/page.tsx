@@ -14,6 +14,8 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { AsientoContable, CuentaContable } from '@/types';
 import { subscribeToAsientos } from '@/lib/firebase/asientos';
 import { subscribeToCuentas }  from '@/lib/firebase/plan-cuentas';
+import { getConfigSRI } from '@/lib/firebase/config-sri';
+import { descargarBalanceGeneralPDF } from '@/lib/contabilidad/estados-financieros-pdf';
 
 function currency(v: number) { return v < 0 ? `($${Math.abs(v).toFixed(2)})` : `$${v.toFixed(2)}`; }
 // Redondea a centavos en cada paso de la suma — sumar miles de decimales en
@@ -104,6 +106,22 @@ export default function BalanceGeneralPage() {
     XLSX.writeFile(wb, `balance_general_${dateTo}.xlsx`);
   };
 
+  const exportarPDF = async () => {
+    const config = await getConfigSRI();
+    descargarBalanceGeneralPDF({
+      razonSocial: config?.razonSocial ?? '',
+      ruc:         config?.ruc ?? '',
+      direccion:   config?.direccionMatriz,
+      fechaCorte:  new Date(dateTo + 'T12:00:00'),
+      activos:     data.activos.map(r => ({ codigo: r.cuenta.codigo, nombre: r.cuenta.nombre, saldo: r.saldo })),
+      pasivos:     data.pasivos.map(r => ({ codigo: r.cuenta.codigo, nombre: r.cuenta.nombre, saldo: r.saldo })),
+      patrimonio:  data.patrimonio.map(r => ({ codigo: r.cuenta.codigo, nombre: r.cuenta.nombre, saldo: r.saldo })),
+      totalActivo:     data.totalActivo,
+      totalPasivo:     data.totalPasivo,
+      totalPatrimonio: data.totalPatrimonio,
+    });
+  };
+
   const SeccionRows = ({ items }: { items: { cuenta: CuentaContable; saldo: number }[] }) => (
     <>
       {items.map(r => (
@@ -124,9 +142,15 @@ export default function BalanceGeneralPage() {
         title="Balance General"
         description="Estado de situación financiera al cierre del período"
         action={
-          <Button variant="outline" onClick={exportar} disabled={loading}>
-            <Download className="mr-2 h-4 w-4" /> Exportar Excel
-          </Button>
+          <div className="flex gap-2">
+            <Button variant="outline" onClick={exportar} disabled={loading}>
+              <Download className="mr-2 h-4 w-4" /> Exportar Excel
+            </Button>
+            <Button onClick={exportarPDF} disabled={loading}
+              title="Documento formal listo para imprimir y firmar">
+              <Download className="mr-2 h-4 w-4" /> Exportar PDF
+            </Button>
+          </div>
         }
       />
 

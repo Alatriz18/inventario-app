@@ -15,6 +15,8 @@ import { Separator }from '@/components/ui/separator';
 import { AsientoContable, CuentaContable } from '@/types';
 import { subscribeToAsientos } from '@/lib/firebase/asientos';
 import { subscribeToCuentas }  from '@/lib/firebase/plan-cuentas';
+import { getConfigSRI } from '@/lib/firebase/config-sri';
+import { descargarEstadoResultadosPDF } from '@/lib/contabilidad/estados-financieros-pdf';
 
 function currency(v: number) { return `$${Math.abs(v).toFixed(2)}`; }
 // Redondea a centavos en cada paso de la suma — evita que sumar miles de
@@ -95,6 +97,25 @@ export default function EstadoResultadosPage() {
     XLSX.writeFile(wb, `estado_resultados_${dateFrom}_${dateTo}.xlsx`);
   };
 
+  const exportarPDF = async () => {
+    const config = await getConfigSRI();
+    descargarEstadoResultadosPDF({
+      razonSocial: config?.razonSocial ?? '',
+      ruc:         config?.ruc ?? '',
+      direccion:   config?.direccionMatriz,
+      desde: new Date(dateFrom + 'T12:00:00'),
+      hasta: new Date(dateTo   + 'T12:00:00'),
+      ingresos: data.ingresos.map(r => ({ codigo: r.cuenta.codigo, nombre: r.cuenta.nombre, saldo: r.saldo })),
+      costos:   data.costos.map(r => ({ codigo: r.cuenta.codigo, nombre: r.cuenta.nombre, saldo: r.saldo })),
+      gastos:   data.gastos.map(r => ({ codigo: r.cuenta.codigo, nombre: r.cuenta.nombre, saldo: r.saldo })),
+      totalIngresos: data.totalIngresos,
+      totalCostos:   data.totalCostos,
+      totalGastos:   data.totalGastos,
+      utilidadBruta: data.utilidadBruta,
+      utilidadNeta:  data.utilidadNeta,
+    });
+  };
+
   const chartData = [
     { name: 'Ingresos',      valor: data.totalIngresos, fill: '#00A896' },
     { name: 'Costos',        valor: data.totalCostos,   fill: '#EF4444' },
@@ -122,9 +143,15 @@ export default function EstadoResultadosPage() {
         title="Estado de Resultados"
         description="Ingresos, costos, gastos y utilidad del período"
         action={
-          <Button variant="outline" onClick={exportar} disabled={loading}>
-            <Download className="mr-2 h-4 w-4" /> Exportar Excel
-          </Button>
+          <div className="flex gap-2">
+            <Button variant="outline" onClick={exportar} disabled={loading}>
+              <Download className="mr-2 h-4 w-4" /> Exportar Excel
+            </Button>
+            <Button onClick={exportarPDF} disabled={loading}
+              title="Documento formal listo para imprimir y firmar">
+              <Download className="mr-2 h-4 w-4" /> Exportar PDF
+            </Button>
+          </div>
         }
       />
 

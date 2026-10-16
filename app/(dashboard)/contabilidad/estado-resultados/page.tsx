@@ -3,7 +3,6 @@
 import { useEffect, useState, useMemo } from 'react';
 import { format, startOfYear } from 'date-fns';
 import { BarChart3, Download } from 'lucide-react';
-import * as XLSX from 'xlsx';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
 
 import PageHeader  from '@/components/shared/PageHeader';
@@ -17,6 +16,7 @@ import { subscribeToAsientos } from '@/lib/firebase/asientos';
 import { subscribeToCuentas }  from '@/lib/firebase/plan-cuentas';
 import { getConfigSRI } from '@/lib/firebase/config-sri';
 import { descargarEstadoResultadosPDF } from '@/lib/contabilidad/estados-financieros-pdf';
+import { descargarEstadoResultadosExcel } from '@/lib/contabilidad/estados-financieros-excel';
 
 function currency(v: number) { return `$${Math.abs(v).toFixed(2)}`; }
 // Redondea a centavos en cada paso de la suma — evita que sumar miles de
@@ -77,29 +77,9 @@ export default function EstadoResultadosPage() {
     return { ingresos, costos, gastos, totalIngresos, totalCostos, totalGastos, utilidadBruta, utilidadNeta };
   }, [asientos, cuentas, dateFrom, dateTo]);
 
-  const exportar = () => {
-    const rows = [
-      { Sección:'INGRESOS', Código:'', Cuenta:'', Monto:'' },
-      ...data.ingresos.map(r => ({ Sección:'', Código: r.cuenta.codigo, Cuenta: r.cuenta.nombre, Monto: r.saldo })),
-      { Sección:'', Código:'', Cuenta:'TOTAL INGRESOS', Monto: data.totalIngresos },
-      { Sección:'COSTOS', Código:'', Cuenta:'', Monto:'' },
-      ...data.costos.map(r => ({ Sección:'', Código: r.cuenta.codigo, Cuenta: r.cuenta.nombre, Monto: r.saldo })),
-      { Sección:'', Código:'', Cuenta:'TOTAL COSTOS', Monto: data.totalCostos },
-      { Sección:'', Código:'', Cuenta:'UTILIDAD BRUTA', Monto: data.utilidadBruta },
-      { Sección:'GASTOS', Código:'', Cuenta:'', Monto:'' },
-      ...data.gastos.map(r => ({ Sección:'', Código: r.cuenta.codigo, Cuenta: r.cuenta.nombre, Monto: r.saldo })),
-      { Sección:'', Código:'', Cuenta:'TOTAL GASTOS', Monto: data.totalGastos },
-      { Sección:'', Código:'', Cuenta:'UTILIDAD NETA', Monto: data.utilidadNeta },
-    ];
-    const ws = XLSX.utils.json_to_sheet(rows);
-    const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, 'Estado Resultados');
-    XLSX.writeFile(wb, `estado_resultados_${dateFrom}_${dateTo}.xlsx`);
-  };
-
-  const exportarPDF = async () => {
+  const datosExport = async () => {
     const config = await getConfigSRI();
-    descargarEstadoResultadosPDF({
+    return {
       razonSocial: config?.razonSocial ?? '',
       ruc:         config?.ruc ?? '',
       direccion:   config?.direccionMatriz,
@@ -113,8 +93,11 @@ export default function EstadoResultadosPage() {
       totalGastos:   data.totalGastos,
       utilidadBruta: data.utilidadBruta,
       utilidadNeta:  data.utilidadNeta,
-    });
+    };
   };
+
+  const exportar = async () => descargarEstadoResultadosExcel(await datosExport());
+  const exportarPDF = async () => descargarEstadoResultadosPDF(await datosExport());
 
   const chartData = [
     { name: 'Ingresos',      valor: data.totalIngresos, fill: '#00A896' },

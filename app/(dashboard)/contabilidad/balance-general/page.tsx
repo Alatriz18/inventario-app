@@ -3,7 +3,6 @@
 import { useEffect, useState, useMemo } from 'react';
 import { format, startOfYear } from 'date-fns';
 import { TrendingUp, Download } from 'lucide-react';
-import * as XLSX from 'xlsx';
 
 import PageHeader  from '@/components/shared/PageHeader';
 import { Button }  from '@/components/ui/button';
@@ -16,6 +15,7 @@ import { subscribeToAsientos } from '@/lib/firebase/asientos';
 import { subscribeToCuentas }  from '@/lib/firebase/plan-cuentas';
 import { getConfigSRI } from '@/lib/firebase/config-sri';
 import { descargarBalanceGeneralPDF } from '@/lib/contabilidad/estados-financieros-pdf';
+import { descargarBalanceGeneralExcel } from '@/lib/contabilidad/estados-financieros-excel';
 
 function currency(v: number) { return v < 0 ? `($${Math.abs(v).toFixed(2)})` : `$${v.toFixed(2)}`; }
 // Redondea a centavos en cada paso de la suma — sumar miles de decimales en
@@ -91,24 +91,9 @@ export default function BalanceGeneralPage() {
 
   const cuadra = Math.abs(data.totalActivo - (data.totalPasivo + data.totalPatrimonio)) < 0.01;
 
-  const exportar = () => {
-    const rows = [
-      ...data.activos.map(r => ({ Sección: 'ACTIVO', Código: r.cuenta.codigo, Cuenta: r.cuenta.nombre, Saldo: r.saldo })),
-      { Sección: '', Código: '', Cuenta: 'TOTAL ACTIVO', Saldo: data.totalActivo },
-      ...data.pasivos.map(r => ({ Sección: 'PASIVO', Código: r.cuenta.codigo, Cuenta: r.cuenta.nombre, Saldo: r.saldo })),
-      { Sección: '', Código: '', Cuenta: 'TOTAL PASIVO', Saldo: data.totalPasivo },
-      ...data.patrimonio.map(r => ({ Sección: 'PATRIMONIO', Código: r.cuenta.codigo, Cuenta: r.cuenta.nombre, Saldo: r.saldo })),
-      { Sección: '', Código: '', Cuenta: 'TOTAL PATRIMONIO', Saldo: data.totalPatrimonio },
-    ];
-    const ws = XLSX.utils.json_to_sheet(rows);
-    const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, 'Balance General');
-    XLSX.writeFile(wb, `balance_general_${dateTo}.xlsx`);
-  };
-
-  const exportarPDF = async () => {
+  const datosExport = async () => {
     const config = await getConfigSRI();
-    descargarBalanceGeneralPDF({
+    return {
       razonSocial: config?.razonSocial ?? '',
       ruc:         config?.ruc ?? '',
       direccion:   config?.direccionMatriz,
@@ -119,8 +104,11 @@ export default function BalanceGeneralPage() {
       totalActivo:     data.totalActivo,
       totalPasivo:     data.totalPasivo,
       totalPatrimonio: data.totalPatrimonio,
-    });
+    };
   };
+
+  const exportar = async () => descargarBalanceGeneralExcel(await datosExport());
+  const exportarPDF = async () => descargarBalanceGeneralPDF(await datosExport());
 
   const SeccionRows = ({ items }: { items: { cuenta: CuentaContable; saldo: number }[] }) => (
     <>

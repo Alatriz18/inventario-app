@@ -1,109 +1,94 @@
-import { TipoCuenta, NaturalezaCuenta, ConfigContable } from '@/types';
+import { ConfigContable } from '@/types';
+import { PLAN_CUENTAS_SUPERCIAS, CuentaSupercias } from '@/lib/data/plan-cuentas-supercias';
 
-interface CuentaSeed {
-  codigo:            string;
-  nombre:            string;
-  tipo:              TipoCuenta;
-  naturaleza:        NaturalezaCuenta;
-  nivel:             1 | 2 | 3 | 4 | 5;
-  aceptaMovimientos: boolean;
-}
+/** Plan de cuentas del sistema: el oficial de la Superintendencia de Compañías. */
+export const PLAN_CUENTAS_ECUADOR: CuentaSupercias[] = PLAN_CUENTAS_SUPERCIAS;
 
-export const PLAN_CUENTAS_ECUADOR: CuentaSeed[] = [
-  // ── ACTIVO ──────────────────────────────────────────────────────────────
-  { codigo:'1',       nombre:'ACTIVO',                              tipo:'activo',    naturaleza:'deudora',   nivel:1, aceptaMovimientos:false },
-  { codigo:'1.1',     nombre:'ACTIVO CORRIENTE',                    tipo:'activo',    naturaleza:'deudora',   nivel:2, aceptaMovimientos:false },
-  { codigo:'1.1.01',  nombre:'Caja',                                tipo:'activo',    naturaleza:'deudora',   nivel:3, aceptaMovimientos:true  },
-  { codigo:'1.1.02',  nombre:'Bancos',                              tipo:'activo',    naturaleza:'deudora',   nivel:3, aceptaMovimientos:true  },
-  { codigo:'1.1.03',  nombre:'Cuentas y Documentos por Cobrar',     tipo:'activo',    naturaleza:'deudora',   nivel:3, aceptaMovimientos:true  },
-  { codigo:'1.1.04',  nombre:'IVA en Compras',                      tipo:'activo',    naturaleza:'deudora',   nivel:3, aceptaMovimientos:true  },
-  { codigo:'1.1.05',  nombre:'Inventario de Mercaderías',           tipo:'activo',    naturaleza:'deudora',   nivel:3, aceptaMovimientos:true  },
-  { codigo:'1.1.06',  nombre:'Retenciones en la Fuente por Cobrar', tipo:'activo',    naturaleza:'deudora',   nivel:3, aceptaMovimientos:true  },
-  { codigo:'1.1.07',  nombre:'Retenciones IVA por Cobrar',          tipo:'activo',    naturaleza:'deudora',   nivel:3, aceptaMovimientos:true  },
-  { codigo:'1.1.08',  nombre:'Anticipo Proveedores',                tipo:'activo',    naturaleza:'deudora',   nivel:3, aceptaMovimientos:true  },
-  { codigo:'1.2',     nombre:'ACTIVO NO CORRIENTE',                 tipo:'activo',    naturaleza:'deudora',   nivel:2, aceptaMovimientos:false },
-  { codigo:'1.2.01',  nombre:'Propiedad, Planta y Equipo',          tipo:'activo',    naturaleza:'deudora',   nivel:3, aceptaMovimientos:true  },
-  { codigo:'1.2.02',  nombre:'Depreciación Acumulada PPE',          tipo:'activo',    naturaleza:'acreedora', nivel:3, aceptaMovimientos:true  },
-
-  // ── PASIVO ───────────────────────────────────────────────────────────────
-  { codigo:'2',       nombre:'PASIVO',                              tipo:'pasivo',    naturaleza:'acreedora', nivel:1, aceptaMovimientos:false },
-  { codigo:'2.1',     nombre:'PASIVO CORRIENTE',                    tipo:'pasivo',    naturaleza:'acreedora', nivel:2, aceptaMovimientos:false },
-  { codigo:'2.1.01',  nombre:'Cuentas y Documentos por Pagar',      tipo:'pasivo',    naturaleza:'acreedora', nivel:3, aceptaMovimientos:true  },
-  { codigo:'2.1.02',  nombre:'IVA en Ventas por Pagar',             tipo:'pasivo',    naturaleza:'acreedora', nivel:3, aceptaMovimientos:true  },
-  { codigo:'2.1.03',  nombre:'Retenciones en la Fuente por Pagar',  tipo:'pasivo',    naturaleza:'acreedora', nivel:3, aceptaMovimientos:true  },
-  { codigo:'2.1.04',  nombre:'Retenciones IVA por Pagar',           tipo:'pasivo',    naturaleza:'acreedora', nivel:3, aceptaMovimientos:true  },
-  { codigo:'2.1.05',  nombre:'IESS por Pagar',                      tipo:'pasivo',    naturaleza:'acreedora', nivel:3, aceptaMovimientos:true  },
-  { codigo:'2.1.06',  nombre:'ICE por Pagar',                       tipo:'pasivo',    naturaleza:'acreedora', nivel:3, aceptaMovimientos:true  },
-  { codigo:'2.1.07',  nombre:'Anticipo Clientes',                   tipo:'pasivo',    naturaleza:'acreedora', nivel:3, aceptaMovimientos:true  },
-  { codigo:'2.2',     nombre:'PASIVO NO CORRIENTE',                 tipo:'pasivo',    naturaleza:'acreedora', nivel:2, aceptaMovimientos:false },
-  { codigo:'2.2.01',  nombre:'Préstamos Bancarios Largo Plazo',     tipo:'pasivo',    naturaleza:'acreedora', nivel:3, aceptaMovimientos:true  },
-
-  // ── PATRIMONIO ───────────────────────────────────────────────────────────
-  { codigo:'3',       nombre:'PATRIMONIO',                          tipo:'patrimonio',naturaleza:'acreedora', nivel:1, aceptaMovimientos:false },
-  { codigo:'3.1',     nombre:'Capital Social',                      tipo:'patrimonio',naturaleza:'acreedora', nivel:2, aceptaMovimientos:true  },
-  { codigo:'3.2',     nombre:'Reserva Legal',                       tipo:'patrimonio',naturaleza:'acreedora', nivel:2, aceptaMovimientos:true  },
-  { codigo:'3.3',     nombre:'Utilidades Retenidas de Ejercicios Anteriores', tipo:'patrimonio',naturaleza:'acreedora', nivel:2, aceptaMovimientos:true },
-  { codigo:'3.4',     nombre:'Utilidad / Pérdida del Ejercicio',    tipo:'patrimonio',naturaleza:'acreedora', nivel:2, aceptaMovimientos:true  },
-
-  // ── INGRESOS ─────────────────────────────────────────────────────────────
-  { codigo:'4',       nombre:'INGRESOS',                            tipo:'ingreso',   naturaleza:'acreedora', nivel:1, aceptaMovimientos:false },
-  { codigo:'4.1',     nombre:'INGRESOS OPERACIONALES',              tipo:'ingreso',   naturaleza:'acreedora', nivel:2, aceptaMovimientos:false },
-  { codigo:'4.1.01',  nombre:'Ventas gravadas IVA 15%',             tipo:'ingreso',   naturaleza:'acreedora', nivel:3, aceptaMovimientos:true  },
-  { codigo:'4.1.02',  nombre:'Ventas tarifa 0% IVA',                tipo:'ingreso',   naturaleza:'acreedora', nivel:3, aceptaMovimientos:true  },
-  { codigo:'4.2',     nombre:'OTROS INGRESOS',                      tipo:'ingreso',   naturaleza:'acreedora', nivel:2, aceptaMovimientos:false },
-  { codigo:'4.2.01',  nombre:'Intereses Ganados',                   tipo:'ingreso',   naturaleza:'acreedora', nivel:3, aceptaMovimientos:true  },
-  { codigo:'4.2.02',  nombre:'Descuentos en Compras',               tipo:'ingreso',   naturaleza:'acreedora', nivel:3, aceptaMovimientos:true  },
-  { codigo:'4.2.03',  nombre:'Otros Ingresos No Operacionales',     tipo:'ingreso',   naturaleza:'acreedora', nivel:3, aceptaMovimientos:true  },
-
-  // ── COSTOS ───────────────────────────────────────────────────────────────
-  { codigo:'5',       nombre:'COSTOS',                              tipo:'costo',     naturaleza:'deudora',   nivel:1, aceptaMovimientos:false },
-  { codigo:'5.1',     nombre:'COSTO DE VENTAS',                     tipo:'costo',     naturaleza:'deudora',   nivel:2, aceptaMovimientos:false },
-  { codigo:'5.1.01',  nombre:'Costo de Mercaderías Vendidas',       tipo:'costo',     naturaleza:'deudora',   nivel:3, aceptaMovimientos:true  },
-  { codigo:'5.2',     nombre:'ICE',                                 tipo:'costo',     naturaleza:'deudora',   nivel:2, aceptaMovimientos:false },
-  { codigo:'5.2.01',  nombre:'ICE Tabacos y Cigarrillos',           tipo:'costo',     naturaleza:'deudora',   nivel:3, aceptaMovimientos:true  },
-  { codigo:'5.2.02',  nombre:'ICE Bebidas Alcohólicas',             tipo:'costo',     naturaleza:'deudora',   nivel:3, aceptaMovimientos:true  },
-
-  // ── GASTOS ───────────────────────────────────────────────────────────────
-  { codigo:'6',       nombre:'GASTOS',                              tipo:'gasto',     naturaleza:'deudora',   nivel:1, aceptaMovimientos:false },
-  { codigo:'6.1',     nombre:'GASTOS ADMINISTRATIVOS',              tipo:'gasto',     naturaleza:'deudora',   nivel:2, aceptaMovimientos:false },
-  { codigo:'6.1.01',  nombre:'Sueldos y Salarios',                  tipo:'gasto',     naturaleza:'deudora',   nivel:3, aceptaMovimientos:true  },
-  { codigo:'6.1.02',  nombre:'Aporte Patronal IESS',                tipo:'gasto',     naturaleza:'deudora',   nivel:3, aceptaMovimientos:true  },
-  { codigo:'6.1.03',  nombre:'Arrendamiento Local',                 tipo:'gasto',     naturaleza:'deudora',   nivel:3, aceptaMovimientos:true  },
-  { codigo:'6.1.04',  nombre:'Servicios Básicos',                   tipo:'gasto',     naturaleza:'deudora',   nivel:3, aceptaMovimientos:true  },
-  { codigo:'6.1.05',  nombre:'Suministros de Oficina',              tipo:'gasto',     naturaleza:'deudora',   nivel:3, aceptaMovimientos:true  },
-  { codigo:'6.1.06',  nombre:'Depreciaciones',                      tipo:'gasto',     naturaleza:'deudora',   nivel:3, aceptaMovimientos:true  },
-  { codigo:'6.1.07',  nombre:'Honorarios Profesionales',            tipo:'gasto',     naturaleza:'deudora',   nivel:3, aceptaMovimientos:true  },
-  { codigo:'6.1.08',  nombre:'Gastos de Alimentación',              tipo:'gasto',     naturaleza:'deudora',   nivel:3, aceptaMovimientos:true  },
-  { codigo:'6.1.09',  nombre:'Combustibles y Lubricantes',          tipo:'gasto',     naturaleza:'deudora',   nivel:3, aceptaMovimientos:true  },
-  { codigo:'6.1.10',  nombre:'Mantenimiento y Reparaciones',        tipo:'gasto',     naturaleza:'deudora',   nivel:3, aceptaMovimientos:true  },
-  { codigo:'6.1.11',  nombre:'Transporte y Fletes',                 tipo:'gasto',     naturaleza:'deudora',   nivel:3, aceptaMovimientos:true  },
-  { codigo:'6.1.12',  nombre:'Seguros',                             tipo:'gasto',     naturaleza:'deudora',   nivel:3, aceptaMovimientos:true  },
-  { codigo:'6.1.13',  nombre:'Otros Gastos Generales',              tipo:'gasto',     naturaleza:'deudora',   nivel:3, aceptaMovimientos:true  },
-  { codigo:'6.2',     nombre:'GASTOS DE VENTAS',                  tipo:'gasto',     naturaleza:'deudora',   nivel:2, aceptaMovimientos:false },
-  { codigo:'6.2.01',  nombre:'Publicidad y Propaganda',             tipo:'gasto',     naturaleza:'deudora',   nivel:3, aceptaMovimientos:true  },
-  { codigo:'6.2.02',  nombre:'Comisiones por Ventas',               tipo:'gasto',     naturaleza:'deudora',   nivel:3, aceptaMovimientos:true  },
-  { codigo:'6.3',     nombre:'GASTOS FINANCIEROS',                  tipo:'gasto',     naturaleza:'deudora',   nivel:2, aceptaMovimientos:false },
-  { codigo:'6.3.01',  nombre:'Intereses Bancarios',                 tipo:'gasto',     naturaleza:'deudora',   nivel:3, aceptaMovimientos:true  },
-  { codigo:'6.3.02',  nombre:'Comisiones Bancarias',                tipo:'gasto',     naturaleza:'deudora',   nivel:3, aceptaMovimientos:true  },
-];
-
-export const CONFIG_CONTABLE_DEFAULT: Omit<ConfigContable,'id'> & Record<string,string> = {
-  cuentaVentas12:          '4.1.01',
-  cuentaVentas0:           '4.1.02',
-  cuentaIVAVentas:         '2.1.02',
-  cuentaCaja:              '1.1.01',
-  cuentaBancos:            '1.1.02',
-  cuentaCxCClientes:       '1.1.03',
-  cuentaCostoVentas:       '5.1.01',
-  cuentaInventario:        '1.1.05',
-  cuentaGastoCompras:      '6.1.08',
-  cuentaIVACompras:        '1.1.04',
-  cuentaCxPProveedores:    '2.1.01',
-  cuentaRetFuenteClientes: '1.1.06',
-  cuentaRetIVAClientes:    '1.1.07',
-  cuentaRetFuentePorPagar: '2.1.03',
-  cuentaRetIVAPorPagar:    '2.1.04',
+/** Cuentas por defecto de cada operación (código del plan de la Supercias). */
+export const CUENTAS_POR_DEFECTO = {
+  cuentaVentas12:          '410101',
+  cuentaVentas0:           '410102',
+  cuentaIVAVentas:         '201070101',
+  cuentaCaja:              '1010101',
+  cuentaBancos:            '1010102',
+  cuentaCxCClientes:       '101020502',
+  cuentaCostoVentas:       '510113',
+  cuentaInventario:        '1010306',
+  cuentaGastoCompras:      '52022801',
+  cuentaIVACompras:        '101050101',
+  cuentaCxPProveedores:    '2010301',
+  cuentaRetFuenteClientes: '101050201',
+  cuentaRetIVAClientes:    '101050102',
+  cuentaRetFuentePorPagar: '201070102',
+  cuentaRetIVAPorPagar:    '201070103',
+  cuentaUtilidadEjercicio: '30701',
+  cuentaProvisionCartera:  '1010209',
+  cuentaGastoProvision:    '52022305',
+  cuentaAjusteInventario:  '52022302',
+  cuentaInteresesGanados:  '4302',
 };
+
+export const CONFIG_CONTABLE_DEFAULT: Omit<ConfigContable,'id'> & Record<string,string> = CUENTAS_POR_DEFECTO;
+
+/**
+ * Equivalencias del plan anterior (códigos con puntos) al plan de la Supercias.
+ * Incluye códigos que el motor usaba por defecto aunque no existieran en el plan.
+ * Las cuentas de agrupación (1, 1.1, 2.1, 6.1…) no se mapean: solo se desactivan.
+ */
+export const MAPEO_PLAN_ANTERIOR: Record<string, string> = {
+  '1.1.01': '1010101',   // Caja
+  '1.1.02': '1010102',   // Bancos
+  '1.1.03': '101020502', // Cuentas y documentos por cobrar
+  '1.1.04': '101050101', // IVA en compras
+  '1.1.05': '1010306',   // Inventario de mercaderías
+  '1.1.06': '101050201', // Retenciones en la fuente por cobrar
+  '1.1.07': '101050102', // Retenciones IVA por cobrar
+  '1.1.08': '1010403',   // Anticipo a proveedores
+  '1.2.01': '1020110',   // Propiedad, planta y equipo
+  '1.2.01.01': '1020112',// (código por defecto de activos fijos) depreciación acumulada
+  '1.2.02': '1020112',   // Depreciación acumulada PPE
+  '2.1.01': '2010301',   // Cuentas y documentos por pagar
+  '2.1.02': '201070101', // IVA en ventas por pagar
+  '2.1.03': '201070102', // Retenciones en la fuente por pagar
+  '2.1.04': '201070103', // Retenciones IVA por pagar
+  '2.1.05': '2010703',   // IESS por pagar
+  '2.1.06': '201070104', // ICE por pagar
+  '2.1.07': '20110',     // Anticipo de clientes
+  '2.2.01': '2020301',   // Préstamos bancarios largo plazo
+  '3.1':    '30101',     // Capital social
+  '3.2':    '30401',     // Reserva legal
+  '3.3':    '30601',     // Utilidades retenidas
+  '3.4':    '30701',     // Utilidad del ejercicio
+  '3.4.01': '30701',
+  '4.1.01': '410101',    // Ventas gravadas
+  '4.1.02': '410102',    // Ventas tarifa 0%
+  '4.2.01': '4302',      // Intereses ganados
+  '4.2.02': '430501',    // Descuentos en compras
+  '4.2.03': '430502',    // Otros ingresos no operacionales
+  '5.1.01': '510113',    // Costo de mercaderías vendidas
+  '5.2.01': '52022001',  // ICE tabacos
+  '5.2.02': '52022002',  // ICE bebidas
+  '5.2.04': '52022305',  // (código por defecto) gasto por provisión de cartera
+  '5.3.01': '52022302',  // (código por defecto) ajustes de inventario
+  '6.1.01': '520201',    // Sueldos y salarios
+  '6.1.02': '520202',    // Aporte patronal IESS
+  '6.1.03': '520209',    // Arrendamiento
+  '6.1.04': '520218',    // Servicios básicos
+  '6.1.05': '52022802',  // Suministros de oficina
+  '6.1.06': '52022101',  // Depreciaciones
+  '6.1.07': '520205',    // Honorarios profesionales
+  '6.1.08': '52022801',  // Gastos de alimentación
+  '6.1.09': '520212',    // Combustibles y lubricantes
+  '6.1.10': '520208',    // Mantenimiento y reparaciones
+  '6.1.11': '520215',    // Transporte y fletes
+  '6.1.12': '520214',    // Seguros
+  '6.1.13': '52022803',  // Otros gastos generales
+  '6.2.01': '520111',    // Publicidad
+  '6.2.02': '520110',    // Comisiones por ventas
+  '6.3.01': '520301',    // Intereses bancarios
+  '6.3.02': '520302',    // Comisiones bancarias
+};
+
 
 export const RETENCIONES_IR_INICIAL = [
   { codigo:'303', descripcion:'Honorarios profesionales',                        porcentaje:10,  aplicaA:'servicios' },

@@ -77,9 +77,11 @@ export default function Form101Page() {
 
     // Gastos de asientos manuales de tipo gastos
     const gastosAsientos = asientos
-      .filter(a => flt(a.fecha))
+      // Las compras a proveedores ya se suman arriba desde las facturas: se excluyen sus asientos
+      // para no contarlas dos veces ahora que van a cuentas de gasto (grupo 5 de la Supercias).
+      .filter(a => flt(a.fecha) && a.tipo !== 'compra_proveedor')
       .flatMap(a => a.lineas)
-      .filter(l => l.cuentaCodigo?.startsWith('5.'))
+      .filter(l => l.cuentaCodigo?.startsWith('5'))
       .reduce((s, l) => s + l.debe, 0);
 
     const utilidadBruta    = totalIngresos - totalGastos - gastosAsientos;

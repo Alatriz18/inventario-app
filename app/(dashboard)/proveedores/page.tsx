@@ -486,7 +486,7 @@ export default function ProveedoresPage() {
               <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
                 <div className="space-y-1.5">
                   <Label className="text-xs">Cuenta CxP</Label>
-                  <Input placeholder="ej: 2.1.01.001" {...register('cuentaCxP')} />
+                  <Input placeholder="ej: 2010301" {...register('cuentaCxP')} />
                 </div>
                 <div className="space-y-1.5">
                   <Label className="text-xs">Destino de sus facturas</Label>
@@ -503,7 +503,7 @@ export default function ProveedoresPage() {
                 </div>
                 <div className="space-y-1.5">
                   <Label className="text-xs">Cuenta IVA Compras</Label>
-                  <Input placeholder="ej: 1.1.04.001" {...register('cuentaIVACompras')} />
+                  <Input placeholder="ej: 101050101" {...register('cuentaIVACompras')} />
                 </div>
               </div>
             </div>

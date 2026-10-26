@@ -247,7 +247,7 @@ export default function BodegasPage() {
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div className="space-y-1.5">
                   <Label className="text-xs">Cuenta de Inventario</Label>
-                  <Input placeholder="ej: 1.1.05.001" {...register('cuentaInventario')} />
+                  <Input placeholder="ej: 1010306" {...register('cuentaInventario')} />
                 </div>
                 <div className="space-y-1.5">
                   <Label className="text-xs">Cuenta Costo de Ventas</Label>

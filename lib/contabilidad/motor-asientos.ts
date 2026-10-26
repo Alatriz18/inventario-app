@@ -19,6 +19,7 @@ import {
   getAsientoByReferencia,
 } from '@/lib/firebase/asientos';
 import { CuentaContable, AsientoLinea, TipoAsiento } from '@/types';
+import { CUENTAS_POR_DEFECTO as DEF } from '@/lib/data/plan-cuentas-ecuador';
 
 // ── Caché en memoria del plan de cuentas y la config contable ────────────
 // Antes se releía TODO el plan de cuentas (getDocs completo) y el doc de
@@ -243,7 +244,7 @@ export async function resolverCuentaDebitoCompra(
   if (!config) return null;
   if (esCompraInventario(prov)) return { codigo: config.cuentaInventario, esGasto: false };
   return {
-    codigo:  prov.cuentaGasto?.trim() || config.cuentaGastoCompras || '6.1.08',
+    codigo:  prov.cuentaGasto?.trim() || config.cuentaGastoCompras || DEF.cuentaGastoCompras,
     esGasto: true,
   };
 }
@@ -652,7 +653,7 @@ export async function crearAsientoNotaDebito(p: ParamsNotaDebito): Promise<strin
     const cuentas = await getCuentasCached();
 
     // Cuenta de ingreso del cargo (intereses / otros ingresos)
-    const CUENTA_OTROS_INGRESOS = '4.2.01'; // Intereses Ganados
+    const CUENTA_OTROS_INGRESOS = config.cuentaInteresesGanados ?? DEF.cuentaInteresesGanados; // Intereses ganados
 
     const lineas: AsientoLinea[] = [];
 
@@ -857,8 +858,8 @@ export async function crearAsientoRetencionEmitida(p: ParamsRetencionEmitida): P
     if (!config) return null;
     const cuentas = await getCuentasCached();
 
-    const CUENTA_RET_FUENTE = (config as any).cuentaRetFuentePorPagar ?? '2.1.03';
-    const CUENTA_RET_IVA    = (config as any).cuentaRetIVAPorPagar    ?? '2.1.04';
+    const CUENTA_RET_FUENTE = config.cuentaRetFuentePorPagar ?? DEF.cuentaRetFuentePorPagar;
+    const CUENTA_RET_IVA    = config.cuentaRetIVAPorPagar    ?? DEF.cuentaRetIVAPorPagar;
 
     const lineas: AsientoLinea[] = [];
 
@@ -958,8 +959,8 @@ export async function crearAsientoRetencionRecibida(p: ParamsRetencionRecibida):
     const cuentas = await getCuentasCached();
 
     // Retenciones que nos hace el cliente = crédito tributario (activo "por cobrar")
-    const cuentaRetFuente = config.cuentaRetFuenteClientes ?? '1.1.06';
-    const cuentaRetIVA    = config.cuentaRetIVAClientes    ?? '1.1.07';
+    const cuentaRetFuente = config.cuentaRetFuenteClientes ?? DEF.cuentaRetFuenteClientes;
+    const cuentaRetIVA    = config.cuentaRetIVAClientes    ?? DEF.cuentaRetIVAClientes;
 
     const lineas: AsientoLinea[] = [];
 
@@ -1011,8 +1012,8 @@ export async function crearAsientoProvisionCartera(p: ParamsProvisionCartera): P
     if (!config) return null;
     const cuentas = await getCuentasCached();
 
-    const cuentaGasto    = (config as any).cuentaGastoProvision    ?? '5.2.04';
-    const cuentaProvision = (config as any).cuentaProvisionCartera ?? '1.2.01';
+    const cuentaGasto    = config.cuentaGastoProvision ?? DEF.cuentaGastoProvision;
+    const cuentaProvision = config.cuentaProvisionCartera ?? DEF.cuentaProvisionCartera;
 
     const lineas: AsientoLinea[] = [
       buildLinea(cuentas, cuentaGasto,    p.monto, 0, p.descripcion),
@@ -1103,7 +1104,7 @@ export async function crearAsientoCierre(p: ParamsCierre): Promise<string | null
 
     const cuentaIngresos  = config.cuentaVentas12;
     const cuentaGastos    = config.cuentaCostoVentas;
-    const cuentaUtilidad  = (config as any).cuentaUtilidadEjercicio ?? '3.4.01';
+    const cuentaUtilidad  = config.cuentaUtilidadEjercicio ?? DEF.cuentaUtilidadEjercicio;
 
     const lineas: AsientoLinea[] = [];
 
@@ -1162,7 +1163,7 @@ export async function crearAsientoAjusteInventario(p: ParamsAjuste): Promise<str
     const cuentas = await getCuentasCached();
 
     // Cuenta de ajuste (contra-cuenta genérica de ajustes de inventario)
-    const CUENTA_AJUSTE = '5.3.01'; // Ajustes de inventario — debe existir en el plan
+    const CUENTA_AJUSTE = config.cuentaAjusteInventario ?? DEF.cuentaAjusteInventario; // Ajustes de inventario
 
     const lineas: AsientoLinea[] = p.esPositivo
       ? [

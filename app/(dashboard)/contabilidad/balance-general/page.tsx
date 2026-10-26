@@ -75,7 +75,7 @@ export default function BalanceGeneralPage() {
     if (Math.abs(resultadoEjercicio) >= 0.01) {
       patrimonio.push({
         cuenta: {
-          id: '__resultado_ejercicio__', codigo: '3.9', nombre: 'Resultado del ejercicio (no distribuido)',
+          id: '__resultado_ejercicio__', codigo: '307', nombre: 'Resultado del ejercicio (no distribuido)',
           tipo: 'patrimonio', naturaleza: 'acreedora', nivel: 2, aceptaMovimientos: true, activa: true,
         },
         saldo: resultadoEjercicio,

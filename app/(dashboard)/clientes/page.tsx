@@ -412,7 +412,7 @@ export default function ClientesPage() {
               </div>
               <div className="space-y-1.5 max-w-xs">
                 <Label className="text-xs">Cuenta CxC de este cliente</Label>
-                <Input placeholder="ej: 1.1.03.001" {...register('cuentaCxC')} />
+                <Input placeholder="ej: 101020502" {...register('cuentaCxC')} />
               </div>
             </div>
 

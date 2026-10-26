@@ -20,7 +20,7 @@ export type Modulo =
   | 'config_sri'
   | 'cxc'             | 'cxc_cartera'
   | 'cxp_facturas'    | 'cxp_documentos' | 'cxp_pagos'
-  | 'plan_cuentas'    | 'centros_costo'  | 'config_contable'
+  | 'plan_cuentas'    | 'centros_costo'  | 'config_contable' | 'migrar_plan'
   | 'asientos'        | 'libro_diario'   | 'libro_mayor'
   | 'balance_comp'    | 'balance_general'| 'estado_resultados'
   | 'periodos'
@@ -54,7 +54,7 @@ const PERMISOS_MODULO: Record<UserRole, Modulo[]> = {
     'notas_credito', 'notas_debito', 'config_sri',
     'cxc', 'cxc_cartera',
     'cxp_facturas', 'cxp_documentos', 'cxp_pagos',
-    'plan_cuentas', 'centros_costo', 'config_contable',
+    'plan_cuentas', 'migrar_plan', 'centros_costo', 'config_contable',
     'asientos', 'libro_diario', 'libro_mayor',
     'balance_comp', 'balance_general', 'estado_resultados',
     'periodos',
@@ -179,6 +179,7 @@ const RUTA_MODULO: Record<string, Modulo> = {
   '/cuentas-por-pagar/documentos-recibidos': 'cxp_documentos',
   '/cuentas-por-pagar/pagos':             'cxp_pagos',
   '/contabilidad/plan-cuentas':           'plan_cuentas',
+  '/contabilidad/migrar-plan':            'migrar_plan',
   '/contabilidad/centros-costo':          'centros_costo',
   '/contabilidad/configuracion':          'config_contable',
   '/contabilidad/asientos':               'asientos',

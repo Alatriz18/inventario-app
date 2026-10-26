@@ -247,7 +247,7 @@ export default function PlanCuentasPage() {
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 py-2">
             <div className="space-y-1.5">
               <Label>Código *</Label>
-              <Input placeholder="ej: 1.1.09" {...register('codigo')} />
+              <Input placeholder="ej: 1010109" {...register('codigo')} />
               {errors.codigo && <p className="text-xs text-red-500">{errors.codigo.message}</p>}
             </div>
             <div className="space-y-1.5">

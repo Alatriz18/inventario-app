@@ -9,7 +9,7 @@ import { getAsientos, reclasificarCuentaEnAsiento } from '@/lib/firebase/asiento
 import { getCuentas, createCuenta } from '@/lib/firebase/plan-cuentas';
 import { getOrCreateConfigContable } from '@/lib/firebase/config-contable';
 import { esCompraInventario, invalidarCacheCuentas } from '@/lib/contabilidad/motor-asientos';
-import { PLAN_CUENTAS_ECUADOR } from '@/lib/data/plan-cuentas-ecuador';
+import { PLAN_CUENTAS_ECUADOR, CUENTAS_POR_DEFECTO } from '@/lib/data/plan-cuentas-ecuador';
 import { Proveedor } from '@/types';
 
 export interface CompraAReclasificar {
@@ -33,7 +33,7 @@ export async function buscarComprasAReclasificar(
   const provPorId    = new Map(proveedores.map(p => [p.id, p]));
   const provPorRuc   = new Map(proveedores.map(p => [p.ruc, p]));
 
-  const gastoPorDefecto = config.cuentaGastoCompras || '6.1.08';
+  const gastoPorDefecto = config.cuentaGastoCompras || CUENTAS_POR_DEFECTO.cuentaGastoCompras;
   const res: CompraAReclasificar[] = [];
   for (const a of asientos) {
     if (a.tipo !== 'compra_proveedor' || a.referenciaTipo !== 'factura_proveedor') continue;
@@ -59,7 +59,7 @@ export async function buscarComprasAReclasificar(
   return res;
 }
 
-/** Garantiza que la cuenta de destino exista en el plan (la crea si falta, p. ej. 6.1.08). */
+/** Garantiza que la cuenta de destino exista en el plan (la crea si falta, p. ej. 52022801). */
 export async function asegurarCuenta(codigo: string) {
   const existente = (await getCuentas()).find(c => c.codigo === codigo);
   if (existente) return { codigo, nombre: existente.nombre, id: existente.id };

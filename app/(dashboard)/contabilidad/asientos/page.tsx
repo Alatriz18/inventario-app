@@ -382,7 +382,7 @@ export default function AsientosPage() {
                         <TableRow key={field.id}>
                           <TableCell>
                             <Input className="h-7 font-mono text-xs w-24"
-                              placeholder="1.1.01" {...register(`lineas.${idx}.cuentaCodigo`)} />
+                              placeholder="1010101" {...register(`lineas.${idx}.cuentaCodigo`)} />
                           </TableCell>
                           <TableCell className="text-xs text-slate-500">
                             {cuenta?.nombre ?? (codigo ? '⚠ No encontrada' : '')}

@@ -433,6 +433,9 @@ export interface ConfigContable {
   cuentaRetIVAProveedores?:    string; // 2.1.x — retención IVA recibida
   cuentaRetFuentePorPagar?:    string; // 2.1.03 — retención en la fuente que emitimos (por pagar al SRI)
   cuentaRetIVAPorPagar?:       string; // 2.1.04 — retención de IVA que emitimos (por pagar al SRI)
+  cuentaAjusteInventario?:     string; // gasto por ajustes de inventario
+  cuentaInteresesGanados?:     string; // ingreso por intereses (notas de débito emitidas, etc.)
+  planMigradoSupercias?:       boolean; // true una vez migrado al plan de la Superintendencia
 }
 
 // ─── DOCUMENTOS RECIBIDOS (NC / ND de proveedores, importados por XML) ──────

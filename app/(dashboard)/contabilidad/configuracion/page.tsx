@@ -16,18 +16,18 @@ import { getOrCreateConfigContable, saveConfigContable } from '@/lib/firebase/co
 import { seedPlanCuentas } from '@/lib/firebase/plan-cuentas';
 
 const CAMPOS: { key: keyof ConfigContable; label: string; desc: string }[] = [
-  { key:'cuentaVentas12',          label:'Ventas gravadas IVA 15%',         desc:'4.1.01' },
-  { key:'cuentaVentas0',           label:'Ventas tarifa 0%',                desc:'4.1.02' },
-  { key:'cuentaIVAVentas',         label:'IVA en Ventas (pasivo)',          desc:'2.1.02' },
-  { key:'cuentaCaja',              label:'Caja',                            desc:'1.1.01' },
-  { key:'cuentaBancos',            label:'Bancos',                          desc:'1.1.02' },
-  { key:'cuentaCxCClientes',       label:'Cuentas por Cobrar Clientes',     desc:'1.1.03' },
-  { key:'cuentaCostoVentas',       label:'Costo de Ventas',                 desc:'5.1.01' },
-  { key:'cuentaInventario',        label:'Inventario de Mercaderías',       desc:'1.1.05' },
-  { key:'cuentaIVACompras',        label:'IVA en Compras (activo)',         desc:'1.1.04' },
-  { key:'cuentaCxPProveedores',    label:'Cuentas por Pagar Proveedores',   desc:'2.1.01' },
-  { key:'cuentaRetFuenteClientes', label:'Ret. Fuente por Cobrar',          desc:'1.1.06' },
-  { key:'cuentaRetIVAClientes',    label:'Ret. IVA por Cobrar',             desc:'1.1.07' },
+  { key:'cuentaVentas12',          label:'Ventas gravadas IVA 15%',         desc:'410101' },
+  { key:'cuentaVentas0',           label:'Ventas tarifa 0%',                desc:'410102' },
+  { key:'cuentaIVAVentas',         label:'IVA en Ventas (pasivo)',          desc:'201070101' },
+  { key:'cuentaCaja',              label:'Caja',                            desc:'1010101' },
+  { key:'cuentaBancos',            label:'Bancos',                          desc:'1010102' },
+  { key:'cuentaCxCClientes',       label:'Cuentas por Cobrar Clientes',     desc:'101020502' },
+  { key:'cuentaCostoVentas',       label:'Costo de Ventas',                 desc:'510113' },
+  { key:'cuentaInventario',        label:'Inventario de Mercaderías',       desc:'1010306' },
+  { key:'cuentaIVACompras',        label:'IVA en Compras (activo)',         desc:'101050101' },
+  { key:'cuentaCxPProveedores',    label:'Cuentas por Pagar Proveedores',   desc:'2010301' },
+  { key:'cuentaRetFuenteClientes', label:'Ret. Fuente por Cobrar',          desc:'101050201' },
+  { key:'cuentaRetIVAClientes',    label:'Ret. IVA por Cobrar',             desc:'101050102' },
 ];
 
 export default function ConfigContablePage() {

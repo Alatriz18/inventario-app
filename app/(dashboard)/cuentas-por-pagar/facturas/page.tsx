@@ -2088,7 +2088,7 @@ export default function FacturasProveedorPage() {
             <p className="text-sm text-slate-600">
               Solo Celaysa es proveedor de inventario. Esta herramienta busca los asientos de compra de
               los demás proveedores que se contabilizaron contra Inventario y cambia esa cuenta por la
-              de gasto (por defecto 6.1.08 Gastos de Alimentación, o la cuenta de gasto del proveedor).
+              de gasto (por defecto 52022801 Gastos de alimentación, o la cuenta de gasto del proveedor).
               Los montos no cambian, solo la cuenta. Los asientos de períodos cerrados se omiten.
             </p>
             {cargandoReclas && <p className="text-sm text-slate-500">Revisando asientos…</p>}

@@ -67,7 +67,7 @@ export default function ActivosFijosPage() {
     valorAdquisicion: '', valorResidual: '0',
     vidaUtilAnios: '5', metodoDepreciacion: 'linea_recta' as MetodoDepreciacion,
     tasaDepreciacion: '20', ubicacion: '', notas: '',
-    cuentaActivoCodigo: '1.2.01', cuentaDepAcumCodigo: '1.2.01.01', cuentaGastoDepCodigo: '5.2.01',
+    cuentaActivoCodigo: '1020110', cuentaDepAcumCodigo: '1020112', cuentaGastoDepCodigo: '52022101',
   });
   const [saving, setSaving] = useState(false);
 
@@ -158,9 +158,9 @@ export default function ActivosFijosPage() {
         activoDescripcion:   activoDepSel.descripcion,
         fecha:               fechaDep,
         cuota:               cuotaDelMes.cuota,
-        cuentaActivoCodigo:  activoDepSel.cuentaActivoCodigo  ?? '1.2.01',
-        cuentaDepAcumCodigo: activoDepSel.cuentaDepAcumCodigo ?? '1.2.01.01',
-        cuentaGastoDepCodigo:activoDepSel.cuentaGastoDepCodigo ?? '5.2.01',
+        cuentaActivoCodigo:  activoDepSel.cuentaActivoCodigo  ?? '1020110',
+        cuentaDepAcumCodigo: activoDepSel.cuentaDepAcumCodigo ?? '1020112',
+        cuentaGastoDepCodigo:activoDepSel.cuentaGastoDepCodigo ?? '52022101',
         usuarioId:           user.uid,
         usuarioNombre:       user.nombre ?? user.email ?? 'Usuario',
       });

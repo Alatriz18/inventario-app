@@ -79,6 +79,7 @@ const NAV: NavItem[] = [
     label: 'Contabilidad', icon: BookOpen,
     children: [
       { label: 'Plan de Cuentas',      href: '/contabilidad/plan-cuentas',      icon: BookMarked,     modulo: 'plan_cuentas' },
+      { label: 'Migrar Plan Supercias',href: '/contabilidad/migrar-plan',       icon: BookMarked,     modulo: 'migrar_plan' },
       { label: 'Centros de Costo',     href: '/contabilidad/centros-costo',     icon: Landmark,       modulo: 'centros_costo' },
       { label: 'Config. Contable',     href: '/contabilidad/configuracion',     icon: Settings,       modulo: 'config_contable' },
       { label: 'Asientos Contables',   href: '/contabilidad/asientos',          icon: BookOpen,       modulo: 'asientos' },

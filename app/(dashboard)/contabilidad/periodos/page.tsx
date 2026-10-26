@@ -303,7 +303,7 @@ export default function PeriodosPage() {
                   {i === 0 && <Label className="text-xs">Código de Cuenta</Label>}
                   <Input className="h-8 text-sm" value={l.codigoCuenta}
                     onChange={e => setLineasApertura(prev => prev.map((x, idx) => idx === i ? {...x, codigoCuenta: e.target.value} : x))}
-                    placeholder="1.1.01.01" />
+                    placeholder="1010101" />
                 </div>
                 <div className="space-y-1">
                   {i === 0 && <Label className="text-xs">Debe</Label>}

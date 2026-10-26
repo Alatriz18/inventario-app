@@ -87,6 +87,9 @@ export interface Proveedor {
   cuentaCxP?: string;
   cuentaGasto?: string;
   cuentaIVACompras?: string;
+  // true → sus facturas ingresan a Inventario; false → van a gasto. Si no se define,
+  // solo Celaysa se trata como proveedor de inventario (ver esCompraInventario).
+  esProveedorInventario?: boolean;
   // Estado
   activo: boolean;
   createdAt: Date;
@@ -420,6 +423,7 @@ export interface ConfigContable {
   cuentaCxPProveedores:    string;
   cuentaRetFuenteClientes: string;
   cuentaRetIVAClientes:    string;
+  cuentaGastoCompras?:     string; // 6.1.08 — gasto por defecto de facturas de proveedores que no son de inventario
   // Cuentas adicionales (opcionales — con defaults razonables)
   cuentaUtilidadEjercicio?:   string; // 3.x — para asiento de cierre
   cuentaCapital?:              string; // 3.x — para asiento de apertura

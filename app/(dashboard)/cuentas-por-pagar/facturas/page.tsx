@@ -32,11 +32,14 @@ import {
 } from '@/components/ui/table';
 
 import {
-  crearAsientoPago, crearAsientoCompraFactura,
+  crearAsientoPago, crearAsientoCompraFactura, type ProveedorCompra,
   crearAsientoNotaCreditoRecibida, crearAsientoNotaDebitoRecibida,
   crearAsientoRetencionRecibida, crearAsientoReversion,
 } from '@/lib/contabilidad/motor-asientos';
 import { FacturaProveedor, Proveedor, CuentaBancaria } from '@/types';
+import {
+  buscarComprasAReclasificar, reclasificarCompras, type CompraAReclasificar,
+} from '@/lib/contabilidad/reclasificar-compras';
 import {
   subscribeToFacturasProveedorActivas,
   getFacturasProveedor,
@@ -210,6 +213,14 @@ export default function FacturasProveedorPage() {
   const [progresoReparar, setProgresoReparar] = useState(0);
   const [resumenReparar, setResumenReparar] = useState<{ faltantes: number } | null>(null);
   const [cargandoResumenReparar, setCargandoResumenReparar] = useState(false);
+
+  // Diálogo "Reclasificar compras a gasto" — las facturas de proveedores que no
+  // son de mercadería (todos salvo Celaysa) se contabilizaban contra Inventario.
+  const [dlgReclas,       setDlgReclas]       = useState(false);
+  const [cargandoReclas,  setCargandoReclas]  = useState(false);
+  const [reclasificando,  setReclasificando]  = useState(false);
+  const [progresoReclas,  setProgresoReclas]  = useState(0);
+  const [itemsReclas,     setItemsReclas]     = useState<CompraAReclasificar[]>([]);
 
   // Diálogo "Corregir fechas desfasadas" — new Date(`${yyyy}-${MM}-${dd}`)
   // (ya corregido en el código) parseaba como medianoche UTC; en Ecuador
@@ -495,7 +506,8 @@ export default function FacturasProveedorPage() {
         });
         const asientoId = await crearAsientoCompraFactura({
           facturaId, fecha: fechaEmision, proveedorNombre: it.razonSocial,
-          subtotal, iva, total, usuarioId: user.uid, usuarioNombre: user.nombre,
+          subtotal, iva, total, proveedor: prov,
+          usuarioId: user.uid, usuarioNombre: user.nombre,
         });
         if (clave) existentes.add(clave);
         return asientoId ? 'ok' : 'ok_sin_asiento';
@@ -706,7 +718,7 @@ export default function FacturasProveedorPage() {
         });
         const asientoId = await crearAsientoCompraFactura({
           facturaId, fecha: fechaEmision, proveedorNombre: f.razonSocialEmisor,
-          subtotal: f.valorSinImpuestos, iva: f.iva, total: f.importeTotal,
+          subtotal: f.valorSinImpuestos, iva: f.iva, total: f.importeTotal, proveedor: prov,
           usuarioId: user.uid, usuarioNombre: user.nombre,
         });
         if (!asientoId) facturasSinAsiento.push(`${f.razonSocialEmisor} (${f.serieComprobante})`);
@@ -746,6 +758,44 @@ export default function FacturasProveedorPage() {
     return todasFacturas.filter(f => f.estado !== 'anulada' && !conAsiento.has(f.id));
   };
 
+  const proveedorDeFactura = (f: FacturaProveedor): ProveedorCompra => {
+    const prov = proveedores.find(p => p.id === f.proveedorId) ?? proveedores.find(p => p.ruc === f.proveedorRuc);
+    return prov ?? { nombre: f.proveedorNombre };
+  };
+
+  const handleAbrirReclasificar = async () => {
+    setDlgReclas(true);
+    setItemsReclas([]);
+    setCargandoReclas(true);
+    try {
+      setItemsReclas(await buscarComprasAReclasificar(proveedores));
+    } catch {
+      toast.error('No se pudieron revisar los asientos de compra');
+    } finally {
+      setCargandoReclas(false);
+    }
+  };
+
+  const handleReclasificar = async () => {
+    if (!user) return;
+    setReclasificando(true);
+    setProgresoReclas(0);
+    try {
+      const r = await reclasificarCompras(itemsReclas, { uid: user.uid, nombre: user.nombre }, setProgresoReclas);
+      toast.success(
+        `${r.ok} asiento(s) reclasificados a gasto` +
+        (r.omitidos ? ` — ${r.omitidos} omitidos (período cerrado)` : '') +
+        (r.errores ? ` — ${r.errores} con error` : ''),
+        { duration: 10000 }
+      );
+      setDlgReclas(false);
+    } catch (e: any) {
+      toast.error(e.message ?? 'Error al reclasificar');
+    } finally {
+      setReclasificando(false);
+    }
+  };
+
   const handleAbrirReparar = async () => {
     setDlgReparar(true);
     setResumenReparar(null);
@@ -773,6 +823,7 @@ export default function FacturasProveedorPage() {
           const asientoId = await crearAsientoCompraFactura({
             facturaId: f.id, fecha: (f.fechaEmision as any)?.toDate?.() ?? new Date(f.fechaEmision),
             proveedorNombre: f.proveedorNombre, subtotal: f.subtotal12 + f.subtotal0, iva: f.iva, total: f.total,
+            proveedor: proveedorDeFactura(f),
             usuarioId: user.uid, usuarioNombre: user.nombre,
           });
           if (asientoId) ok++; else err++;
@@ -1206,6 +1257,10 @@ export default function FacturasProveedorPage() {
             </Button>
             <Button variant="outline" onClick={handleAbrirReparar} title="Busca facturas registradas que quedaron sin su asiento contable y los genera">
               <FileCheck className="mr-2 h-4 w-4" /> Reparar asientos faltantes
+            </Button>
+            <Button variant="outline" onClick={handleAbrirReclasificar}
+              title="Pasa de Inventario a Gasto los asientos de facturas de proveedores que no son de mercadería">
+              <FileCheck className="mr-2 h-4 w-4" /> Reclasificar compras a gasto
             </Button>
             <Button variant="outline" onClick={handleAbrirCorregirFechas}
               title="Recalcula la fecha real desde el XML guardado y corrige las que quedaron un día atrás por husos horarios">
@@ -2018,6 +2073,41 @@ export default function FacturasProveedorPage() {
             <Button variant="outline" onClick={() => setDlgReparar(false)} disabled={reparando}>Cancelar</Button>
             <Button onClick={handleReparar} disabled={reparando}>
               {reparando ? 'Reparando…' : 'Buscar y generar asientos'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Dialog reclasificar compras de Inventario a Gasto */}
+      <Dialog open={dlgReclas} onOpenChange={(o) => !reclasificando && setDlgReclas(o)}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Reclasificar compras a gasto</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3">
+            <p className="text-sm text-slate-600">
+              Solo Celaysa es proveedor de inventario. Esta herramienta busca los asientos de compra de
+              los demás proveedores que se contabilizaron contra Inventario y cambia esa cuenta por la
+              de gasto (por defecto 6.1.08 Gastos de Alimentación, o la cuenta de gasto del proveedor).
+              Los montos no cambian, solo la cuenta. Los asientos de períodos cerrados se omiten.
+            </p>
+            {cargandoReclas && <p className="text-sm text-slate-500">Revisando asientos…</p>}
+            {!cargandoReclas && !reclasificando && (
+              <p className="text-sm font-medium">
+                {itemsReclas.length === 0
+                  ? 'No hay asientos por reclasificar.'
+                  : `Se encontraron ${itemsReclas.length} asiento(s) por $${itemsReclas.reduce((s, i) => s + i.monto, 0).toFixed(2)} contabilizados en Inventario.`}
+              </p>
+            )}
+            {reclasificando && (
+              <p className="text-sm text-slate-500">Reclasificando… {progresoReclas} / {itemsReclas.length}</p>
+            )}
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setDlgReclas(false)} disabled={reclasificando}>Cancelar</Button>
+            <Button onClick={handleReclasificar}
+              disabled={reclasificando || cargandoReclas || itemsReclas.length === 0}>
+              {reclasificando ? 'Reclasificando…' : 'Reclasificar a gasto'}
             </Button>
           </DialogFooter>
         </DialogContent>

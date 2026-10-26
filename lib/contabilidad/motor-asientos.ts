@@ -213,6 +213,39 @@ interface ParamsCompra extends ParamsBase {
   subtotal:        number;
   iva:             number;
   total:           number;
+  /** Cuenta a debitar por el subtotal. Por defecto Inventario (compra de mercadería). */
+  cuentaDebito?:   string;
+  descripcionDebito?: string;
+}
+
+/** Datos mínimos del proveedor para decidir si su factura es inventario o gasto. */
+export interface ProveedorCompra {
+  nombre:                string;
+  cuentaGasto?:          string;
+  esProveedorInventario?: boolean;
+}
+
+// Celaysa es el único proveedor de mercadería: mientras el proveedor no tenga
+// el campo esProveedorInventario definido, se reconoce por nombre.
+const PROVEEDOR_INVENTARIO_POR_DEFECTO = /celaysa/i;
+
+export function esCompraInventario(prov: ProveedorCompra): boolean {
+  if (prov.cuentaGasto?.trim()) return false;
+  if (prov.esProveedorInventario !== undefined) return prov.esProveedorInventario;
+  return PROVEEDOR_INVENTARIO_POR_DEFECTO.test(prov.nombre);
+}
+
+/** Cuenta que se debita en la factura de un proveedor: Inventario o su cuenta de gasto. */
+export async function resolverCuentaDebitoCompra(
+  prov: ProveedorCompra
+): Promise<{ codigo: string; esGasto: boolean } | null> {
+  const config = await getConfigSegura();
+  if (!config) return null;
+  if (esCompraInventario(prov)) return { codigo: config.cuentaInventario, esGasto: false };
+  return {
+    codigo:  prov.cuentaGasto?.trim() || config.cuentaGastoCompras || '6.1.08',
+    esGasto: true,
+  };
 }
 
 function buildLineasCompra(
@@ -221,8 +254,8 @@ function buildLineasCompra(
   p:       ParamsCompra
 ): AsientoLinea[] {
   const lineas: AsientoLinea[] = [];
-  lineas.push(buildLinea(cuentas, config.cuentaInventario,
-    p.subtotal, 0, 'Compra de mercaderías'));
+  lineas.push(buildLinea(cuentas, p.cuentaDebito ?? config.cuentaInventario,
+    p.subtotal, 0, p.descripcionDebito ?? 'Compra de mercaderías'));
   // El total de la factura (lo que realmente se le debe al proveedor) es el
   // dato real; si el SRI redondeó cada línea y subtotal+iva no da exacto el
   // total, se absorbe la diferencia en el IVA (no en el subtotal) para que
@@ -274,6 +307,8 @@ export async function crearAsientoCompraFactura(p: {
   subtotal:        number;
   iva:             number;
   total:           number;
+  /** Si se pasa, decide Inventario vs gasto según el proveedor; si no, va a Inventario. */
+  proveedor?:      ProveedorCompra;
   usuarioId:       string;
   usuarioNombre:   string;
 }): Promise<string | null> {
@@ -281,7 +316,10 @@ export async function crearAsientoCompraFactura(p: {
     const config  = await getConfigSegura();
     if (!config) return null;
     const cuentas = await getCuentasCached();
+    const destino = p.proveedor ? await resolverCuentaDebitoCompra(p.proveedor) : null;
     const lineas  = buildLineasCompra(cuentas, config, {
+      cuentaDebito:      destino?.codigo,
+      descripcionDebito: destino?.esGasto ? `Gasto - ${p.proveedorNombre}` : undefined,
       entradaId:       p.facturaId,
       fecha:           p.fecha,
       proveedorNombre: p.proveedorNombre,

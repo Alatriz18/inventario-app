@@ -29,7 +29,11 @@ import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from '@/components/ui/table';
 
-import { Proveedor, TipoIdentificacionProv, TipoProveedor, TipoPago } from '@/types';
+import { deleteField } from 'firebase/firestore';
+import { Proveedor, TipoIdentificacionProv, TipoProveedor, TipoPago, CuentaContable } from '@/types';
+import { subscribeToCuentas } from '@/lib/firebase/plan-cuentas';
+import { PLAN_CUENTAS_ECUADOR } from '@/lib/data/plan-cuentas-ecuador';
+import { asegurarCuenta } from '@/lib/contabilidad/reclasificar-compras';
 import { subscribeToProveedores, createProveedor, updateProveedor, deleteProveedor } from '@/lib/firebase/proveedores';
 import { PROVINCIAS_ECUADOR, PAISES, CODIGOS_SUSTENTO, REGIMENES } from '@/lib/constants/ecuador';
 
@@ -84,6 +88,8 @@ export default function ProveedoresPage() {
   const [deletingId,  setDeletingId]  = useState<string | null>(null);
   const [saving,      setSaving]      = useState(false);
   const [search,      setSearch]      = useState('');
+  const [cuentasPlan, setCuentasPlan] = useState<CuentaContable[]>([]);
+  const [destinoCompra, setDestinoCompra] = useState('auto');
 
   const { register, handleSubmit, reset, watch, setValue, formState: { errors } } =
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -108,14 +114,27 @@ export default function ProveedoresPage() {
     activo: true, notas: '',
   });
 
+  useEffect(() => subscribeToCuentas(setCuentasPlan), []);
+
+  // Cuentas de gasto/costo del plan + las del catálogo base que aún no existen en él
+  const cuentasGasto = (() => {
+    const esGasto = (c: { tipo: string; aceptaMovimientos: boolean }) =>
+      (c.tipo === 'gasto' || c.tipo === 'costo') && c.aceptaMovimientos;
+    const delPlan = cuentasPlan.filter(c => esGasto(c) && c.activa !== false);
+    const faltantes = PLAN_CUENTAS_ECUADOR.filter(c => esGasto(c) && !cuentasPlan.some(p => p.codigo === c.codigo));
+    return [...delPlan, ...faltantes].sort((a, b) => a.codigo.localeCompare(b.codigo));
+  })();
+
   const openCreate = () => {
     setEditing(null);
+    setDestinoCompra('auto');
     reset(defaultValues());
     setDialogOpen(true);
   };
 
   const openEdit = (p: Proveedor) => {
     setEditing(p);
+    setDestinoCompra(p.cuentaGasto?.trim() || (p.esProveedorInventario ? 'inventario' : 'auto'));
     reset({
       tipoIdentificacion: p.tipoIdentificacion,
       ruc: p.ruc, nombre: p.nombre,
@@ -142,14 +161,28 @@ export default function ProveedoresPage() {
   const onSubmit = async (data: ProveedorForm) => {
     setSaving(true);
     try {
+      const esCuenta = destinoCompra !== 'auto' && destinoCompra !== 'inventario';
+      if (esCuenta) await asegurarCuenta(destinoCompra); // crea la cuenta si solo estaba en el catálogo base
+      const base: ProveedorForm & { esProveedorInventario?: boolean } = {
+        ...data,
+        cuentaGasto: esCuenta ? destinoCompra : '',
+        esProveedorInventario: destinoCompra === 'inventario' ? true : undefined,
+      };
       const clean = Object.fromEntries(
-        Object.entries(data).map(([k, v]) => [k, v === '' ? undefined : v])
+        Object.entries(base).map(([k, v]) => [k, v === '' ? undefined : v])
       ) as unknown as Proveedor;
       if (editing) {
-        await updateProveedor(editing.id, clean);
+        // Firestore rechaza undefined: los campos vaciados se borran explícitamente.
+        const cambios = Object.fromEntries(
+          Object.entries(clean).map(([k, v]) => [k, v === undefined ? deleteField() : v])
+        );
+        await updateProveedor(editing.id, cambios as Partial<Proveedor>);
         toast.success('Proveedor actualizado');
       } else {
-        await createProveedor({ ...clean, activo: true });
+        await createProveedor({
+          ...(Object.fromEntries(Object.entries(clean).filter(([, v]) => v !== undefined)) as unknown as Proveedor),
+          activo: true,
+        });
         toast.success('Proveedor creado');
       }
       setDialogOpen(false);
@@ -456,8 +489,17 @@ export default function ProveedoresPage() {
                   <Input placeholder="ej: 2.1.01.001" {...register('cuentaCxP')} />
                 </div>
                 <div className="space-y-1.5">
-                  <Label className="text-xs">Cuenta de Compras/Gasto</Label>
-                  <Input placeholder="ej: 5.1.01.001" {...register('cuentaGasto')} />
+                  <Label className="text-xs">Destino de sus facturas</Label>
+                  <Select value={destinoCompra} onValueChange={setDestinoCompra}>
+                    <SelectTrigger><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="auto">Automático (Celaysa = inventario, otros = gasto)</SelectItem>
+                      <SelectItem value="inventario">Inventario (mercadería)</SelectItem>
+                      {cuentasGasto.map(c => (
+                        <SelectItem key={c.codigo} value={c.codigo}>{c.codigo} – {c.nombre}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
                 </div>
                 <div className="space-y-1.5">
                   <Label className="text-xs">Cuenta IVA Compras</Label>

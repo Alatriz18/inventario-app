@@ -18,6 +18,7 @@ export interface CompraAReclasificar {
   fecha:           Date;
   proveedorNombre: string;
   monto:           number;
+  cuentaOrigen:    string;
   cuentaDestino:   string;
   bloqueado:       boolean;
 }
@@ -32,20 +33,26 @@ export async function buscarComprasAReclasificar(
   const provPorId    = new Map(proveedores.map(p => [p.id, p]));
   const provPorRuc   = new Map(proveedores.map(p => [p.ruc, p]));
 
+  const gastoPorDefecto = config.cuentaGastoCompras || '6.1.08';
   const res: CompraAReclasificar[] = [];
   for (const a of asientos) {
     if (a.tipo !== 'compra_proveedor' || a.referenciaTipo !== 'factura_proveedor') continue;
-    const linea = a.lineas.find(l => l.cuentaCodigo === config.cuentaInventario && l.debe > 0);
+    // Origen: Inventario (error original) o el gasto por defecto, por si el
+    // proveedor ahora tiene una cuenta propia (combustible, etc.).
+    const linea = a.lineas.find(l =>
+      (l.cuentaCodigo === config.cuentaInventario || l.cuentaCodigo === gastoPorDefecto) && l.debe > 0);
     if (!linea) continue;
     const f = facturaPorId.get(a.referenciaId ?? '');
     if (!f || f.estado === 'anulada') continue;
     const prov = provPorId.get(f.proveedorId) ?? provPorRuc.get(f.proveedorRuc);
     const datos = prov ?? { nombre: f.proveedorNombre };
     if (esCompraInventario(datos)) continue;
+    const cuentaDestino = prov?.cuentaGasto?.trim() || gastoPorDefecto;
+    if (cuentaDestino === linea.cuentaCodigo) continue;
     res.push({
       asientoId: a.id, numero: a.numero ?? '', fecha: a.fecha,
       proveedorNombre: f.proveedorNombre, monto: linea.debe,
-      cuentaDestino: prov?.cuentaGasto?.trim() || config.cuentaGastoCompras || '6.1.08',
+      cuentaOrigen: linea.cuentaCodigo, cuentaDestino,
       bloqueado: !!a.bloqueado,
     });
   }
@@ -53,7 +60,7 @@ export async function buscarComprasAReclasificar(
 }
 
 /** Garantiza que la cuenta de destino exista en el plan (la crea si falta, p. ej. 6.1.08). */
-async function asegurarCuenta(codigo: string) {
+export async function asegurarCuenta(codigo: string) {
   const existente = (await getCuentas()).find(c => c.codigo === codigo);
   if (existente) return { codigo, nombre: existente.nombre, id: existente.id };
   const base = PLAN_CUENTAS_ECUADOR.find(c => c.codigo === codigo);
@@ -68,7 +75,6 @@ export async function reclasificarCompras(
   usuario: { uid: string; nombre: string },
   onProgreso?: (hechos: number) => void
 ): Promise<{ ok: number; omitidos: number; errores: number }> {
-  const config = await getOrCreateConfigContable();
   const destinos = new Map<string, { codigo: string; nombre: string; id: string }>();
   let ok = 0, omitidos = 0, errores = 0;
 
@@ -78,7 +84,7 @@ export async function reclasificarCompras(
       if (it.bloqueado) { omitidos++; continue; }
       if (!destinos.has(it.cuentaDestino)) destinos.set(it.cuentaDestino, await asegurarCuenta(it.cuentaDestino));
       const cambio = await reclasificarCuentaEnAsiento(
-        it.asientoId, config.cuentaInventario, destinos.get(it.cuentaDestino)!, usuario.uid, usuario.nombre
+        it.asientoId, it.cuentaOrigen, destinos.get(it.cuentaDestino)!, usuario.uid, usuario.nombre
       );
       if (cambio) ok++; else omitidos++;
     } catch { errores++; }

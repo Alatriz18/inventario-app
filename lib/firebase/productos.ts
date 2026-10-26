@@ -12,13 +12,20 @@ const COL = 'productos';
 // pantalla con búsqueda del lado del servidor en vez de traer todo.
 const LIMITE_DEFAULT = 3000;
 
+/**
+ * Por defecto NO incluye los ítems de tipo 'gasto' (alimentación, combustible…):
+ * no tienen stock y no deben aparecer en el POS, entradas, despachos ni reportes de
+ * inventario. Solo el catálogo de Productos y la importación de compras los piden.
+ */
 export function subscribeToProductos(
   callback: (data: Producto[]) => void,
-  limite = LIMITE_DEFAULT
+  limite = LIMITE_DEFAULT,
+  opciones: { incluirGastos?: boolean } = {}
 ): () => void {
   const q = query(collection(db, COL), orderBy('nombre'), fsLimit(limite));
   return onSnapshot(q, (snap) => {
-    callback(snap.docs.map((d) => ({ id: d.id, ...d.data() } as Producto)));
+    const todos = snap.docs.map((d) => ({ id: d.id, ...d.data() } as Producto));
+    callback(opciones.incluirGastos ? todos : todos.filter((p) => p.tipoItem !== 'gasto'));
   });
 }
 

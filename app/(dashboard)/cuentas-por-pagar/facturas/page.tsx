@@ -36,7 +36,9 @@ import {
   crearAsientoNotaCreditoRecibida, crearAsientoNotaDebitoRecibida,
   crearAsientoRetencionRecibida, crearAsientoReversion,
 } from '@/lib/contabilidad/motor-asientos';
-import { FacturaProveedor, Proveedor, CuentaBancaria } from '@/types';
+import { FacturaProveedor, Proveedor, CuentaBancaria, Producto } from '@/types';
+import { subscribeToProductos, updateProducto } from '@/lib/firebase/productos';
+import { clasificarDetalles, aLineasCompra } from '@/lib/contabilidad/clasificar-compra';
 import {
   buscarComprasAReclasificar, reclasificarCompras, type CompraAReclasificar,
 } from '@/lib/contabilidad/reclasificar-compras';
@@ -182,6 +184,7 @@ export default function FacturasProveedorPage() {
 
   const [facturas,     setFacturas]     = useState<FacturaProveedor[]>([]);
   const [proveedores,  setProveedores]  = useState<Proveedor[]>([]);
+  const [productos,    setProductos]    = useState<Producto[]>([]);
   const [loading,      setLoading]      = useState(true);
   const [dialogOpen,   setDialogOpen]   = useState(false);
   const [pagoDialog,   setPagoDialog]   = useState<FacturaProveedor | null>(null);
@@ -269,9 +272,10 @@ export default function FacturasProveedorPage() {
   useEffect(() => {
     const u1 = subscribeToFacturasProveedorActivas((d) => { setFacturas(d); setLoading(false); });
     const u2 = subscribeToProveedores(setProveedores);
+    const uProd = subscribeToProductos(setProductos, undefined, { incluirGastos: true });
     const u3 = subscribeToCuentasBancarias(setCuentasBancarias);
     const u4 = subscribeToComprobantes(setComprobantesEmitidos, { limite: 1000 });
-    return () => { u1(); u2(); u3(); u4(); };
+    return () => { u1(); u2(); uProd(); u3(); u4(); };
   }, []);
 
   const stats = {
@@ -496,6 +500,7 @@ export default function FacturasProveedorPage() {
         const total    = Number(inf.importeTotal) || 0;
         const fechaEmision = parseFecha(inf.fechaEmision);
         const prov = await getOrCreateProveedorPorRuc(it.ruc, it.razonSocial);
+        const lineasClasificadas = aLineasCompra(clasificarDetalles(productos, it.ruc, data.detalles ?? []));
 
         const facturaId = await createFacturaProveedor({
           proveedorId: prov.id, proveedorNombre: it.razonSocial, proveedorRuc: it.ruc,
@@ -506,7 +511,7 @@ export default function FacturasProveedorPage() {
         });
         const asientoId = await crearAsientoCompraFactura({
           facturaId, fecha: fechaEmision, proveedorNombre: it.razonSocial,
-          subtotal, iva, total, proveedor: prov,
+          subtotal, iva, total, proveedor: prov, lineasClasificadas,
           usuarioId: user.uid, usuarioNombre: user.nombre,
         });
         if (clave) existentes.add(clave);
@@ -1743,7 +1748,7 @@ export default function FacturasProveedorPage() {
 
       {/* ─── DIALOG CONFIRMAR XML ─── */}
       <Dialog open={xmlDialog} onOpenChange={() => { setXmlDialog(false); setXmlPreview(null); }}>
-        <DialogContent className="sm:max-w-lg">
+        <DialogContent className="sm:max-w-2xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <FileSearch className="h-4 w-4" /> Confirmar importación XML
@@ -1790,9 +1795,83 @@ export default function FacturasProveedorPage() {
                   registrado. La factura se importará igualmente pero sin asociar al proveedor.
                 </div>
               )}
-              <p className="text-xs text-slate-400">
-                Se importarán {xmlPreview.data.detalles?.length ?? 0} línea(s) de detalle.
-              </p>
+              {(() => {
+                const ruc    = xmlPreview.data.infoTributaria.ruc as string;
+                const lineas = clasificarDetalles(productos, ruc, xmlPreview.data.detalles ?? []);
+                if (lineas.length === 0) return null;
+                const sinAsignar = lineas.filter(l => !l.producto).length;
+
+                // Vincula el código de este proveedor al producto elegido: la próxima factura se clasifica sola
+                const asignar = async (codigo: string, productoId: string) => {
+                  const prod = productos.find(x => x.id === productoId);
+                  if (!prod) return;
+                  const prov = proveedores.find(x => x.ruc === ruc);
+                  try {
+                    await updateProducto(prod.id, {
+                      proveedores: [...(prod.proveedores ?? []), {
+                        proveedorId: prov?.id ?? '', proveedorRuc: ruc,
+                        proveedorNombre: xmlPreview.data.infoTributaria.razonSocial, codigoProveedor: codigo,
+                      }],
+                    });
+                    toast.success(`Código ${codigo} vinculado a "${prod.nombre}"`);
+                  } catch { toast.error('No se pudo vincular el producto'); }
+                };
+
+                return (
+                  <div className="space-y-2">
+                    <p className="text-xs font-medium text-slate-600">
+                      Destino contable de cada línea
+                      {sinAsignar > 0 && <span className="ml-2 text-amber-600">({sinAsignar} sin producto asignado)</span>}
+                    </p>
+                    <div className="max-h-56 overflow-y-auto rounded-lg border">
+                      <Table>
+                        <TableHeader>
+                          <TableRow>
+                            <TableHead>Descripción</TableHead>
+                            <TableHead className="text-right">Valor</TableHead>
+                            <TableHead className="min-w-[200px]">Producto / destino</TableHead>
+                          </TableRow>
+                        </TableHeader>
+                        <TableBody>
+                          {lineas.map(l => (
+                            <TableRow key={l.indice}>
+                              <TableCell className="text-xs">
+                                {l.descripcion}
+                                <span className="block font-mono text-[10px] text-slate-400">{l.codigo}</span>
+                              </TableCell>
+                              <TableCell className="text-right text-xs">{currency(l.monto)}</TableCell>
+                              <TableCell>
+                                {l.producto ? (
+                                  <Badge variant="outline" className={l.producto.tipoItem === 'gasto' ? 'border-amber-300 text-amber-700' : 'border-blue-300 text-blue-700'}>
+                                    {l.producto.nombre} · {l.producto.tipoItem === 'gasto' ? 'Gasto' : 'Inventario'}
+                                  </Badge>
+                                ) : (
+                                  <Select value="" onValueChange={v => asignar(l.codigo, v)}>
+                                    <SelectTrigger className="h-8 text-xs"><SelectValue placeholder="Asignar a un producto…" /></SelectTrigger>
+                                    <SelectContent className="max-h-60">
+                                      {productos.filter(x => x.activo !== false).map(x => (
+                                        <SelectItem key={x.id} value={x.id}>
+                                          {x.nombre}{x.tipoItem === 'gasto' ? ' (gasto)' : ''}
+                                        </SelectItem>
+                                      ))}
+                                    </SelectContent>
+                                  </Select>
+                                )}
+                              </TableCell>
+                            </TableRow>
+                          ))}
+                        </TableBody>
+                      </Table>
+                    </div>
+                    {sinAsignar > 0 && (
+                      <p className="text-[11px] text-slate-400">
+                        Las líneas sin producto siguen la regla del proveedor (inventario o gasto). Al asignarlas, el sistema
+                        recuerda el código de este proveedor para las próximas facturas.
+                      </p>
+                    )}
+                  </div>
+                );
+              })()}
             </div>
           )}
           <DialogFooter>

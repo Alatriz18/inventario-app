@@ -29,7 +29,11 @@ import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from '@/components/ui/select';
 
-import { Producto, Categoria } from '@/types';
+import { Producto, Categoria, Proveedor, CuentaContable, ProductoProveedor } from '@/types';
+import { subscribeToProveedores } from '@/lib/firebase/proveedores';
+import { subscribeToCuentas } from '@/lib/firebase/plan-cuentas';
+import { PLAN_CUENTAS_ECUADOR } from '@/lib/data/plan-cuentas-ecuador';
+import { asegurarCuenta } from '@/lib/contabilidad/reclasificar-compras';
 import { subscribeToProductos, createProducto, updateProducto, deleteProducto } from '@/lib/firebase/productos';
 import { subscribeToCategorias } from '@/lib/firebase/categorias';
 import { comprimirImagenBase64 } from '@/lib/utils/imagen';
@@ -42,13 +46,21 @@ const schema = z.object({
   descripcion:  z.string().optional(),
   categoriaId:  z.string().min(1, 'Selecciona una categoría'),
   precioCompra: z.coerce.number().min(0, 'Precio inválido'),
-  precioVenta:  z.coerce.number().min(0.01, 'Precio inválido'),
+  precioVenta:  z.coerce.number().min(0, 'Precio inválido'),
   stockActual:  z.coerce.number().min(0),
   stockMinimo:  z.coerce.number().min(0),
+  tipoItem:     z.enum(['inventario', 'gasto']),
+  cuentaGasto:  z.string().optional(),
   activo:       z.boolean(),
-}).refine(data => data.precioVenta >= data.precioCompra, {
-  message: 'El precio de venta no puede ser menor al precio de costo',
-  path: ['precioVenta'],
+}).superRefine((data, ctx) => {
+  if (data.tipoItem === 'gasto') {
+    if (!data.cuentaGasto) ctx.addIssue({ code: 'custom', path: ['cuentaGasto'], message: 'Elige la cuenta contable del gasto' });
+    return;
+  }
+  if (data.precioVenta < 0.01) ctx.addIssue({ code: 'custom', path: ['precioVenta'], message: 'Precio inválido' });
+  else if (data.precioVenta < data.precioCompra) {
+    ctx.addIssue({ code: 'custom', path: ['precioVenta'], message: 'El precio de venta no puede ser menor al precio de costo' });
+  }
 });
 
 type ProductoForm = z.infer<typeof schema>;
@@ -83,32 +95,65 @@ export default function ProductosPage() {
   const [search,       setSearch]       = useState('');
   const [filtroCategoria, setFiltroCategoria] = useState('todas');
   const [quickCat,     setQuickCat]     = useState(false); // ← dentro del componente
+  const [proveedores,  setProveedores]  = useState<Proveedor[]>([]);
+  const [cuentasPlan,  setCuentasPlan]  = useState<CuentaContable[]>([]);
+  const [provsItem,    setProvsItem]    = useState<ProductoProveedor[]>([]);
+  const [provSel,      setProvSel]      = useState('');
+  const [codigoProv,   setCodigoProv]   = useState('');
   const fileRef = useRef<HTMLInputElement>(null);
 
   const { register, handleSubmit, reset, setValue, watch, formState: { errors } } =
     useForm<ProductoForm>({ resolver: zodResolver(schema) as any });
 
+  const tipoItem     = watch('tipoItem');
+  const cuentaGasto  = watch('cuentaGasto');
   const precioCompra = watch('precioCompra') || 0;
   const precioVenta  = watch('precioVenta')  || 0;
 
   useEffect(() => {
-    const u1 = subscribeToProductos((d) => { setProductos(d); setLoading(false); });
+    const u1 = subscribeToProductos((d) => { setProductos(d); setLoading(false); }, undefined, { incluirGastos: true });
     const u2 = subscribeToCategorias(setCategorias);
-    return () => { u1(); u2(); };
+    const u3 = subscribeToProveedores(setProveedores);
+    const u4 = subscribeToCuentas(setCuentasPlan);
+    return () => { u1(); u2(); u3(); u4(); };
   }, []);
+
+  // Cuentas de gasto/costo del plan + las del catálogo base que aún no existen en él
+  const cuentasGasto = (() => {
+    const esGasto = (c: { tipo: string; aceptaMovimientos: boolean }) =>
+      (c.tipo === 'gasto' || c.tipo === 'costo') && c.aceptaMovimientos;
+    const delPlan = cuentasPlan.filter(c => esGasto(c) && c.activa !== false);
+    const faltantes = PLAN_CUENTAS_ECUADOR.filter(c => esGasto(c) && !cuentasPlan.some(p => p.codigo === c.codigo));
+    return [...delPlan, ...faltantes].sort((a, b) => a.codigo.localeCompare(b.codigo));
+  })();
+
+  const agregarProveedor = () => {
+    const prov = proveedores.find(p => p.id === provSel);
+    const codigo = codigoProv.trim();
+    if (!prov || !codigo) { toast.error('Elige el proveedor y escribe el código con que lo factura'); return; }
+    if (provsItem.some(v => v.proveedorRuc === prov.ruc && v.codigoProveedor === codigo)) {
+      toast.error('Ese proveedor ya tiene este código en el producto'); return;
+    }
+    setProvsItem(v => [...v, { proveedorId: prov.id, proveedorRuc: prov.ruc, proveedorNombre: prov.nombre, codigoProveedor: codigo }]);
+    setProvSel(''); setCodigoProv('');
+  };
 
   const openCreate = () => {
     setEditing(null);
     setImagePreview(null);
+    setProvsItem([]); setProvSel(''); setCodigoProv('');
     reset({ sku: '', nombre: '', descripcion: '', categoriaId: '',
-      precioCompra: 0, precioVenta: 0, stockActual: 0, stockMinimo: 5, activo: true });
+      precioCompra: 0, precioVenta: 0, stockActual: 0, stockMinimo: 5,
+      tipoItem: 'inventario', cuentaGasto: '', activo: true });
     setDialogOpen(true);
   };
 
   const openEdit = (p: Producto) => {
     setEditing(p);
     setImagePreview(p.imagen || null);
+    setProvsItem(p.proveedores ?? []); setProvSel(''); setCodigoProv('');
     reset({
+      tipoItem: p.tipoItem ?? 'inventario', cuentaGasto: p.cuentaGasto ?? '',
       sku: p.sku, nombre: p.nombre, descripcion: p.descripcion ?? '',
       categoriaId: p.categoriaId, precioCompra: p.precioCompra,
       precioVenta: p.precioVenta, stockActual: p.stockActual,
@@ -138,8 +183,12 @@ export default function ProductosPage() {
     setSaving(true);
     try {
       const categoria = categorias.find((c) => c.id === data.categoriaId);
+      const esGasto = data.tipoItem === 'gasto';
+      if (esGasto && data.cuentaGasto) await asegurarCuenta(data.cuentaGasto); // crea la cuenta si solo estaba en el catálogo base
       const payload: Omit<Producto, 'id'> = {
         ...data, categoriaNombre: categoria?.nombre ?? '',
+        cuentaGasto: esGasto ? data.cuentaGasto ?? '' : '',
+        proveedores: provsItem,
         imagen: imagePreview ?? '', createdAt: editing?.createdAt ?? new Date(), updatedAt: new Date(),
       };
       if (editing) {
@@ -245,7 +294,17 @@ export default function ProductosPage() {
                   )}
                 </TableCell>
                 <TableCell className="font-mono text-xs text-slate-500 hidden md:table-cell">{p.sku}</TableCell>
-                <TableCell className="font-medium">{p.nombre}</TableCell>
+                <TableCell className="font-medium">
+                  {p.nombre}
+                  {p.tipoItem === 'gasto' && (
+                    <Badge variant="outline" className="ml-2 border-amber-300 text-amber-700">Gasto</Badge>
+                  )}
+                  {(p.proveedores?.length ?? 0) > 0 && (
+                    <span className="ml-2 text-[11px] font-normal text-slate-400">
+                      {p.proveedores!.length} proveedor{p.proveedores!.length > 1 ? 'es' : ''}
+                    </span>
+                  )}
+                </TableCell>
                 <TableCell className="hidden sm:table-cell">
                   <span className="text-xs bg-slate-100 text-slate-600 px-2 py-0.5 rounded-full">
                     {p.categoriaNombre || '—'}
@@ -259,10 +318,12 @@ export default function ProductosPage() {
                   </TableCell>
                 )}
                 <TableCell className="text-center">
-                  <span className={`font-semibold text-sm ${p.stockActual <= p.stockMinimo ? 'text-red-600' : 'text-slate-700'}`}>
-                    {Number(p.stockActual.toFixed(2))}
-                  </span>
-                  {p.stockActual <= p.stockMinimo && <span className="ml-1 text-xs text-red-400">⚠</span>}
+                  {p.tipoItem === 'gasto' ? <span className="text-xs text-slate-300">—</span> : (<>
+                    <span className={`font-semibold text-sm ${p.stockActual <= p.stockMinimo ? 'text-red-600' : 'text-slate-700'}`}>
+                      {Number(p.stockActual.toFixed(2))}
+                    </span>
+                    {p.stockActual <= p.stockMinimo && <span className="ml-1 text-xs text-red-400">⚠</span>}
+                  </>)}
                 </TableCell>
                 <TableCell className="text-center hidden sm:table-cell">
                   <Badge variant={p.activo ? 'default' : 'secondary'}>{p.activo ? 'Activo' : 'Inactivo'}</Badge>
@@ -331,6 +392,39 @@ export default function ProductosPage() {
               </div>
             </div>
 
+            {/* Tipo de ítem */}
+            <div className="col-span-2 space-y-1.5">
+              <Label>¿Qué es este ítem?</Label>
+              <div className="grid grid-cols-2 gap-2">
+                {([
+                  ['inventario', 'Producto de inventario', 'Se compra y se vende; maneja stock'],
+                  ['gasto',      'Gasto o servicio',       'Alimentación, combustible, fletes… va directo a una cuenta de gasto'],
+                ] as const).map(([valor, titulo, detalle]) => (
+                  <button key={valor} type="button" onClick={() => setValue('tipoItem', valor, { shouldValidate: true })}
+                    className={`rounded-lg border p-3 text-left transition-colors ${tipoItem === valor
+                      ? 'border-blue-500 bg-blue-50' : 'border-slate-200 hover:border-slate-300'}`}>
+                    <p className="text-sm font-medium">{titulo}</p>
+                    <p className="text-xs text-slate-500">{detalle}</p>
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {tipoItem === 'gasto' && (
+              <div className="col-span-2 space-y-1.5">
+                <Label>Cuenta contable del gasto *</Label>
+                <Select value={cuentaGasto ?? ''} onValueChange={(v) => setValue('cuentaGasto', v, { shouldValidate: true })}>
+                  <SelectTrigger><SelectValue placeholder="Elige la cuenta de gasto" /></SelectTrigger>
+                  <SelectContent className="max-h-72">
+                    {cuentasGasto.map(c => (
+                      <SelectItem key={c.codigo} value={c.codigo}>{c.codigo} – {c.nombre}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                {errors.cuentaGasto && <p className="text-xs text-red-500">{errors.cuentaGasto.message}</p>}
+              </div>
+            )}
+
             <div className="space-y-1.5">
               <Label>SKU / Código *</Label>
               <Input placeholder="TAB-001" {...register('sku')} />
@@ -363,6 +457,7 @@ export default function ProductosPage() {
               {errors.categoriaId && <p className="text-xs text-red-500">{errors.categoriaId.message}</p>}
             </div>
 
+            {tipoItem !== 'gasto' && (<>
             <div className="space-y-1.5">
               <Label>Precio de compra *</Label>
               <div className="relative">
@@ -409,6 +504,50 @@ export default function ProductosPage() {
             <div className="space-y-1.5">
               <Label>Stock mínimo (alerta)</Label>
               <Input type="number" min="0" placeholder="5" {...register('stockMinimo')} />
+            </div>
+            </>)}
+
+            {/* Proveedores y el código con que cada uno factura este producto */}
+            <div className="col-span-2 space-y-2 rounded-lg border p-3">
+              <div>
+                <Label>Proveedores de este ítem</Label>
+                <p className="text-xs text-slate-400">
+                  Registra el código con que cada proveedor lo factura. Al importar sus facturas (XML), el sistema
+                  reconoce el ítem y lo manda a {tipoItem === 'gasto' ? 'la cuenta de gasto elegida' : 'inventario'} automáticamente.
+                </p>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                <Select value={provSel} onValueChange={setProvSel}>
+                  <SelectTrigger className="min-w-[220px] flex-1"><SelectValue placeholder="Proveedor…" /></SelectTrigger>
+                  <SelectContent className="max-h-60">
+                    {proveedores.filter(p => p.activo !== false).map(p => (
+                      <SelectItem key={p.id} value={p.id}>{p.nombre}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <Input className="w-44" placeholder="Código del proveedor" value={codigoProv}
+                  onChange={(e) => setCodigoProv(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); agregarProveedor(); } }} />
+                <Button type="button" variant="outline" onClick={agregarProveedor}>
+                  <Plus className="mr-1 h-4 w-4" /> Añadir
+                </Button>
+              </div>
+              {provsItem.length > 0 && (
+                <ul className="divide-y rounded-md border text-sm">
+                  {provsItem.map((v, i) => (
+                    <li key={`${v.proveedorRuc}-${v.codigoProveedor}`} className="flex items-center justify-between gap-2 px-3 py-1.5">
+                      <span className="truncate">
+                        {v.proveedorNombre} <span className="font-mono text-xs text-slate-400">{v.proveedorRuc}</span>
+                      </span>
+                      <span className="flex items-center gap-2">
+                        <span className="font-mono text-xs">{v.codigoProveedor}</span>
+                        <button type="button" onClick={() => setProvsItem(l => l.filter((_, k) => k !== i))}
+                          className="text-slate-400 hover:text-red-600"><X className="h-4 w-4" /></button>
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              )}
             </div>
 
             <div className="space-y-1.5 col-span-2">

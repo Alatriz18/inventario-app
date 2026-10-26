@@ -217,6 +217,16 @@ interface ParamsCompra extends ParamsBase {
   /** Cuenta a debitar por el subtotal. Por defecto Inventario (compra de mercadería). */
   cuentaDebito?:   string;
   descripcionDebito?: string;
+  /** Reparto del subtotal entre varias cuentas (factura con líneas de distinto tipo). */
+  debitos?:        Array<{ cuenta: string; monto: number; descripcion: string }>;
+}
+
+/** Línea de una factura ya emparejada con el catálogo de productos. */
+export interface LineaCompraClasificada {
+  monto:       number;
+  descripcion: string;
+  destino?:    'inventario' | 'gasto'; // undefined = sin emparejar: aplica la regla del proveedor
+  cuentaGasto?: string;
 }
 
 /** Datos mínimos del proveedor para decidir si su factura es inventario o gasto. */
@@ -249,14 +259,54 @@ export async function resolverCuentaDebitoCompra(
   };
 }
 
+/**
+ * Reparte el subtotal de la factura entre cuentas según el producto de cada línea.
+ * Las líneas sin emparejar siguen la regla del proveedor. Devuelve undefined cuando
+ * ninguna línea se emparejó (se usa la cuenta única de siempre).
+ */
+function repartirSubtotal(
+  config:   Awaited<ReturnType<typeof getOrCreateConfigContable>>,
+  subtotal: number,
+  lineas:   LineaCompraClasificada[] | undefined,
+  porDefecto: { codigo: string; esGasto: boolean } | null,
+  proveedorNombre: string
+): ParamsCompra['debitos'] {
+  if (!lineas?.some(l => l.destino)) return undefined;
+  const cuentaDefecto = porDefecto?.codigo ?? config.cuentaInventario;
+  const grupos = new Map<string, { monto: number; descripcion: string }>();
+  for (const l of lineas) {
+    const cuenta = l.destino === 'inventario' ? config.cuentaInventario
+      : l.destino === 'gasto' ? (l.cuentaGasto?.trim() || config.cuentaGastoCompras || DEF.cuentaGastoCompras)
+      : cuentaDefecto;
+    const g = grupos.get(cuenta) ?? { monto: 0, descripcion: '' };
+    g.monto += l.monto;
+    g.descripcion = g.descripcion || l.descripcion;
+    grupos.set(cuenta, g);
+  }
+  const debitos = [...grupos.entries()].map(([cuenta, g]) => ({
+    cuenta, monto: round2(g.monto),
+    descripcion: cuenta === config.cuentaInventario ? 'Compra de mercaderías' : `Gasto - ${proveedorNombre}`,
+  }));
+  // El subtotal del SRI es el dato real: el redondeo de las líneas se absorbe en el grupo mayor
+  const diferencia = round2(subtotal - debitos.reduce((s, d) => s + d.monto, 0));
+  if (diferencia !== 0) {
+    debitos.sort((a, b) => b.monto - a.monto)[0].monto = round2(debitos[0].monto + diferencia);
+  }
+  return debitos.filter(d => d.monto !== 0);
+}
+
 function buildLineasCompra(
   cuentas: CuentaContable[],
   config:  Awaited<ReturnType<typeof getOrCreateConfigContable>>,
   p:       ParamsCompra
 ): AsientoLinea[] {
   const lineas: AsientoLinea[] = [];
-  lineas.push(buildLinea(cuentas, p.cuentaDebito ?? config.cuentaInventario,
-    p.subtotal, 0, p.descripcionDebito ?? 'Compra de mercaderías'));
+  if (p.debitos?.length) {
+    p.debitos.forEach(d => lineas.push(buildLinea(cuentas, d.cuenta, d.monto, 0, d.descripcion)));
+  } else {
+    lineas.push(buildLinea(cuentas, p.cuentaDebito ?? config.cuentaInventario,
+      p.subtotal, 0, p.descripcionDebito ?? 'Compra de mercaderías'));
+  }
   // El total de la factura (lo que realmente se le debe al proveedor) es el
   // dato real; si el SRI redondeó cada línea y subtotal+iva no da exacto el
   // total, se absorbe la diferencia en el IVA (no en el subtotal) para que
@@ -310,6 +360,8 @@ export async function crearAsientoCompraFactura(p: {
   total:           number;
   /** Si se pasa, decide Inventario vs gasto según el proveedor; si no, va a Inventario. */
   proveedor?:      ProveedorCompra;
+  /** Líneas de la factura emparejadas con el catálogo: reparten el subtotal por cuenta. */
+  lineasClasificadas?: LineaCompraClasificada[];
   usuarioId:       string;
   usuarioNombre:   string;
 }): Promise<string | null> {
@@ -318,9 +370,12 @@ export async function crearAsientoCompraFactura(p: {
     if (!config) return null;
     const cuentas = await getCuentasCached();
     const destino = p.proveedor ? await resolverCuentaDebitoCompra(p.proveedor) : null;
+    const debitos = repartirSubtotal(config, p.subtotal, p.lineasClasificadas, destino, p.proveedorNombre);
+    const clasificado = !!p.lineasClasificadas?.some(l => l.destino);
     const lineas  = buildLineasCompra(cuentas, config, {
       cuentaDebito:      destino?.codigo,
       descripcionDebito: destino?.esGasto ? `Gasto - ${p.proveedorNombre}` : undefined,
+      debitos,
       entradaId:       p.facturaId,
       fecha:           p.fecha,
       proveedorNombre: p.proveedorNombre,
@@ -337,6 +392,7 @@ export async function crearAsientoCompraFactura(p: {
       tipo:           'compra_proveedor',
       referenciaId:   p.facturaId,
       referenciaTipo: 'factura_proveedor',
+      ...(clasificado ? { clasificadoPorProducto: true } : {}),
       lineas,
       totalDebe:      lineas.reduce((s, l) => s + l.debe,  0),
       totalHaber:     lineas.reduce((s, l) => s + l.haber, 0),

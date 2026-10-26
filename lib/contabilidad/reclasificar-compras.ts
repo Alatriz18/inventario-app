@@ -37,6 +37,7 @@ export async function buscarComprasAReclasificar(
   const res: CompraAReclasificar[] = [];
   for (const a of asientos) {
     if (a.tipo !== 'compra_proveedor' || a.referenciaTipo !== 'factura_proveedor') continue;
+    if (a.clasificadoPorProducto) continue; // ya repartida por línea según el catálogo
     // Origen: Inventario (error original) o el gasto por defecto, por si el
     // proveedor ahora tiene una cuenta propia (combustible, etc.).
     const linea = a.lineas.find(l =>

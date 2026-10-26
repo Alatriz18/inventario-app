@@ -135,6 +135,17 @@ export interface Cliente {
 }
 
 // ─── PRODUCTOS ─────────────────────────────────────────────────────────────
+/** Código con el que un proveedor identifica este producto en sus facturas. */
+export interface ProductoProveedor {
+  proveedorId:     string;
+  proveedorRuc:    string;
+  proveedorNombre: string;
+  codigoProveedor: string;
+}
+
+/** 'gasto' = rubro que se consume (alimentación, combustible…): no maneja stock ni se vende en el POS. */
+export type TipoItemProducto = 'inventario' | 'gasto';
+
 export interface Producto {
   id: string;
   sku: string;
@@ -147,6 +158,9 @@ export interface Producto {
   stockActual: number;
   stockMinimo: number;
   imagen?: string;
+  tipoItem?: TipoItemProducto;      // por defecto 'inventario'
+  cuentaGasto?: string;             // código de cuenta contable cuando tipoItem = 'gasto'
+  proveedores?: ProductoProveedor[];
   activo: boolean;
   createdAt: Date;
   updatedAt: Date;
@@ -402,6 +416,7 @@ export interface AsientoContable {
   estado:         'borrador' | 'confirmado';
   bloqueado:      boolean;  // true si el período contable está cerrado
   editadoManualmente: boolean; // true si fue modificado después de crearse automáticamente
+  clasificadoPorProducto?: boolean; // compra repartida por línea según el catálogo de productos
   usuarioId:      string;
   usuarioNombre:  string;
   createdAt:      Date;

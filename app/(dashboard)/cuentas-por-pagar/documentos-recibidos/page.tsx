@@ -32,6 +32,9 @@ import {
 } from '@/lib/contabilidad/motor-asientos';
 import { useAuth } from '@/context/AuthContext';
 import { leerTextoDetectandoCodificacion } from '@/lib/utils/leer-texto';
+import CuentaCombobox from '@/components/shared/CuentaCombobox';
+import { useOpcionesDestinoCompra } from '@/hooks/useOpcionesDestinoCompra';
+import { asegurarCuenta } from '@/lib/contabilidad/reclasificar-compras';
 
 const currency = (v: number) => `$${(v ?? 0).toFixed(2)}`;
 const TIPO_LABEL: Record<string, string> = { nota_credito: 'Nota de crédito', nota_debito: 'Nota de débito' };
@@ -126,6 +129,8 @@ export default function DocumentosRecibidosPage() {
   const [docModificado,setDocModificado]= useState('');
   const [fechaEmision, setFechaEmision] = useState(new Date().toISOString().split('T')[0]);
   const [claveAcceso,  setClaveAcceso]  = useState('');
+  const [destinoDoc,   setDestinoDoc]   = useState('auto'); // 'auto' | 'inventario' | código de cuenta de gasto
+  const opcionesDestino = useOpcionesDestinoCompra();
   const [subtotal,     setSubtotal]     = useState(0);
   const [iva,          setIva]          = useState(0);
   const [saving,       setSaving]       = useState(false);
@@ -348,7 +353,7 @@ export default function DocumentosRecibidosPage() {
   const resetDialog = () => {
     setTipo('nota_credito'); setProveedor(''); setProveedorRuc('');
     setNumero(''); setDocModificado(''); setFechaEmision(new Date().toISOString().split('T')[0]);
-    setClaveAcceso(''); setSubtotal(0); setIva(0);
+    setClaveAcceso(''); setSubtotal(0); setIva(0); setDestinoDoc('auto');
   };
 
   const handleRegistrar = async () => {
@@ -380,10 +385,11 @@ export default function DocumentosRecibidosPage() {
         usuarioNombre:   user.nombre ?? user.email ?? 'Usuario',
       });
 
+      if (destinoDoc !== 'auto' && destinoDoc !== 'inventario') await asegurarCuenta(destinoDoc);
       const crearAsiento = tipo === 'nota_credito' ? crearAsientoNotaCreditoRecibida : crearAsientoNotaDebitoRecibida;
       const asientoId = await crearAsiento({
         docId, fecha, proveedorNombre: proveedor.trim(),
-        subtotal, iva, total,
+        subtotal, iva, total, proveedor: prov, cuentaDestino: destinoDoc,
         usuarioId: user.uid, usuarioNombre: user.nombre ?? user.email ?? 'Usuario',
       });
 
@@ -467,7 +473,7 @@ export default function DocumentosRecibidosPage() {
         const crearAsiento = f.tipo === 'nota_credito' ? crearAsientoNotaCreditoRecibida : crearAsientoNotaDebitoRecibida;
         const asientoId = await crearAsiento({
           docId, fecha, proveedorNombre: f.proveedorNombre || prov.nombre,
-          subtotal: f.subtotal, iva: f.iva, total: f.total,
+          subtotal: f.subtotal, iva: f.iva, total: f.total, proveedor: prov,
           usuarioId: user.uid, usuarioNombre: user.nombre ?? user.email ?? 'Usuario',
         });
 
@@ -665,6 +671,15 @@ export default function DocumentosRecibidosPage() {
                 <Label>Clave de acceso (opcional)</Label>
                 <Input value={claveAcceso} onChange={e => setClaveAcceso(e.target.value)}
                   placeholder="49 dígitos" className="mt-1 font-mono text-xs" />
+              </div>
+              <div className="sm:col-span-2 min-w-0">
+                <Label>Cuenta que se {tipo === 'nota_credito' ? 'acredita (reversa de la compra)' : 'debita (cargo adicional)'}</Label>
+                <div className="mt-1">
+                  <CuentaCombobox value={destinoDoc} onChange={setDestinoDoc} opciones={opcionesDestino} />
+                </div>
+                <p className="mt-1 text-[11px] text-slate-400">
+                  «Según el proveedor»: Celaysa va a inventario y los demás a su cuenta de gasto.
+                </p>
               </div>
               <div>
                 <Label>Subtotal sin IVA *</Label>

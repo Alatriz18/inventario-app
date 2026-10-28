@@ -5,6 +5,7 @@
  */
 
 import { getFacturasProveedor } from '@/lib/firebase/facturas-proveedor';
+import { getDocsRecibidos } from '@/lib/firebase/docs-recibidos';
 import { getAsientos, reclasificarCuentaEnAsiento } from '@/lib/firebase/asientos';
 import { getCuentas, createCuenta } from '@/lib/firebase/plan-cuentas';
 import { getOrCreateConfigContable } from '@/lib/firebase/config-contable';
@@ -26,33 +27,46 @@ export interface CompraAReclasificar {
 export async function buscarComprasAReclasificar(
   proveedores: Proveedor[]
 ): Promise<CompraAReclasificar[]> {
-  const [config, facturas, asientos] = await Promise.all([
-    getOrCreateConfigContable(), getFacturasProveedor(), getAsientos(),
+  const [config, facturas, asientos, docs] = await Promise.all([
+    getOrCreateConfigContable(), getFacturasProveedor(), getAsientos(), getDocsRecibidos(),
   ]);
   const facturaPorId = new Map(facturas.map(f => [f.id, f]));
+  const docPorId     = new Map(docs.map(d => [d.id, d]));
   const provPorId    = new Map(proveedores.map(p => [p.id, p]));
   const provPorRuc   = new Map(proveedores.map(p => [p.ruc, p]));
 
   const gastoPorDefecto = config.cuentaGastoCompras || CUENTAS_POR_DEFECTO.cuentaGastoCompras;
   const res: CompraAReclasificar[] = [];
   for (const a of asientos) {
-    if (a.tipo !== 'compra_proveedor' || a.referenciaTipo !== 'factura_proveedor') continue;
+    const esFactura = a.tipo === 'compra_proveedor' && a.referenciaTipo === 'factura_proveedor';
+    const esNC = a.referenciaTipo === 'nota_credito_recibida';
+    const esND = a.referenciaTipo === 'nota_debito_recibida';
+    if (!esFactura && !esNC && !esND) continue;
     if (a.clasificadoPorProducto) continue; // ya repartida por línea según el catálogo
-    // Origen: Inventario (error original) o el gasto por defecto, por si el
-    // proveedor ahora tiene una cuenta propia (combustible, etc.).
+
+    // Documento origen: factura, o nota de crédito/débito recibida
+    const f = esFactura ? facturaPorId.get(a.referenciaId ?? '') : undefined;
+    const doc = !esFactura ? docPorId.get(a.referenciaId ?? '') : undefined;
+    const origen = f
+      ? { proveedorId: f.proveedorId, proveedorRuc: f.proveedorRuc, nombre: f.proveedorNombre, anulado: f.estado === 'anulada' }
+      : doc ? { proveedorId: doc.proveedorId ?? '', proveedorRuc: doc.proveedorRuc, nombre: doc.proveedorNombre, anulado: !!doc.anulado }
+      : null;
+    if (!origen || origen.anulado) continue;
+
+    // Origen del importe: Inventario (error original) o el gasto por defecto, por si el
+    // proveedor ahora tiene una cuenta propia. Factura y ND van al debe; la NC, al haber.
     const linea = a.lineas.find(l =>
-      (l.cuentaCodigo === config.cuentaInventario || l.cuentaCodigo === gastoPorDefecto) && l.debe > 0);
+      (l.cuentaCodigo === config.cuentaInventario || l.cuentaCodigo === gastoPorDefecto) &&
+      (esNC ? l.haber > 0 : l.debe > 0));
     if (!linea) continue;
-    const f = facturaPorId.get(a.referenciaId ?? '');
-    if (!f || f.estado === 'anulada') continue;
-    const prov = provPorId.get(f.proveedorId) ?? provPorRuc.get(f.proveedorRuc);
-    const datos = prov ?? { nombre: f.proveedorNombre };
+    const prov = provPorId.get(origen.proveedorId) ?? provPorRuc.get(origen.proveedorRuc);
+    const datos = prov ?? { nombre: origen.nombre };
     if (esCompraInventario(datos)) continue;
     const cuentaDestino = prov?.cuentaGasto?.trim() || gastoPorDefecto;
     if (cuentaDestino === linea.cuentaCodigo) continue;
     res.push({
       asientoId: a.id, numero: a.numero ?? '', fecha: a.fecha,
-      proveedorNombre: f.proveedorNombre, monto: linea.debe,
+      proveedorNombre: origen.nombre, monto: esNC ? linea.haber : linea.debe,
       cuentaOrigen: linea.cuentaCodigo, cuentaDestino,
       bloqueado: !!a.bloqueado,
     });

@@ -38,7 +38,10 @@ import {
 } from '@/lib/contabilidad/motor-asientos';
 import { FacturaProveedor, Proveedor, CuentaBancaria, Producto } from '@/types';
 import { subscribeToProductos, updateProducto } from '@/lib/firebase/productos';
+import { asegurarCuenta } from '@/lib/contabilidad/reclasificar-compras';
 import { clasificarDetalles, aLineasCompra } from '@/lib/contabilidad/clasificar-compra';
+import CuentaCombobox from '@/components/shared/CuentaCombobox';
+import { useOpcionesDestinoCompra } from '@/hooks/useOpcionesDestinoCompra';
 import {
   buscarComprasAReclasificar, reclasificarCompras, type CompraAReclasificar,
 } from '@/lib/contabilidad/reclasificar-compras';
@@ -185,6 +188,8 @@ export default function FacturasProveedorPage() {
   const [facturas,     setFacturas]     = useState<FacturaProveedor[]>([]);
   const [proveedores,  setProveedores]  = useState<Proveedor[]>([]);
   const [productos,    setProductos]    = useState<Producto[]>([]);
+  const [destinoFactura, setDestinoFactura] = useState('auto'); // destino de la factura manual
+  const opcionesDestino = useOpcionesDestinoCompra();
   const [loading,      setLoading]      = useState(true);
   const [dialogOpen,   setDialogOpen]   = useState(false);
   const [pagoDialog,   setPagoDialog]   = useState<FacturaProveedor | null>(null);
@@ -298,6 +303,7 @@ export default function FacturasProveedorPage() {
       fechaEmision: new Date().toISOString().split('T')[0],
       fechaVencimiento: '', subtotal12: 0, subtotal0: 0, iva: 0, total: 0, notas: '',
     });
+    setDestinoFactura('auto');
     setDialogOpen(true);
   };
 
@@ -306,13 +312,14 @@ export default function FacturasProveedorPage() {
     setSaving(true);
     try {
       const prov = proveedores.find(p => p.id === data.proveedorId);
-      await createFacturaProveedor({
+      const fechaEmisionManual = new Date(data.fechaEmision + 'T12:00:00'); // mediodía local: evita correr el día por huso horario
+      const facturaId = await createFacturaProveedor({
         proveedorId:      data.proveedorId,
         proveedorNombre:  prov?.nombre ?? '',
         proveedorRuc:     prov?.ruc    ?? '',
         numeroFactura:    data.numeroFactura,
         ...(data.claveAcceso ? { claveAcceso: data.claveAcceso } : {}),
-        fechaEmision:     new Date(data.fechaEmision),
+        fechaEmision:     fechaEmisionManual,
         fechaVencimiento: data.fechaVencimiento ? new Date(data.fechaVencimiento) : undefined,
         subtotal12:       data.subtotal12,
         subtotal0:        data.subtotal0,
@@ -326,7 +333,16 @@ export default function FacturasProveedorPage() {
         usuarioNombre:    user.nombre,
         createdAt:        new Date(),
       });
-      toast.success('Factura registrada');
+      // Asiento de compra: Inventario o gasto según el destino elegido / la regla del proveedor
+      if (destinoFactura !== 'auto' && destinoFactura !== 'inventario') await asegurarCuenta(destinoFactura);
+      const asientoId = await crearAsientoCompraFactura({
+        facturaId, fecha: fechaEmisionManual, proveedorNombre: prov?.nombre ?? '',
+        subtotal: data.subtotal12 + data.subtotal0, iva: data.iva, total: data.total,
+        proveedor: prov, cuentaDestino: destinoFactura,
+        usuarioId: user.uid, usuarioNombre: user.nombre,
+      });
+      if (asientoId) toast.success('Factura registrada y contabilizada');
+      else toast.warning('Factura registrada, pero el asiento contable NO se pudo generar. Usa "Reparar asientos faltantes".', { duration: 10000 });
       setDialogOpen(false);
     } catch (e: any) {
       toast.error(e?.message ?? 'Error al guardar la factura');
@@ -534,7 +550,7 @@ export default function FacturasProveedorPage() {
         });
         const asientoNcId = await crearAsientoNotaCreditoRecibida({
           docId, fecha: parseFecha(d.fechaEmision), proveedorNombre: d.razonSocial,
-          subtotal: d.subtotal, iva: d.iva, total: d.total,
+          subtotal: d.subtotal, iva: d.iva, total: d.total, proveedor: prov,
           usuarioId: user.uid, usuarioNombre: user.nombre,
         });
         if (d.docModificado) {
@@ -568,7 +584,7 @@ export default function FacturasProveedorPage() {
         });
         const asientoNdId = await crearAsientoNotaDebitoRecibida({
           docId, fecha: parseFecha(d.fechaEmision), proveedorNombre: d.razonSocial,
-          subtotal: d.subtotal, iva: d.iva, total: d.total,
+          subtotal: d.subtotal, iva: d.iva, total: d.total, proveedor: prov,
           usuarioId: user.uid, usuarioNombre: user.nombre,
         });
         if (d.docModificado) {
@@ -1484,6 +1500,13 @@ export default function FacturasProveedorPage() {
                 <p className="text-xs text-red-500">{facturaForm.formState.errors.total.message}</p>
               )}
             </div>
+            <div className="space-y-1.5 col-span-2 min-w-0">
+              <Label>Destino contable de la compra</Label>
+              <CuentaCombobox value={destinoFactura} onChange={setDestinoFactura} opciones={opcionesDestino} />
+              <p className="text-[11px] text-slate-400">
+                «Según el proveedor»: Celaysa va a inventario y los demás a su cuenta de gasto.
+              </p>
+            </div>
             <div className="space-y-1.5 col-span-2">
               <Label>Notas</Label>
               <Textarea placeholder="Observaciones..." rows={2} {...facturaForm.register('notas')} />
@@ -2165,7 +2188,7 @@ export default function FacturasProveedorPage() {
           </DialogHeader>
           <div className="space-y-3">
             <p className="text-sm text-slate-600">
-              Solo Celaysa es proveedor de inventario. Esta herramienta busca los asientos de compra de
+              Solo Celaysa es proveedor de inventario. Esta herramienta busca los asientos de compra (facturas, notas de crédito y notas de débito) de
               los demás proveedores que se contabilizaron contra Inventario y cambia esa cuenta por la
               de gasto (por defecto 52022801 Gastos de alimentación, o la cuenta de gasto del proveedor).
               Los montos no cambian, solo la cuenta. También se corrigen los asientos de períodos cerrados, que siguen cerrados.

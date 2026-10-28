@@ -246,6 +246,24 @@ export function esCompraInventario(prov: ProveedorCompra): boolean {
   return PROVEEDOR_INVENTARIO_POR_DEFECTO.test(prov.nombre);
 }
 
+/**
+ * Cuenta de compra de un documento: el destino elegido a mano ('inventario' o un código de
+ * cuenta) manda; si es 'auto' o no hay, se aplica la regla del proveedor; sin proveedor, Inventario.
+ */
+async function cuentaDeCompra(
+  config: Awaited<ReturnType<typeof getOrCreateConfigContable>>,
+  prov?: ProveedorCompra,
+  destino?: string
+): Promise<{ codigo: string; esGasto: boolean }> {
+  if (destino === 'inventario') return { codigo: config.cuentaInventario, esGasto: false };
+  if (destino && destino !== 'auto') return { codigo: destino, esGasto: true };
+  if (prov) {
+    const r = await resolverCuentaDebitoCompra(prov);
+    if (r) return r;
+  }
+  return { codigo: config.cuentaInventario, esGasto: false };
+}
+
 /** Cuenta que se debita en la factura de un proveedor: Inventario o su cuenta de gasto. */
 export async function resolverCuentaDebitoCompra(
   prov: ProveedorCompra
@@ -360,6 +378,8 @@ export async function crearAsientoCompraFactura(p: {
   total:           number;
   /** Si se pasa, decide Inventario vs gasto según el proveedor; si no, va a Inventario. */
   proveedor?:      ProveedorCompra;
+  /** Destino elegido a mano para toda la factura: 'auto', 'inventario' o un código de cuenta. */
+  cuentaDestino?:  string;
   /** Líneas de la factura emparejadas con el catálogo: reparten el subtotal por cuenta. */
   lineasClasificadas?: LineaCompraClasificada[];
   usuarioId:       string;
@@ -369,7 +389,8 @@ export async function crearAsientoCompraFactura(p: {
     const config  = await getConfigSegura();
     if (!config) return null;
     const cuentas = await getCuentasCached();
-    const destino = p.proveedor ? await resolverCuentaDebitoCompra(p.proveedor) : null;
+    const destino = (p.proveedor || p.cuentaDestino)
+      ? await cuentaDeCompra(config, p.proveedor, p.cuentaDestino) : null;
     const debitos = repartirSubtotal(config, p.subtotal, p.lineasClasificadas, destino, p.proveedorNombre);
     const clasificado = !!p.lineasClasificadas?.some(l => l.destino);
     const lineas  = buildLineasCompra(cuentas, config, {
@@ -811,6 +832,10 @@ interface ParamsDocRecibido extends ParamsBase {
   subtotal:        number;
   iva:             number;
   total:           number;
+  /** Regla del proveedor (inventario o gasto). Sin proveedor ni destino se usa Inventario. */
+  proveedor?:      ProveedorCompra;
+  /** Destino elegido a mano: 'auto', 'inventario' o un código de cuenta. */
+  cuentaDestino?:  string;
 }
 
 export async function crearAsientoNotaCreditoRecibida(p: ParamsDocRecibido): Promise<string | null> {
@@ -823,8 +848,9 @@ export async function crearAsientoNotaCreditoRecibida(p: ParamsDocRecibido): Pro
     // DB: CxP Proveedores (disminuye la deuda)
     lineas.push(buildLinea(cuentas, config.cuentaCxPProveedores, p.total, 0,
       `NC recibida de ${p.proveedorNombre}`));
-    // CR: Inventario (reversa de la compra)
-    lineas.push(buildLinea(cuentas, config.cuentaInventario, 0, p.subtotal,
+    // CR: Inventario o la cuenta de gasto de la compra original (reversa de la compra)
+    const destino = await cuentaDeCompra(config, p.proveedor, p.cuentaDestino);
+    lineas.push(buildLinea(cuentas, destino.codigo, 0, p.subtotal,
       'Reversa de compra (NC proveedor)'));
     // CR: IVA en compras (reversa del crédito tributario) — absorbe cualquier
     // redondeo de 1 centavo del SRI para que el asiento cuadre exacto.
@@ -863,8 +889,9 @@ export async function crearAsientoNotaDebitoRecibida(p: ParamsDocRecibido): Prom
     const cuentas = await getCuentasCached();
     const lineas: AsientoLinea[] = [];
 
-    // DB: Inventario / gasto (cargo adicional del proveedor)
-    lineas.push(buildLinea(cuentas, config.cuentaInventario, p.subtotal, 0,
+    // DB: Inventario o gasto, según el proveedor (cargo adicional del proveedor)
+    const destino = await cuentaDeCompra(config, p.proveedor, p.cuentaDestino);
+    lineas.push(buildLinea(cuentas, destino.codigo, p.subtotal, 0,
       `ND recibida de ${p.proveedorNombre}`));
     // DB: IVA en compras — absorbe cualquier redondeo de 1 centavo del SRI
     // para que el asiento cuadre exacto.

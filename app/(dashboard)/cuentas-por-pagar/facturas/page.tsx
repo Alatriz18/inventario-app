@@ -789,7 +789,7 @@ export default function FacturasProveedorPage() {
       const r = await reclasificarCompras(itemsReclas, { uid: user.uid, nombre: user.nombre }, setProgresoReclas);
       toast.success(
         `${r.ok} asiento(s) reclasificados a gasto` +
-        (r.omitidos ? ` — ${r.omitidos} omitidos (período cerrado)` : '') +
+        (r.omitidos ? ` — ${r.omitidos} sin cambios` : '') +
         (r.errores ? ` — ${r.errores} con error` : ''),
         { duration: 10000 }
       );
@@ -2168,14 +2168,15 @@ export default function FacturasProveedorPage() {
               Solo Celaysa es proveedor de inventario. Esta herramienta busca los asientos de compra de
               los demás proveedores que se contabilizaron contra Inventario y cambia esa cuenta por la
               de gasto (por defecto 52022801 Gastos de alimentación, o la cuenta de gasto del proveedor).
-              Los montos no cambian, solo la cuenta. Los asientos de períodos cerrados se omiten.
+              Los montos no cambian, solo la cuenta. También se corrigen los asientos de períodos cerrados, que siguen cerrados.
             </p>
             {cargandoReclas && <p className="text-sm text-slate-500">Revisando asientos…</p>}
             {!cargandoReclas && !reclasificando && (
               <p className="text-sm font-medium">
                 {itemsReclas.length === 0
                   ? 'No hay asientos por reclasificar.'
-                  : `Se encontraron ${itemsReclas.length} asiento(s) por $${itemsReclas.reduce((s, i) => s + i.monto, 0).toFixed(2)} contabilizados en Inventario.`}
+                  : `Se encontraron ${itemsReclas.length} asiento(s) por $${itemsReclas.reduce((s, i) => s + i.monto, 0).toFixed(2)} contabilizados en Inventario` +
+                    `${itemsReclas.some(i => i.bloqueado) ? ` (${itemsReclas.filter(i => i.bloqueado).length} en períodos cerrados)` : ''}.`}
               </p>
             )}
             {reclasificando && (

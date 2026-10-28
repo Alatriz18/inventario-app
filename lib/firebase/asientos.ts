@@ -229,12 +229,14 @@ export async function reclasificarCuentaEnAsiento(
   cuentaOrigenCodigo: string,
   cuentaDestino:      { codigo: string; nombre: string; id?: string },
   usuarioId:          string,
-  usuarioNombre:       string
+  usuarioNombre:       string,
+  /** Permite reclasificar aunque el período esté cerrado (solo cambia la cuenta, no los montos). */
+  permitirCerrado = false
 ): Promise<boolean> {
   const snap = await getDoc(doc(db, COL, id));
   if (!snap.exists()) throw new Error('Asiento no encontrado');
   const asiento = fromDoc(snap);
-  if (asiento.bloqueado) {
+  if (asiento.bloqueado && !permitirCerrado) {
     throw new Error('No se puede editar: el período contable está cerrado.');
   }
 

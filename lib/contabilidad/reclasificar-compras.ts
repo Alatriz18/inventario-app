@@ -82,10 +82,10 @@ export async function reclasificarCompras(
   for (let i = 0; i < items.length; i++) {
     const it = items[i];
     try {
-      if (it.bloqueado) { omitidos++; continue; }
       if (!destinos.has(it.cuentaDestino)) destinos.set(it.cuentaDestino, await asegurarCuenta(it.cuentaDestino));
       const cambio = await reclasificarCuentaEnAsiento(
-        it.asientoId, it.cuentaOrigen, destinos.get(it.cuentaDestino)!, usuario.uid, usuario.nombre
+        it.asientoId, it.cuentaOrigen, destinos.get(it.cuentaDestino)!, usuario.uid, usuario.nombre,
+        true // los períodos cerrados también se corrigen: no cambia ningún monto, solo la cuenta
       );
       if (cambio) ok++; else omitidos++;
     } catch { errores++; }

@@ -15,6 +15,7 @@ import {
 } from '@/components/ui/table';
 
 import { useAuth } from '@/context/AuthContext';
+import CuentaCombobox from '@/components/shared/CuentaCombobox';
 import { PLAN_CUENTAS_SUPERCIAS } from '@/lib/data/plan-cuentas-supercias';
 import {
   analizarMigracion, generarRespaldo, aplicarMigracion,
@@ -158,16 +159,9 @@ export default function MigrarPlanPage() {
                           {u.lineas} líneas · {u.otros} vínculos
                         </TableCell>
                         <TableCell className="min-w-[320px]">
-                          <Select value={dest} onValueChange={v => setManuales(m => ({ ...m, [u.codigo]: v }))}>
-                            <SelectTrigger className={dest ? '' : 'border-red-300'}>
-                              <SelectValue placeholder="Elegir cuenta destino…" />
-                            </SelectTrigger>
-                            <SelectContent className="max-h-72">
-                              {destinos.map(c => (
-                                <SelectItem key={c.codigo} value={c.codigo}>{c.codigo} – {c.nombre}</SelectItem>
-                              ))}
-                            </SelectContent>
-                          </Select>
+                          <CuentaCombobox value={dest} placeholder="Elegir cuenta destino…"
+                            onChange={v => setManuales(m => ({ ...m, [u.codigo]: v }))}
+                            opciones={destinos.map(c => ({ value: c.codigo, label: `${c.codigo} – ${c.nombre}` }))} />
                           {dest && !manuales[u.codigo] && (
                             <p className="mt-1 text-[11px] text-slate-400">{nombreDestino(dest)}</p>
                           )}

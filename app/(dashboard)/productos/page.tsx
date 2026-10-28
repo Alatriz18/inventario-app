@@ -34,6 +34,7 @@ import { subscribeToProveedores } from '@/lib/firebase/proveedores';
 import { subscribeToCuentas } from '@/lib/firebase/plan-cuentas';
 import { PLAN_CUENTAS_ECUADOR } from '@/lib/data/plan-cuentas-ecuador';
 import { asegurarCuenta } from '@/lib/contabilidad/reclasificar-compras';
+import CuentaCombobox from '@/components/shared/CuentaCombobox';
 import { subscribeToProductos, createProducto, updateProducto, deleteProducto } from '@/lib/firebase/productos';
 import { subscribeToCategorias } from '@/lib/firebase/categorias';
 import { comprimirImagenBase64 } from '@/lib/utils/imagen';
@@ -413,14 +414,9 @@ export default function ProductosPage() {
             {tipoItem === 'gasto' && (
               <div className="col-span-2 space-y-1.5">
                 <Label>Cuenta contable del gasto *</Label>
-                <Select value={cuentaGasto ?? ''} onValueChange={(v) => setValue('cuentaGasto', v, { shouldValidate: true })}>
-                  <SelectTrigger><SelectValue placeholder="Elige la cuenta de gasto" /></SelectTrigger>
-                  <SelectContent className="max-h-72">
-                    {cuentasGasto.map(c => (
-                      <SelectItem key={c.codigo} value={c.codigo}>{c.codigo} – {c.nombre}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                <CuentaCombobox value={cuentaGasto ?? ''} placeholder="Elige la cuenta de gasto"
+                  onChange={(v) => setValue('cuentaGasto', v, { shouldValidate: true })}
+                  opciones={cuentasGasto.map(c => ({ value: c.codigo, label: `${c.codigo} – ${c.nombre}` }))} />
                 {errors.cuentaGasto && <p className="text-xs text-red-500">{errors.cuentaGasto.message}</p>}
               </div>
             )}

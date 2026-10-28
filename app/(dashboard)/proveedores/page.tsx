@@ -34,6 +34,7 @@ import { Proveedor, TipoIdentificacionProv, TipoProveedor, TipoPago, CuentaConta
 import { subscribeToCuentas } from '@/lib/firebase/plan-cuentas';
 import { PLAN_CUENTAS_ECUADOR } from '@/lib/data/plan-cuentas-ecuador';
 import { asegurarCuenta } from '@/lib/contabilidad/reclasificar-compras';
+import CuentaCombobox, { OpcionCuenta } from '@/components/shared/CuentaCombobox';
 import { subscribeToProveedores, createProveedor, updateProveedor, deleteProveedor } from '@/lib/firebase/proveedores';
 import { PROVINCIAS_ECUADOR, PAISES, CODIGOS_SUSTENTO, REGIMENES } from '@/lib/constants/ecuador';
 
@@ -117,13 +118,20 @@ export default function ProveedoresPage() {
   useEffect(() => subscribeToCuentas(setCuentasPlan), []);
 
   // Cuentas de gasto/costo del plan + las del catálogo base que aún no existen en él
-  const cuentasGasto = (() => {
-    const esGasto = (c: { tipo: string; aceptaMovimientos: boolean }) =>
-      (c.tipo === 'gasto' || c.tipo === 'costo') && c.aceptaMovimientos;
-    const delPlan = cuentasPlan.filter(c => esGasto(c) && c.activa !== false);
-    const faltantes = PLAN_CUENTAS_ECUADOR.filter(c => esGasto(c) && !cuentasPlan.some(p => p.codigo === c.codigo));
-    return [...delPlan, ...faltantes].sort((a, b) => a.codigo.localeCompare(b.codigo));
-  })();
+  // Cuentas de detalle de los tipos pedidos: las del plan actual (sin las del plan anterior,
+  // que llevan puntos) + las del catálogo de la Supercias que aún no estén cargadas
+  const opcionesCuenta = (tipos: string[]): OpcionCuenta[] => {
+    const ok = (c: { tipo: string; aceptaMovimientos: boolean; codigo: string }) =>
+      tipos.includes(c.tipo) && c.aceptaMovimientos && !c.codigo.includes('.');
+    const delPlan = cuentasPlan.filter(c => ok(c) && c.activa !== false);
+    const faltantes = PLAN_CUENTAS_ECUADOR.filter(c => ok(c) && !cuentasPlan.some(p => p.codigo === c.codigo));
+    return [...delPlan, ...faltantes]
+      .sort((a, b) => a.codigo.localeCompare(b.codigo))
+      .map(c => ({ value: c.codigo, label: `${c.codigo} – ${c.nombre}` }));
+  };
+  const cuentasGasto = opcionesCuenta(['gasto', 'costo']);
+  const cuentasPasivo = opcionesCuenta(['pasivo']);
+  const cuentasActivo = opcionesCuenta(['activo']);
 
   const openCreate = () => {
     setEditing(null);
@@ -162,7 +170,10 @@ export default function ProveedoresPage() {
     setSaving(true);
     try {
       const esCuenta = destinoCompra !== 'auto' && destinoCompra !== 'inventario';
-      if (esCuenta) await asegurarCuenta(destinoCompra); // crea la cuenta si solo estaba en el catálogo base
+      // Crea las cuentas elegidas que solo estaban en el catálogo base y aún no existen en el plan
+      for (const codigo of [esCuenta ? destinoCompra : '', data.cuentaCxP, data.cuentaIVACompras]) {
+        if (codigo) await asegurarCuenta(codigo);
+      }
       const base: ProveedorForm & { esProveedorInventario?: boolean } = {
         ...data,
         cuentaGasto: esCuenta ? destinoCompra : '',
@@ -484,26 +495,25 @@ export default function ProveedoresPage() {
                 <span className="text-xs text-slate-400">(opcional)</span>
               </div>
               <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
-                <div className="space-y-1.5">
+                <div className="min-w-0 space-y-1.5">
                   <Label className="text-xs">Cuenta CxP</Label>
-                  <Input placeholder="ej: 2010301" {...register('cuentaCxP')} />
+                  <CuentaCombobox value={watch('cuentaCxP') ?? ''} onChange={v => setValue('cuentaCxP', v)}
+                    opciones={cuentasPasivo} vacioLabel="Por defecto (config. contable)" />
                 </div>
-                <div className="space-y-1.5">
+                <div className="min-w-0 space-y-1.5">
                   <Label className="text-xs">Destino de sus facturas</Label>
-                  <Select value={destinoCompra} onValueChange={setDestinoCompra}>
-                    <SelectTrigger><SelectValue /></SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="auto">Automático (Celaysa = inventario, otros = gasto)</SelectItem>
-                      <SelectItem value="inventario">Inventario (mercadería)</SelectItem>
-                      {cuentasGasto.map(c => (
-                        <SelectItem key={c.codigo} value={c.codigo}>{c.codigo} – {c.nombre}</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+                  <CuentaCombobox value={destinoCompra} onChange={setDestinoCompra}
+                    opciones={[
+                      { value: 'auto',       label: 'Automático', grupo: 'Según el proveedor' },
+                      { value: 'inventario', label: 'Inventario (mercadería)', grupo: 'Según el proveedor' },
+                      ...cuentasGasto.map(c => ({ ...c, grupo: 'Cuenta de gasto' })),
+                    ]} />
+                  <p className="text-[11px] text-slate-400">Automático: Celaysa va a inventario; los demás, a gasto.</p>
                 </div>
-                <div className="space-y-1.5">
+                <div className="min-w-0 space-y-1.5">
                   <Label className="text-xs">Cuenta IVA Compras</Label>
-                  <Input placeholder="ej: 101050101" {...register('cuentaIVACompras')} />
+                  <CuentaCombobox value={watch('cuentaIVACompras') ?? ''} onChange={v => setValue('cuentaIVACompras', v)}
+                    opciones={cuentasActivo} vacioLabel="Por defecto (config. contable)" />
                 </div>
               </div>
             </div>

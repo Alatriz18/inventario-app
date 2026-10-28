@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState, useMemo, useRef } from 'react';
+import { useModoMantenimiento } from '@/hooks/useModoMantenimiento';
 import { format } from 'date-fns';
 import { Plus, Upload, Building2, Receipt, Ban, ArrowRightLeft } from 'lucide-react';
 import { toast } from 'sonner';
@@ -47,6 +48,7 @@ const ESTADO_COLOR: Record<string, string> = {
 };
 
 export default function MovimientosBancariosPage() {
+  const mantenimiento = useModoMantenimiento();
   const { user } = useAuth();
   const [cuentas,   setCuentas]   = useState<CuentaBancaria[]>([]);
   // 'todas' = ver movimientos de todas las cuentas juntos (vista por defecto,
@@ -657,12 +659,14 @@ export default function MovimientosBancariosPage() {
                 onClick={() => setDlgReclasificar(true)}>
                 <ArrowRightLeft className="mr-2 h-4 w-4" /> Reclasificar saldo a Caja
               </Button>
+              {mantenimiento && (
               <Button variant="outline" size="sm" className="text-amber-700 border-amber-300 hover:bg-amber-50"
                 disabled={!cuentaSelObj?.cuentaContableCodigo}
                 title={!cuentaSelObj?.cuentaContableCodigo ? 'Primero vincula esta cuenta a una cuenta contable' : 'Busca en TODO el Libro Diario los asientos de este banco y los reclasifica a Caja'}
                 onClick={() => setDlgMoverTodo(true)}>
                 <ArrowRightLeft className="mr-2 h-4 w-4" /> Mover TODO el historial a Caja
               </Button>
+              )}
             </div>
           </>
         )}
@@ -672,9 +676,11 @@ export default function MovimientosBancariosPage() {
               Viendo movimientos de todas las cuentas ({movs.length} registrado{movs.length === 1 ? '' : 's'}).
               Elige una cuenta específica para importar CSV, registrar comisiones o reclasificar a Caja.
             </p>
+            {mantenimiento && (
             <Button variant="outline" size="sm" onClick={handleAbrirRecuperar}>
               Recuperar movimientos faltantes
             </Button>
+            )}
           </>
         )}
       </div>

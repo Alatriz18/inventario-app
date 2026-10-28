@@ -41,6 +41,7 @@ import { subscribeToProductos, updateProducto } from '@/lib/firebase/productos';
 import { asegurarCuenta } from '@/lib/contabilidad/reclasificar-compras';
 import { clasificarDetalles, aLineasCompra } from '@/lib/contabilidad/clasificar-compra';
 import CuentaCombobox from '@/components/shared/CuentaCombobox';
+import { useModoMantenimiento } from '@/hooks/useModoMantenimiento';
 import { useOpcionesDestinoCompra } from '@/hooks/useOpcionesDestinoCompra';
 import {
   buscarComprasAReclasificar, reclasificarCompras, type CompraAReclasificar,
@@ -189,6 +190,7 @@ export default function FacturasProveedorPage() {
   const [proveedores,  setProveedores]  = useState<Proveedor[]>([]);
   const [productos,    setProductos]    = useState<Producto[]>([]);
   const [destinoFactura, setDestinoFactura] = useState('auto'); // destino de la factura manual
+  const mantenimiento = useModoMantenimiento();
   const opcionesDestino = useOpcionesDestinoCompra();
   const [loading,      setLoading]      = useState(true);
   const [dialogOpen,   setDialogOpen]   = useState(false);
@@ -1276,6 +1278,7 @@ export default function FacturasProveedorPage() {
             <Button variant="outline" onClick={descargarTodosXML}>
               <Download className="mr-2 h-4 w-4" /> Descargar todos (ZIP)
             </Button>
+            {mantenimiento && (<>
             <Button variant="outline" onClick={handleAbrirReparar} title="Busca facturas registradas que quedaron sin su asiento contable y los genera">
               <FileCheck className="mr-2 h-4 w-4" /> Reparar asientos faltantes
             </Button>
@@ -1287,6 +1290,7 @@ export default function FacturasProveedorPage() {
               title="Recalcula la fecha real desde el XML guardado y corrige las que quedaron un día atrás por husos horarios">
               <FileCheck className="mr-2 h-4 w-4" /> Corregir fechas desfasadas
             </Button>
+            </>)}
             <Button variant="outline" onClick={abrirPagoBanco}>
               <Banknote className="mr-2 h-4 w-4" /> Pago bancario (TXT)
             </Button>

@@ -28,6 +28,7 @@ import {
 import { Venta, MetodoPago, Producto, Categoria, ItemVenta } from '@/types';
 import { subscribeToVentas, anularVenta, repararVenta, getVentas } from '@/lib/firebase/ventas';
 import { subscribeToProductos } from '@/lib/firebase/productos';
+import { useModoMantenimiento } from '@/hooks/useModoMantenimiento';
 import { subscribeToCategorias } from '@/lib/firebase/categorias';
 import { getConfigSRI } from '@/lib/firebase/config-sri';
 import { descargarTicket } from '@/lib/pdf/ticket-venta';
@@ -76,6 +77,7 @@ export default function HistorialVentasPage() {
   // volumen alto de POS eso podía fallar en silencio). Explica por qué el
   // Estado de Resultados puede mostrar menos ventas que el reporte real.
   const [dlgReparar,   setDlgReparar]   = useState(false);
+  const mantenimiento = useModoMantenimiento();
   const [reparandoAsientos, setReparandoAsientos] = useState(false);
   const [progresoReparar, setProgresoReparar] = useState(0);
   const [resumenReparar, setResumenReparar] = useState<{ faltantes: number } | null>(null);
@@ -248,12 +250,12 @@ export default function HistorialVentasPage() {
       <PageHeader
         title="Historial de Ventas"
         description="Registro completo de todas las transacciones"
-        action={
+        action={mantenimiento ? (
           <Button variant="outline" size="sm" onClick={handleAbrirReparar}
             title="Busca ventas registradas que quedaron sin su asiento contable y los genera">
             <Wrench className="mr-2 h-4 w-4" /> Reparar asientos faltantes
           </Button>
-        }
+        ) : undefined}
       />
 
       {/* KPIs */}

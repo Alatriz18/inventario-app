@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState, useMemo } from 'react';
+import { useModoMantenimiento } from '@/hooks/useModoMantenimiento';
 import { format, startOfYear } from 'date-fns';
 import { Calculator, Download } from 'lucide-react';
 import * as XLSX from 'xlsx';
@@ -35,6 +36,7 @@ export default function BalanceComprobacionPage() {
   const [dateFrom, setDateFrom] = useState(format(startOfYear(new Date()), 'yyyy-MM-dd'));
   const [dateTo,   setDateTo]   = useState(format(new Date(), 'yyyy-MM-dd'));
   const [corrigiendo, setCorrigiendo] = useState(false);
+  const mantenimiento = useModoMantenimiento();
 
   useEffect(() => {
     setLoading(true);
@@ -184,10 +186,12 @@ export default function BalanceComprobacionPage() {
             <p className="text-sm font-semibold text-red-700">
               {asientosDescuadrados.length} asiento(s) con Debe ≠ Haber dentro de sí mismos — acá está el descuadre real:
             </p>
+            {mantenimiento && (
             <Button size="sm" variant="outline" onClick={handleCorregirDescuadres} disabled={corrigiendo}
               title="Absorbe la diferencia de 1 centavo en la línea de IVA de cada asiento (mismo criterio que usan los asientos nuevos)">
               {corrigiendo ? 'Corrigiendo…' : 'Corregir automáticamente'}
             </Button>
+            )}
           </div>
           <div className="space-y-1.5">
             {asientosDescuadrados.map(r => (

@@ -42,6 +42,7 @@ import {
   agruparPendientes, netoEnCuenta, cruceConCaja, CUENTAS_SUGERIDAS, type Emparejamiento, type GrupoMovimientos,
 } from '@/lib/bancos/conciliacion';
 import { useOpcionesCuentasMovimiento } from '@/hooks/useOpcionesCuentasMovimiento';
+import { diagnosticarApertura } from '@/lib/bancos/diagnostico-apertura';
 import { useAuth } from '@/context/AuthContext';
 
 const currency = (v: number) => `$${v.toFixed(2)}`;
@@ -159,6 +160,25 @@ export default function ConciliacionBancariaPage() {
     return { monto: cuentaObj?.saldoInicial ?? 0, desdeBanco: false };
   }, [extractos, cuentaObj]);
   const primerPeriodo = periodos[0];
+
+  // ¿Los libros ya tienen un asiento de apertura con el banco? ¿Se registró además un saldo inicial a mano?
+  const asientosApertura = useMemo(() => {
+    if (!cuentaCodigo) return [];
+    return asientos
+      .filter(a => a.estado !== 'borrador' && (a.tipo === 'apertura' || /apertura/i.test(a.concepto)) && netoEnCuenta(a, cuentaCodigo) !== 0)
+      .map(a => ({
+        numero: a.numero ?? a.id,
+        montoBanco: netoEnCuenta(a, cuentaCodigo),
+        visto: marcas.some(k => k.asientoId === a.id) || movs.some(m => m.asientoId === a.id && m.estado === 'conciliado'),
+      }));
+  }, [asientos, cuentaCodigo, marcas, movs]);
+  const registradoApertura = useMemo(
+    () => movs.find(m => m.tipoDocumento === 'saldo_inicial' && m.estado !== 'anulado')?.monto, [movs]);
+  const avisosApertura = useMemo(() => diagnosticarApertura({
+    aperturaBanco: apertura.desdeBanco ? apertura.monto : null,
+    registrado: registradoApertura,
+    asientosApertura,
+  }), [apertura, registradoApertura, asientosApertura]);
 
   // Saldo del banco al corte: el que declara el estado de cuenta; si no hay, se calcula con los movimientos
   const saldoBanco = useMemo(() => {
@@ -604,7 +624,17 @@ export default function ConciliacionBancariaPage() {
                     (revisa el asiento de apertura). Si es un mes posterior, revisa los movimientos conciliados con monto distinto.
                   </p>
                 )}
-                {!bloqueado && !aperturaRegistrada && periodo === primerPeriodo && apertura.monto > 0 && (
+                {avisosApertura.length > 0 && (
+                  <div className="mt-2 max-w-2xl space-y-1.5">
+                    {avisosApertura.map((a, i) => (
+                      <p key={i} className={`rounded-lg border p-2.5 text-xs ${
+                        a.nivel === 'error' ? 'border-red-300 bg-white text-red-800' : 'border-sky-200 bg-white text-sky-800'}`}>
+                        {a.texto}
+                      </p>
+                    ))}
+                  </div>
+                )}
+                {!bloqueado && !aperturaRegistrada && asientosApertura.length === 0 && periodo === primerPeriodo && apertura.monto > 0 && (
                   <div className={`mt-2 max-w-xl rounded-lg border p-2.5 text-xs ${
                     Math.abs(diferencia - apertura.monto) <= 1 ? 'border-red-300 bg-white text-slate-700' : 'border-slate-200 bg-white text-slate-500'}`}>
                     <p>

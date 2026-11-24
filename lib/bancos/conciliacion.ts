@@ -409,3 +409,24 @@ export function librosDelMes(p: {
   }
   return filas.sort((x, y) => aFecha(x.asiento.fecha).getTime() - aFecha(y.asiento.fecha).getTime());
 }
+
+// ── Saldo del banco al corte ────────────────────────────────────────────────
+
+/**
+ * Saldo del banco al corte: el que declara el estado de cuenta; si ese mes no se guardó, se calcula con
+ * los movimientos (y el saldo inicial de la cuenta, salvo que ya esté registrado como movimiento).
+ */
+export function saldoBancoAlCorte(p: {
+  extracto?:           { saldoActual: number } | null;
+  movimientos:         MovimientoBancario[];
+  corte:               Date;
+  saldoInicialCuenta:  number;
+  aperturaRegistrada:  boolean;
+}): { valor: number; desdeEstadoCuenta: boolean } {
+  if (p.extracto) return { valor: p.extracto.saldoActual, desdeEstadoCuenta: true };
+  const base = p.aperturaRegistrada ? 0 : p.saldoInicialCuenta;
+  const neto = p.movimientos
+    .filter(m => m.estado !== 'anulado' && aFecha(m.fecha) <= p.corte)
+    .reduce((s, m) => s + (m.tipo === 'credito' ? m.monto : -m.monto), base);
+  return { valor: redondear(neto), desdeEstadoCuenta: false };
+}

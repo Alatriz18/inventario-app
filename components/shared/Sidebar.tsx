@@ -111,6 +111,7 @@ const NAV: NavItem[] = [
     children: [
       { label: 'Movimientos Bancarios', href: '/movimientos-bancarios', icon: Landmark, modulo: 'movimientos_bancarios' },
       { label: 'Conciliación Bancaria', href: '/conciliacion-bancaria', icon: Building2, modulo: 'conciliacion_bancaria' },
+      { label: 'Reporte de Conciliaciones', href: '/conciliacion-bancaria/reporte', icon: BarChart3, modulo: 'conciliacion_bancaria' },
     ],
   },
   {

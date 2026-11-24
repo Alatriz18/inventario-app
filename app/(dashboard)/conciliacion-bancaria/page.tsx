@@ -38,7 +38,7 @@ import { asegurarCuenta } from '@/lib/contabilidad/reclasificar-compras';
 import { CUENTAS_POR_DEFECTO } from '@/lib/data/plan-cuentas-ecuador';
 import {
   aFecha, periodoDe, finDePeriodo, calcularConciliacion, proponerEmparejamientos, librosDelMes,
-  type MarcaVisto, type FilaLibro,
+  saldoBancoAlCorte, type MarcaVisto, type FilaLibro,
   agruparPendientes, netoEnCuenta, cruceConCaja, CUENTAS_SUGERIDAS, type Emparejamiento, type GrupoMovimientos,
 } from '@/lib/bancos/conciliacion';
 import { useOpcionesCuentasMovimiento } from '@/hooks/useOpcionesCuentasMovimiento';
@@ -163,13 +163,15 @@ export default function ConciliacionBancariaPage() {
   // Saldo del banco al corte: el que declara el estado de cuenta; si no hay, se calcula con los movimientos
   const saldoBanco = useMemo(() => {
     if (!cuentaObj || !periodo) return { valor: 0, origen: 'sin datos' as const };
-    if (extracto) return { valor: extracto.saldoActual, origen: 'estado de cuenta' as const };
-    // Sin el estado de cuenta del mes se calcula; si el saldo inicial ya está como movimiento, no se suma dos veces
-    const base = aperturaRegistrada ? 0 : cuentaObj.saldoInicial;
-    const neto = movs
-      .filter(m => m.estado !== 'anulado' && aFecha(m.fecha) <= corte)
-      .reduce((s, m) => s + (m.tipo === 'credito' ? m.monto : -m.monto), base);
-    return { valor: Math.round(neto * 100) / 100, origen: 'calculado con los movimientos (sin estado de cuenta de este mes)' as const };
+    const s = saldoBancoAlCorte({
+      extracto, movimientos: movs, corte, saldoInicialCuenta: cuentaObj.saldoInicial, aperturaRegistrada,
+    });
+    return {
+      valor: s.valor,
+      origen: s.desdeEstadoCuenta
+        ? 'estado de cuenta' as const
+        : 'calculado con los movimientos (sin estado de cuenta de este mes)' as const,
+    };
   }, [cuentaObj, periodo, extracto, movs, corte, aperturaRegistrada]);
 
   // Vistos puestos a los asientos del banco (el banco ya los reflejó)

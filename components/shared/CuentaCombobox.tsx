@@ -14,6 +14,8 @@ export interface OpcionCuenta {
   value:   string;
   label:   string;   // texto que se muestra: "1010306 – INVENTARIOS…"
   grupo?:  string;   // encabezado opcional (p. ej. "Opciones especiales")
+  contexto?: string; // cuenta padre, en gris: distingue cuentas con el mismo nombre ("COMISIONES" de ventas / financieras)
+  keywords?: string[]; // palabras extra que también encuentran la cuenta ("gastos bancarios")
 }
 
 interface Props {
@@ -43,7 +45,8 @@ export default function CuentaCombobox({ value, onChange, opciones, placeholder 
         <Button type="button" variant="outline" role="combobox" aria-expanded={abierto} disabled={disabled}
           className="w-full min-w-0 justify-between font-normal">
           <span className={cn('truncate', !actual && 'text-slate-400')}>
-            {actual ? actual.label : (value === '' && vacioLabel ? vacioLabel : placeholder)}
+            {actual ? (actual.contexto ? `${actual.label} · ${actual.contexto}` : actual.label)
+              : (value === '' && vacioLabel ? vacioLabel : placeholder)}
           </span>
           <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
         </Button>
@@ -64,9 +67,10 @@ export default function CuentaCombobox({ value, onChange, opciones, placeholder 
             {grupos.map(g => (
               <CommandGroup key={g || 'general'} heading={g || undefined}>
                 {opciones.filter(o => (o.grupo ?? '') === g).map(o => (
-                  <CommandItem key={o.value} value={o.label} onSelect={() => elegir(o.value)}>
+                  <CommandItem key={o.value} value={o.label} keywords={o.keywords} onSelect={() => elegir(o.value)}>
                     <Check className={cn('mr-2 h-4 w-4 shrink-0', value === o.value ? 'opacity-100' : 'opacity-0')} />
                     <span className="truncate">{o.label}</span>
+                    {o.contexto && <span className="ml-2 shrink-0 max-w-[45%] truncate text-[10px] text-slate-400">{o.contexto}</span>}
                   </CommandItem>
                 ))}
               </CommandGroup>

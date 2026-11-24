@@ -36,6 +36,8 @@ export interface CorteEstadoCuenta {
 }
 
 export interface ResultadoEstadoCuenta {
+  /** Número de cuenta que figura en el encabezado del PDF. */
+  numeroCuenta?: string;
   cortes:      CorteEstadoCuenta[];
   /** Movimientos de los cortes no repetidos, en el orden del archivo. */
   movimientos: MovimientoPDF[];
@@ -87,7 +89,13 @@ export function interpretarEstadoCuentaPichincha(items: ItemTexto[]): ResultadoE
   let corte: CorteEstadoCuenta | null = null;
   let ultimo: { mov: MovimientoPDF; pagina: number; y: number; xDoc: number } | null = null;
 
+  let numeroCuenta: string | undefined;
+
   for (const l of lineas) {
+    if (!numeroCuenta) {
+      const mc = /^CUENTA:?\s+(\d{6,})/.exec(l.texto);
+      if (mc) numeroCuenta = mc[1];
+    }
     const mCorte = RE_FECHA_CORTE.exec(l.texto);
     if (mCorte) {
       corte = {
@@ -174,6 +182,7 @@ export function interpretarEstadoCuentaPichincha(items: ItemTexto[]): ResultadoE
   }
 
   return {
+    numeroCuenta,
     cortes,
     movimientos: cortes.filter(c => !c.repetido).flatMap(c => c.movimientos),
   };

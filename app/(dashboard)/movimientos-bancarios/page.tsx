@@ -36,6 +36,7 @@ import {
   crearAsientoMovimientoBancario, crearAsientoReversion, crearAsientoReclasificacionCaja,
 } from '@/lib/contabilidad/motor-asientos';
 import { useAuth } from '@/context/AuthContext';
+import { guardarExtractos } from '@/lib/firebase/extractos-bancarios';
 import { extraerTextoPDF } from '@/lib/bancos/leer-pdf';
 import { interpretarEstadoCuentaPichincha, type ResultadoEstadoCuenta } from '@/lib/bancos/estado-cuenta-pichincha';
 
@@ -298,11 +299,18 @@ export default function MovimientosBancariosPage() {
   };
 
   const handleConfirmarPDF = async () => {
-    if (!pdfPlan || pdfPlan.nuevos.length === 0) return;
+    if (!pdfPlan) return;
     setImportandoPdf(true);
     try {
       await importarMovimientosBancarios(pdfPlan.nuevos);
-      toast.success(`${pdfPlan.nuevos.length} movimientos importados — ve a Conciliación Bancaria para cuadrarlos con la contabilidad`);
+      // Se guarda también el corte de cada mes (saldos que declara el banco): base de la conciliación mensual
+      let extractos = 0;
+      try {
+        extractos = pdfRes ? await guardarExtractos(cuentaSel, pdfRes.cortes, user?.nombre ?? '') : 0;
+      } catch {
+        toast.warning('Los movimientos se importaron, pero no se pudieron guardar los saldos de cada mes del banco. Revisa los permisos (reglas de Firestore) y vuelve a importar el PDF.', { duration: 12000 });
+      }
+      toast.success(`${pdfPlan.nuevos.length} movimientos importados${extractos ? ` en ${extractos} corte(s) mensual(es)` : ''} — ve a Conciliación Bancaria y concilia mes a mes`);
       setDlgPdf(false);
       setPdfRes(null);
     } catch (err: any) {
@@ -942,6 +950,17 @@ export default function MovimientosBancariosPage() {
           </DialogHeader>
           {pdfRes && pdfPlan && (
             <div className="space-y-4 py-1">
+              {pdfRes.numeroCuenta && cuentaSelObj
+                && !cuentaSelObj.numeroCuenta.replace(/\D/g, '').endsWith(pdfRes.numeroCuenta.slice(-6)) && (
+                <p className="rounded-lg border border-red-200 bg-red-50 p-3 text-xs text-red-700">
+                  ⚠ Este PDF es de la cuenta <strong>{pdfRes.numeroCuenta}</strong>, pero elegiste la cuenta{' '}
+                  <strong>{cuentaSelObj.numeroCuenta}</strong>. Verifica antes de importar.
+                </p>
+              )}
+              <p className="text-xs text-slate-500">
+                El archivo trae {pdfRes.cortes.filter(c => !c.repetido).length} corte(s) mensual(es). Cada uno se verifica por separado
+                y se guarda con los saldos del banco: la conciliación se hace mes a mes.
+              </p>
               <div className="rounded-lg border">
                 <Table>
                   <TableHeader>
@@ -1030,8 +1049,10 @@ export default function MovimientosBancariosPage() {
             <Button variant="outline" disabled={importandoPdf} onClick={() => { setDlgPdf(false); setPdfRes(null); }}>
               Cancelar
             </Button>
-            <Button disabled={importandoPdf || !pdfPlan || pdfPlan.nuevos.length === 0} onClick={handleConfirmarPDF}>
-              {importandoPdf ? 'Importando…' : `Importar ${pdfPlan?.nuevos.length ?? 0} movimientos`}
+            <Button disabled={importandoPdf || !pdfPlan} onClick={handleConfirmarPDF}>
+              {importandoPdf ? 'Importando…'
+                : (pdfPlan?.nuevos.length ?? 0) > 0 ? `Importar ${pdfPlan?.nuevos.length} movimientos`
+                : 'Guardar los saldos de cada mes'}
             </Button>
           </DialogFooter>
         </DialogContent>

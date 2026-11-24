@@ -763,6 +763,38 @@ export interface MovimientoBancario {
   createdAt:      Date;
 }
 
+/** Corte mensual de un estado de cuenta bancario (se guarda al importar el PDF). */
+export interface ExtractoBancario {
+  id:               string;   // `${cuentaBancariaId}_${periodo}`
+  cuentaBancariaId: string;
+  periodo:          string;   // 'yyyy-MM'
+  corte:            Date;
+  saldoAnterior:    number;
+  saldoActual:      number;
+  creditos:         { n: number; total: number };
+  debitos:          { n: number; total: number };
+  movimientos:      number;
+  cuadra:           boolean;  // lo leído coincidía con los totales del banco
+  usuarioNombre:    string;
+  createdAt:        Date;
+}
+
+/** Conciliación bancaria de un mes cerrada por el contador. */
+export interface ConciliacionBancaria {
+  id:               string;   // `${cuentaBancariaId}_${periodo}`
+  cuentaBancariaId: string;
+  periodo:          string;
+  corte:            Date;
+  saldoBanco:       number;
+  saldoLibros:      number;
+  saldoConciliado:  number;
+  depositosTransito:number;
+  pagosPendientes:  number;
+  usuarioId:        string;
+  usuarioNombre:    string;
+  cerradaAt:        Date;
+}
+
 // ─── LOTES DE RECLASIFICACIÓN (deshacer "mover historial a Caja") ──────────
 
 export interface ItemLoteReclasificacion {

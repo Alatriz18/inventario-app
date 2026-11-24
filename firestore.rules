@@ -247,6 +247,17 @@ service cloud.firestore {
       allow read: if isStaff();
       allow write: if isAdmin() || hasRole('contador');
     }
+
+    // Cortes mensuales del estado de cuenta y conciliaciones mensuales cerradas
+    match /extractos_bancarios/{id} {
+      allow read: if isStaff();
+      allow write: if isAdmin() || hasRole('contador');
+    }
+
+    match /conciliaciones_bancarias/{id} {
+      allow read: if isStaff();
+      allow write: if isAdmin() || hasRole('contador');
+    }
   }
 }
 

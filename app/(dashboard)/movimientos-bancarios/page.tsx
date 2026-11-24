@@ -3,7 +3,7 @@
 import { useEffect, useState, useMemo, useRef } from 'react';
 import { useModoMantenimiento } from '@/hooks/useModoMantenimiento';
 import { format } from 'date-fns';
-import { Plus, Upload, Building2, Receipt, Ban, ArrowRightLeft } from 'lucide-react';
+import { Plus, Upload, Building2, Receipt, Ban, ArrowRightLeft, FileText } from 'lucide-react';
 import { toast } from 'sonner';
 
 import PageHeader  from '@/components/shared/PageHeader';
@@ -36,6 +36,8 @@ import {
   crearAsientoMovimientoBancario, crearAsientoReversion, crearAsientoReclasificacionCaja,
 } from '@/lib/contabilidad/motor-asientos';
 import { useAuth } from '@/context/AuthContext';
+import { extraerTextoPDF } from '@/lib/bancos/leer-pdf';
+import { interpretarEstadoCuentaPichincha, type ResultadoEstadoCuenta } from '@/lib/bancos/estado-cuenta-pichincha';
 
 const currency = (v: number) => `$${v.toFixed(2)}`;
 
@@ -71,6 +73,13 @@ export default function MovimientosBancariosPage() {
   // Importar movimientos CSV
   const fileRef  = useRef<HTMLInputElement>(null);
   const [importing, setImporting] = useState(false);
+
+  // Importar el estado de cuenta en PDF del banco (se revisa antes de guardar)
+  const pdfRef = useRef<HTMLInputElement>(null);
+  const [leyendoPdf,    setLeyendoPdf]    = useState(false);
+  const [dlgPdf,        setDlgPdf]        = useState(false);
+  const [pdfRes,        setPdfRes]        = useState<ResultadoEstadoCuenta | null>(null);
+  const [importandoPdf, setImportandoPdf] = useState(false);
 
   // Dialog registrar movimiento bancario directo (comisión, cargo, interés…)
   const [dlgMov, setDlgMov] = useState(false);
@@ -157,6 +166,33 @@ export default function MovimientosBancariosPage() {
     [movs]
   );
 
+  // Movimientos del PDF separados en nuevos y ya registrados (misma fecha, documento, tipo y monto)
+  const pdfPlan = useMemo(() => {
+    if (!pdfRes) return null;
+    const clave = (fecha: Date, doc: string, tipo: string, monto: number) =>
+      `${format(fecha, 'yyyy-MM-dd')}|${doc}|${tipo}|${monto.toFixed(2)}`;
+    const existentes = new Set(
+      movs.filter(m => m.estado !== 'anulado').map(m => {
+        const f = m.fecha instanceof Date ? m.fecha : new Date(m.fecha as unknown as string);
+        return clave(f, m.referencia ?? '', m.tipo, m.monto);
+      })
+    );
+    const nuevos: Omit<MovimientoBancario, 'id' | 'createdAt'>[] = [];
+    let yaRegistrados = 0;
+    for (const p of pdfRes.movimientos) {
+      const tipo  = p.debito > 0 ? 'debito' : 'credito';
+      const monto = p.debito > 0 ? p.debito : p.credito;
+      if (monto <= 0) continue;
+      if (existentes.has(clave(p.fecha, p.documento, tipo, monto))) { yaRegistrados++; continue; }
+      nuevos.push({
+        cuentaBancariaId: cuentaSel, fecha: p.fecha, descripcion: p.descripcion, tipo, monto,
+        saldo: p.saldo, referencia: p.documento, oficina: p.oficina, estado: 'no_conciliado',
+      });
+    }
+    nuevos.sort((a, b) => a.fecha.getTime() - b.fecha.getTime());
+    return { nuevos, yaRegistrados };
+  }, [pdfRes, movs, cuentaSel]);
+
   // Crear cuenta bancaria
   const handleCrearCuenta = async () => {
     if (!formCuenta.banco || !formCuenta.numeroCuenta) {
@@ -226,6 +262,44 @@ export default function MovimientosBancariosPage() {
     } finally {
       setImporting(false);
       if (fileRef.current) fileRef.current.value = '';
+    }
+  };
+
+  // Leer el PDF del estado de cuenta y mostrar la revisión
+  const handleLeerPDF = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file || !cuentaSel || cuentaSel === 'todas') return;
+    setLeyendoPdf(true);
+    try {
+      const items = await extraerTextoPDF(await file.arrayBuffer());
+      const res = interpretarEstadoCuentaPichincha(items);
+      if (res.movimientos.length === 0) {
+        toast.error('No se encontraron movimientos. Verifica que sea el estado de cuenta en PDF del Banco Pichincha.');
+        return;
+      }
+      setPdfRes(res);
+      setDlgPdf(true);
+    } catch (err) {
+      console.error('Error al leer el PDF del banco:', err);
+      toast.error('No se pudo leer el PDF. Si es un archivo escaneado (imagen), descárgalo de nuevo desde la banca en línea.');
+    } finally {
+      setLeyendoPdf(false);
+      if (pdfRef.current) pdfRef.current.value = '';
+    }
+  };
+
+  const handleConfirmarPDF = async () => {
+    if (!pdfPlan || pdfPlan.nuevos.length === 0) return;
+    setImportandoPdf(true);
+    try {
+      await importarMovimientosBancarios(pdfPlan.nuevos);
+      toast.success(`${pdfPlan.nuevos.length} movimientos importados — ve a Conciliación Bancaria para cuadrarlos con la contabilidad`);
+      setDlgPdf(false);
+      setPdfRes(null);
+    } catch (err: any) {
+      toast.error(err?.message ?? 'Error al importar los movimientos');
+    } finally {
+      setImportandoPdf(false);
     }
   };
 
@@ -647,6 +721,19 @@ export default function MovimientosBancariosPage() {
                 <Upload className="mr-2 h-4 w-4" />
                 {importing ? 'Importando…' : 'Importar CSV'}
               </Button>
+              <input
+                ref={pdfRef}
+                type="file"
+                accept=".pdf,application/pdf"
+                className="hidden"
+                onChange={handleLeerPDF}
+              />
+              <Button variant="outline" size="sm" disabled={leyendoPdf}
+                title="Carga el estado de cuenta en PDF del Banco Pichincha: crea un movimiento por cada renglón"
+                onClick={() => pdfRef.current?.click()}>
+                <FileText className="mr-2 h-4 w-4" />
+                {leyendoPdf ? 'Leyendo PDF…' : 'Importar PDF del banco'}
+              </Button>
               <Button variant="outline" size="sm"
                 disabled={!cuentaSelObj?.cuentaContableCodigo}
                 title={!cuentaSelObj?.cuentaContableCodigo ? 'Primero vincula esta cuenta a una cuenta contable' : undefined}
@@ -823,6 +910,111 @@ export default function MovimientosBancariosPage() {
       )}
 
       {/* Dialog nueva cuenta */}
+      {/* Revisión del estado de cuenta en PDF antes de importar */}
+      <Dialog open={dlgPdf} onOpenChange={(o) => { if (!importandoPdf) { setDlgPdf(o); if (!o) setPdfRes(null); } }}>
+        <DialogContent className="sm:max-w-4xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <FileText className="h-4 w-4" /> Importar estado de cuenta — {cuentaSelObj?.banco} {cuentaSelObj?.numeroCuenta}
+            </DialogTitle>
+          </DialogHeader>
+          {pdfRes && pdfPlan && (
+            <div className="space-y-4 py-1">
+              <div className="rounded-lg border">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Corte</TableHead>
+                      <TableHead className="text-right">Movimientos</TableHead>
+                      <TableHead className="text-right">Saldo inicial</TableHead>
+                      <TableHead className="text-right">Saldo final</TableHead>
+                      <TableHead>Verificación con el banco</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {[...pdfRes.cortes].sort((a, b) => a.corte.getTime() - b.corte.getTime()).map((c, i) => (
+                      <TableRow key={i}>
+                        <TableCell className="text-xs">{format(c.corte, 'dd/MM/yyyy')}</TableCell>
+                        <TableCell className="text-right text-xs">{c.movimientos.length}</TableCell>
+                        <TableCell className="text-right text-xs">{c.saldoAnterior === null ? '—' : currency(c.saldoAnterior)}</TableCell>
+                        <TableCell className="text-right text-xs">{c.saldoActual === null ? '—' : currency(c.saldoActual)}</TableCell>
+                        <TableCell className="text-xs">
+                          {c.repetido ? (
+                            <span className="text-slate-500">Repetido en el archivo — se omite</span>
+                          ) : c.cuadra ? (
+                            <span className="text-green-700">✓ Créditos, débitos y saldos cuadran</span>
+                          ) : (
+                            <span className="text-amber-700">⚠ {c.avisos.join(' · ')}</span>
+                          )}
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
+
+              <div className="flex flex-wrap gap-x-6 gap-y-1 text-sm">
+                <span><strong>{pdfPlan.nuevos.length}</strong> movimientos nuevos para importar</span>
+                {pdfPlan.yaRegistrados > 0 && (
+                  <span className="text-slate-500">{pdfPlan.yaRegistrados} ya estaban registrados (se omiten)</span>
+                )}
+              </div>
+              {pdfRes.cortes.some(c => !c.repetido && !c.cuadra) && (
+                <p className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs text-amber-700">
+                  Algún corte no cuadra con los totales del banco. Revisa los avisos antes de importar.
+                </p>
+              )}
+
+              {pdfPlan.nuevos.length > 0 && (
+                <div className="max-h-72 overflow-y-auto rounded-lg border">
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Fecha</TableHead>
+                        <TableHead>Oficina</TableHead>
+                        <TableHead>N° documento</TableHead>
+                        <TableHead>Descripción</TableHead>
+                        <TableHead className="text-right">Débito</TableHead>
+                        <TableHead className="text-right">Crédito</TableHead>
+                        <TableHead className="text-right">Saldo</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {pdfPlan.nuevos.slice(0, 300).map((m, i) => (
+                        <TableRow key={i}>
+                          <TableCell className="text-xs whitespace-nowrap">{format(m.fecha, 'dd/MM/yyyy')}</TableCell>
+                          <TableCell className="text-xs">{m.oficina}</TableCell>
+                          <TableCell className="font-mono text-xs">{m.referencia}</TableCell>
+                          <TableCell className="text-xs">{m.descripcion}</TableCell>
+                          <TableCell className="text-right text-xs">{m.tipo === 'debito' ? currency(m.monto) : ''}</TableCell>
+                          <TableCell className="text-right text-xs">{m.tipo === 'credito' ? currency(m.monto) : ''}</TableCell>
+                          <TableCell className="text-right text-xs">{m.saldo === undefined ? '' : currency(m.saldo)}</TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </div>
+              )}
+              {pdfPlan.nuevos.length > 300 && (
+                <p className="text-[11px] text-slate-400">Se muestran los primeros 300; se importarán los {pdfPlan.nuevos.length}.</p>
+              )}
+              <p className="text-[11px] text-slate-400">
+                Cada renglón se guarda como un movimiento pendiente, con su fecha, oficina, N° de documento, descripción,
+                débito o crédito y saldo. Luego los concilias o los contabilizas desde Conciliación Bancaria.
+              </p>
+            </div>
+          )}
+          <DialogFooter>
+            <Button variant="outline" disabled={importandoPdf} onClick={() => { setDlgPdf(false); setPdfRes(null); }}>
+              Cancelar
+            </Button>
+            <Button disabled={importandoPdf || !pdfPlan || pdfPlan.nuevos.length === 0} onClick={handleConfirmarPDF}>
+              {importandoPdf ? 'Importando…' : `Importar ${pdfPlan?.nuevos.length ?? 0} movimientos`}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
       <Dialog open={dlgCuenta} onOpenChange={setDlgCuenta}>
         <DialogContent className="max-w-md">
           <DialogHeader>

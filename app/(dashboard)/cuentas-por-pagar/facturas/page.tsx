@@ -32,7 +32,7 @@ import {
 } from '@/components/ui/table';
 
 import {
-  crearAsientoPago, crearAsientoCompraFactura, type ProveedorCompra,
+  crearAsientoPago, crearAsientoCompraFactura, esCompraInventario, type ProveedorCompra,
   crearAsientoNotaCreditoRecibida, crearAsientoNotaDebitoRecibida,
   crearAsientoRetencionRecibida, crearAsientoReversion,
 } from '@/lib/contabilidad/motor-asientos';
@@ -190,6 +190,7 @@ export default function FacturasProveedorPage() {
   const [proveedores,  setProveedores]  = useState<Proveedor[]>([]);
   const [productos,    setProductos]    = useState<Producto[]>([]);
   const [destinoFactura, setDestinoFactura] = useState('auto'); // destino de la factura manual
+  const [destinoXml,     setDestinoXml]     = useState('auto'); // destino de la factura importada por XML
   const mantenimiento = useModoMantenimiento();
   const opcionesDestino = useOpcionesDestinoCompra();
   const [loading,      setLoading]      = useState(true);
@@ -457,6 +458,7 @@ export default function FacturasProveedorPage() {
       const iva  = extraerIVAdeXML(xml);
       if (!data) { toast.error('No se pudo leer el XML del SRI'); return; }
       setXmlPreview({ data, iva, xmlRaw: xml });
+      setDestinoXml('auto');
       setXmlDialog(true);
     };
     reader.readAsText(file);
@@ -468,7 +470,8 @@ export default function FacturasProveedorPage() {
     setSaving(true);
     try {
       const existentes = new Set(facturas.map(f => f.claveAcceso).filter(Boolean) as string[]);
-      const r = await procesarXmlRecibido(xmlPreview.xmlRaw, existentes);
+      if (destinoXml !== 'auto' && destinoXml !== 'inventario') await asegurarCuenta(destinoXml);
+      const r = await procesarXmlRecibido(xmlPreview.xmlRaw, existentes, destinoXml);
       if (r === 'ok')                 toast.success('Factura importada — proveedor y asiento de compra generados');
       else if (r === 'ok_sin_asiento')toast.warning('Factura importada, pero el asiento contable NO se pudo generar. Revísala en Libro Diario.', { duration: 10000 });
       else if (r === 'dup')           toast.warning('Esta factura ya estaba registrada (clave de acceso duplicada)');
@@ -499,7 +502,9 @@ export default function FacturasProveedorPage() {
 
   const procesarXmlRecibido = async (
     xml: string,
-    existentes: Set<string>
+    existentes: Set<string>,
+    /** Destino contable de una factura: 'auto' (regla del proveedor), 'inventario' o código de cuenta de gasto. */
+    destino: string = 'auto'
   ): Promise<'ok' | 'ok_sin_asiento' | 'dup' | 'err' | 'omitido'> => {
     if (!user) return 'err';
     const tipo = detectarTipoComprobante(xml);
@@ -529,7 +534,7 @@ export default function FacturasProveedorPage() {
         });
         const asientoId = await crearAsientoCompraFactura({
           facturaId, fecha: fechaEmision, proveedorNombre: it.razonSocial,
-          subtotal, iva, total, proveedor: prov, lineasClasificadas,
+          subtotal, iva, total, proveedor: prov, lineasClasificadas, cuentaDestino: destino,
           usuarioId: user.uid, usuarioNombre: user.nombre,
         });
         if (clave) existentes.add(clave);
@@ -1822,6 +1827,26 @@ export default function FacturasProveedorPage() {
                   registrado. La factura se importará igualmente pero sin asociar al proveedor.
                 </div>
               )}
+              {(() => {
+                const info  = xmlPreview.data.infoTributaria;
+                const prov  = proveedores.find(p => p.ruc === info.ruc);
+                const regla = prov?.cuentaGasto?.trim()
+                  ? `la cuenta de gasto ${prov.cuentaGasto} de este proveedor`
+                  : esCompraInventario(prov ?? { nombre: info.razonSocial as string })
+                    ? 'Inventario (mercadería)'
+                    : 'Gastos (cuenta por defecto de compras)';
+                return (
+                  <div className="space-y-1.5 rounded-lg border p-3">
+                    <Label>Destino contable de la compra</Label>
+                    <CuentaCombobox value={destinoXml} onChange={setDestinoXml} opciones={opcionesDestino} />
+                    <p className="text-[11px] text-slate-400">
+                      {destinoXml === 'auto'
+                        ? <>«Según el proveedor»: esta factura irá a <strong>{regla}</strong>. Las líneas que asignes a un producto abajo siguen el tipo de ese producto.</>
+                        : 'Se aplica a toda la factura, salvo las líneas asignadas a un producto del catálogo.'}
+                    </p>
+                  </div>
+                );
+              })()}
               {(() => {
                 const ruc    = xmlPreview.data.infoTributaria.ruc as string;
                 const lineas = clasificarDetalles(productos, ruc, xmlPreview.data.detalles ?? []);

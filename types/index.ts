@@ -756,6 +756,8 @@ export interface MovimientoBancario {
   monto:          number;
   saldo?:         number;
   referencia?:    string;
+  /** Oficina del banco que registró el movimiento (viene en el estado de cuenta en PDF). */
+  oficina?:       string;
   estado:         EstadoConciliacion;
   asientoId?:     string;
   createdAt:      Date;

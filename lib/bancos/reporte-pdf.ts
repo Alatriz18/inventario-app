@@ -23,7 +23,7 @@ const MESES = ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 'Julio', '
 export const nombrePeriodo = (p: string) => { const [y, m] = p.split('-').map(Number); return `${MESES[m - 1]} de ${y}`; };
 
 const ETIQUETA_ESTADO: Record<FilaResumen['estado'], string> = {
-  cerrada: 'Cerrada', cuadra: 'Cuadra (sin cerrar)', diferencia: 'Con diferencia',
+  cerrada: 'Cerrada', cuadra: 'Cuadra (sin cerrar)', diferencia: 'Con diferencia', sin_estado: 'Sin estado de cuenta',
 };
 
 // ── PDF de un mes ──────────────────────────────────────────────────────────

@@ -42,7 +42,7 @@ import {
   agruparPendientes, netoEnCuenta, cruceConCaja, CUENTAS_SUGERIDAS, type Emparejamiento, type GrupoMovimientos,
 } from '@/lib/bancos/conciliacion';
 import { useOpcionesCuentasMovimiento } from '@/hooks/useOpcionesCuentasMovimiento';
-import { diagnosticarApertura } from '@/lib/bancos/diagnostico-apertura';
+import { diagnosticarApertura, aperturaDelBanco } from '@/lib/bancos/diagnostico-apertura';
 import { useAuth } from '@/context/AuthContext';
 
 const currency = (v: number) => `$${v.toFixed(2)}`;
@@ -155,10 +155,10 @@ export default function ConciliacionBancariaPage() {
   const aperturaRegistrada = useMemo(
     () => movs.some(m => m.tipoDocumento === 'saldo_inicial' && m.estado !== 'anulado'), [movs]);
   const apertura = useMemo(() => {
-    const primero = [...extractos].sort((a, b) => a.periodo.localeCompare(b.periodo))[0];
-    if (primero) return { monto: primero.saldoAnterior, desdeBanco: true };
+    const delBanco = aperturaDelBanco(extractos, periodos[0]);
+    if (delBanco !== null) return { monto: delBanco, desdeBanco: true };
     return { monto: cuentaObj?.saldoInicial ?? 0, desdeBanco: false };
-  }, [extractos, cuentaObj]);
+  }, [extractos, cuentaObj, periodos]);
   const primerPeriodo = periodos[0];
 
   // ¿Los libros ya tienen un asiento de apertura con el banco? ¿Se registró además un saldo inicial a mano?
@@ -253,7 +253,8 @@ export default function ConciliacionBancariaPage() {
 
   const opcionesCuentas = useOpcionesCuentasMovimiento();
 
-  const puedeCerrar = !!conc && !cierre && lotesAplicados.length === 0 && Math.abs(diferencia) < 0.005
+  // No se cierra un mes sin el saldo real del estado de cuenta: calculado con los movimientos siempre «cuadra»
+  const puedeCerrar = !!conc && !cierre && !!extracto && lotesAplicados.length === 0 && Math.abs(diferencia) < 0.005
     && movsAgrupados.pendientes.length === 0 && conc.descuadres.length === 0
     && conc.creditosNoRegistrados.length + conc.debitosNoRegistrados.length === 0;
   const bloqueado = !!cierre;
@@ -603,6 +604,11 @@ export default function ConciliacionBancariaPage() {
                 <span className="inline-flex items-center gap-1.5 text-xs font-medium px-2.5 py-1 rounded-full bg-green-100 text-green-700">
                   <Lock className="h-3 w-3" /> Cerrada por {cierre.usuarioNombre}
                 </span>
+              ) : !extracto ? (
+                <span className="text-xs font-medium px-2.5 py-1 rounded-full bg-amber-100 text-amber-700"
+                  title="El saldo del banco está calculado con los movimientos, no es el del estado de cuenta">
+                  Sin estado de cuenta
+                </span>
               ) : Math.abs(diferencia) < 0.005 ? (
                 <span className="text-xs font-medium px-2.5 py-1 rounded-full bg-emerald-100 text-emerald-700">Cuadra</span>
               ) : (
@@ -694,7 +700,7 @@ export default function ConciliacionBancariaPage() {
                   </Button>
                 ) : (
                   <Button size="sm" onClick={cerrarMes} disabled={!puedeCerrar || cerrando}
-                    title={puedeCerrar ? undefined : 'Para cerrar: diferencia en $0.00 y todos los movimientos del banco contabilizados'}>
+                    title={puedeCerrar ? undefined : 'Para cerrar: guardar el estado de cuenta del mes, diferencia en $0.00 y todos los movimientos del banco contabilizados'}>
                     <Lock className="mr-2 h-4 w-4" /> {cerrando ? 'Cerrando…' : 'Cerrar conciliación del mes'}
                   </Button>
                 )}

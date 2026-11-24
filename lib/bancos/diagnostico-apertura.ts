@@ -9,6 +9,20 @@ export interface AsientoApertura { numero: string; montoBanco: number; visto: bo
 
 const d2 = (n: number) => `$${Math.abs(n).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
+/**
+ * Saldo con el que abrió el banco: el «saldo anterior» del estado de cuenta del PRIMER mes con movimientos.
+ * Si falta el estado de cuenta de ese mes devuelve null: el saldo anterior de un corte posterior es el cierre
+ * del mes anterior, no la apertura.
+ */
+export function aperturaDelBanco(
+  extractos: { periodo: string; saldoAnterior: number }[],
+  primerPeriodo: string | undefined
+): number | null {
+  if (!primerPeriodo) return null;
+  const e = extractos.find(x => x.periodo === primerPeriodo);
+  return e ? e.saldoAnterior : null;
+}
+
 export function diagnosticarApertura(p: {
   /** Saldo con el que el banco abrió, del primer estado de cuenta guardado (null si no hay). */
   aperturaBanco:    number | null;

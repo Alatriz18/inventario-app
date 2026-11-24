@@ -80,6 +80,7 @@ describe('resumenConciliaciones', () => {
     const filas = resumenConciliaciones(datos({ extractos: [extracto('2026-01', 100)] }));
     const feb = filas.find(f => f.periodo === '2026-02')!;
     expect(feb.conEstadoCuenta).toBe(false);
+    expect(feb.estado).toBe('sin_estado'); // no se presenta como «cuadra» ni se puede cerrar
     expect(feb.saldoBanco).toBe(70); // 0 + 100 − 30
   });
 

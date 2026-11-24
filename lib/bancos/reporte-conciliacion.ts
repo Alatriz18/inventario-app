@@ -9,7 +9,8 @@ import {
   type MarcaVisto, type ResultadoConciliacion,
 } from '@/lib/bancos/conciliacion';
 
-export type EstadoMes = 'cerrada' | 'cuadra' | 'diferencia';
+/** 'sin_estado': falta guardar el estado de cuenta del mes, el saldo del banco es calculado y no sirve para cerrar. */
+export type EstadoMes = 'cerrada' | 'cuadra' | 'diferencia' | 'sin_estado';
 
 export interface FilaResumen {
   periodo:    string;
@@ -88,7 +89,9 @@ export function detalleMes(periodo: string, d: DatosConciliacion): DetalleMes {
 
   const fila: FilaResumen = {
     periodo, corte,
-    estado: cierre ? 'cerrada' : Math.abs(diferencia) < 0.005 ? 'cuadra' : 'diferencia',
+    estado: cierre ? 'cerrada'
+      : !saldo.desdeEstadoCuenta ? 'sin_estado'
+      : Math.abs(diferencia) < 0.005 ? 'cuadra' : 'diferencia',
     saldoBanco: saldo.valor, conEstadoCuenta: saldo.desdeEstadoCuenta,
     depositosTransito: conc.totalTransito, nDepositosTransito: conc.depositosTransito.length,
     pagosPendientes: conc.totalPendientes, nPagosPendientes: conc.pagosPendientes.length,

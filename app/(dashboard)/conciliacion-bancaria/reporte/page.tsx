@@ -34,6 +34,7 @@ const ESTILO_ESTADO: Record<EstadoMes, { texto: string; clase: string }> = {
   cerrada:    { texto: 'Cerrada',          clase: 'bg-green-100 text-green-700' },
   cuadra:     { texto: 'Cuadra, sin cerrar', clase: 'bg-emerald-50 text-emerald-700' },
   diferencia: { texto: 'Con diferencia',   clase: 'bg-amber-100 text-amber-700' },
+  sin_estado: { texto: 'Sin estado de cuenta', clase: 'bg-amber-50 text-amber-700' },
 };
 
 export default function ReporteConciliacionesPage() {

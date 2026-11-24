@@ -1,5 +1,23 @@
 import { describe, it, expect } from 'vitest';
-import { diagnosticarApertura } from '@/lib/bancos/diagnostico-apertura';
+import { diagnosticarApertura, aperturaDelBanco } from '@/lib/bancos/diagnostico-apertura';
+
+describe('aperturaDelBanco (caso real: estado de cuenta de enero sin guardar)', () => {
+  const febrero = { periodo: '2026-02', saldoAnterior: 779.26 };   // = cierre de enero, NO la apertura
+  const enero   = { periodo: '2026-01', saldoAnterior: 4369.82 };
+
+  it('si falta el estado de cuenta del primer mes no inventa la apertura con el de un mes posterior', () => {
+    expect(aperturaDelBanco([febrero], '2026-01')).toBeNull();
+  });
+
+  it('con el estado de cuenta del primer mes toma su saldo anterior', () => {
+    expect(aperturaDelBanco([febrero, enero], '2026-01')).toBe(4369.82);
+  });
+
+  it('sin meses o sin extractos devuelve null', () => {
+    expect(aperturaDelBanco([], '2026-01')).toBeNull();
+    expect(aperturaDelBanco([enero], undefined)).toBeNull();
+  });
+});
 
 describe('diagnosticarApertura (caso de la captura de febrero: $10 por explicar)', () => {
   it('apertura duplicada y con monto distinto al del banco: lo explica todo', () => {

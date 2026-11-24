@@ -21,7 +21,8 @@ import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from '@/components/ui/table';
 
-import { CuentaBancaria, MovimientoBancario, AsientoContable, CuentaContable, ExtractoBancario, ConciliacionBancaria } from '@/types';
+import { CuentaBancaria, MovimientoBancario, AsientoContable, CuentaContable, ExtractoBancario, ConciliacionBancaria, LoteReclasificacion } from '@/types';
+import { subscribeToLotesReclasificacion } from '@/lib/firebase/reclasificaciones';
 import {
   subscribeToCuentasBancarias, subscribeToMovimientosBancarios,
   conciliarMovimiento, ignorarMovimiento, revertirConciliacion,
@@ -67,6 +68,7 @@ export default function ConciliacionBancariaPage() {
   const [asientos,  setAsientos]  = useState<AsientoContable[]>([]);
   const [extractos, setExtractos] = useState<ExtractoBancario[]>([]);
   const [cierres,   setCierres]   = useState<ConciliacionBancaria[]>([]);
+  const [lotes,     setLotes]     = useState<LoteReclasificacion[]>([]);
   const [planCuentas, setPlanCuentas] = useState<CuentaContable[]>([]);
 
   // Conciliar un movimiento con un asiento existente
@@ -103,14 +105,19 @@ export default function ConciliacionBancariaPage() {
   }, [cuentas, cuentaSel]);
 
   useEffect(() => {
-    if (!cuentaSel) { setMovs([]); setExtractos([]); setCierres([]); return; }
+    if (!cuentaSel) { setMovs([]); setExtractos([]); setCierres([]); setLotes([]); return; }
     setLoading(true);
     const onErr = () => { toast.error('No se pudieron cargar los movimientos'); setLoading(false); };
     const u1 = subscribeToMovimientosBancarios(cuentaSel, d => { setMovs(d); setLoading(false); }, onErr);
     const u2 = subscribeToExtractos(cuentaSel, setExtractos, () => {});
     const u3 = subscribeToConciliaciones(cuentaSel, setCierres, () => {});
-    return () => { u1(); u2(); u3(); };
+    const u4 = subscribeToLotesReclasificacion(cuentaSel, setLotes);
+    return () => { u1(); u2(); u3(); u4(); };
   }, [cuentaSel]);
+
+  // Si el historial de este banco se movió a Caja General, los libros ya no tienen el banco:
+  // no se puede conciliar hasta deshacer esa reclasificación.
+  const lotesAplicados = useMemo(() => lotes.filter(l => l.estado === 'aplicado'), [lotes]);
 
   const cuentaObj = useMemo(() => cuentas.find(c => c.id === cuentaSel) ?? null, [cuentas, cuentaSel]);
   const cuentaCodigo = cuentaObj?.cuentaContableCodigo ?? '';
@@ -183,7 +190,7 @@ export default function ConciliacionBancariaPage() {
       .map(c => ({ value: c.codigo, label: `${c.codigo} – ${c.nombre}`, grupo: c.tipo.charAt(0).toUpperCase() + c.tipo.slice(1) }));
   }, [planCuentas]);
 
-  const puedeCerrar = !!conc && !cierre && Math.abs(diferencia) < 0.005
+  const puedeCerrar = !!conc && !cierre && lotesAplicados.length === 0 && Math.abs(diferencia) < 0.005
     && movsAgrupados.pendientes.length === 0 && conc.descuadres.length === 0
     && conc.creditosNoRegistrados.length + conc.debitosNoRegistrados.length === 0;
   const bloqueado = !!cierre;
@@ -402,6 +409,19 @@ export default function ConciliacionBancariaPage() {
         </div>
       ) : conc && (
         <>
+          {lotesAplicados.length > 0 && (
+            <div className="bg-red-50 border border-red-200 rounded-xl p-4 text-sm text-red-800 space-y-1.5">
+              <p className="font-semibold">El historial de este banco fue movido a Caja General</p>
+              <p className="text-xs">
+                {lotesAplicados.map(l => `${format(aFecha(l.fecha), 'dd/MM/yyyy')} (${l.items.length} movimientos, por ${l.usuarioNombre})`).join(' · ')}.
+                Esa reclasificación cambió la cuenta Bancos por Caja en los asientos, así que los libros casi no tienen movimientos en el banco
+                y esta conciliación no puede cuadrar. Para conciliar de verdad, entra a{' '}
+                <Link href="/movimientos-bancarios" className="underline font-medium">Movimientos Bancarios</Link>, elige esta cuenta y pulsa
+                «Deshacer» en el recuadro de reclasificaciones. No se puede cerrar el mes mientras siga aplicada.
+              </p>
+            </div>
+          )}
+
           {/* ── Estado de la conciliación del mes ─────────────────────────── */}
           <div className="bg-white rounded-xl border overflow-hidden">
             <div className="px-5 py-3 border-b bg-slate-50 flex flex-wrap items-center justify-between gap-3">

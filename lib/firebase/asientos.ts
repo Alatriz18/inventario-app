@@ -344,3 +344,24 @@ export async function bloquearAsientosDePeriodo(
 
   await Promise.all(batch);
 }
+
+/**
+ * Como reclasificarCuentaEnAsiento, pero SOLO si el asiento tiene una única línea con la cuenta de
+ * origen. Si tiene varias (p. ej. un depósito: Debe Bancos / Haber Caja, que al moverse a Caja deja
+ * dos líneas de Caja) no se puede saber cuál era la original: no se toca y se devuelve 'ambigua'
+ * para revisarla a mano. Se usa al deshacer "mover el historial a Caja".
+ */
+export async function reclasificarCuentaEnAsientoSiEsUnica(
+  id:                 string,
+  cuentaOrigenCodigo: string,
+  cuentaDestino:      { codigo: string; nombre: string; id?: string },
+  usuarioId:          string,
+  usuarioNombre:      string
+): Promise<'ok' | 'sin_cambio' | 'ambigua'> {
+  const snap = await getDoc(doc(db, COL, id));
+  if (!snap.exists()) throw new Error('Asiento no encontrado');
+  const lineasOrigen = fromDoc(snap).lineas.filter(l => l.cuentaCodigo === cuentaOrigenCodigo);
+  if (lineasOrigen.length > 1) return 'ambigua';
+  const cambio = await reclasificarCuentaEnAsiento(id, cuentaOrigenCodigo, cuentaDestino, usuarioId, usuarioNombre);
+  return cambio ? 'ok' : 'sin_cambio';
+}

@@ -27,7 +27,7 @@ import {
   marcarMovimientoReclasificado, restaurarMovimiento,
 } from '@/lib/firebase/cuentas-bancarias';
 import { subscribeToCuentas }  from '@/lib/firebase/plan-cuentas';
-import { reclasificarCuentaEnAsiento, getAsientos } from '@/lib/firebase/asientos';
+import { reclasificarCuentaEnAsiento, reclasificarCuentaEnAsientoSiEsUnica, getAsientos } from '@/lib/firebase/asientos';
 import { getOrCreateConfigContable } from '@/lib/firebase/config-contable';
 import {
   crearLoteReclasificacion, subscribeToLotesReclasificacion, marcarLoteRevertido,
@@ -652,16 +652,19 @@ export default function MovimientosBancariosPage() {
     if (!user) return;
     if (!window.confirm(`¿Deshacer esta reclasificación de ${lote.items.length} movimiento(s) y devolverlos a ${lote.items[0]?.cuentaOrigenNombre ?? 'su cuenta original'}?`)) return;
     setRevirtiendoLoteId(lote.id);
-    let ok = 0, err = 0;
+    let ok = 0, err = 0, ambiguos = 0, cerrados = 0;
     try {
       for (const item of lote.items) {
         try {
           if (item.huboAsiento && item.asientoId) {
-            await reclasificarCuentaEnAsiento(
+            // Si el asiento quedó con varias líneas de Caja (p. ej. un depósito Bancos/Caja) no se puede
+            // saber cuál era la del banco: se deja como está para revisarlo a mano.
+            const r = await reclasificarCuentaEnAsientoSiEsUnica(
               item.asientoId, lote.cuentaDestinoCodigo,
               { codigo: item.cuentaOrigenCodigo, nombre: item.cuentaOrigenNombre, id: item.cuentaOrigenId },
               user.uid, user.nombre
             );
+            if (r === 'ambigua') { ambiguos++; continue; }
           }
           if (item.movId && item.estadoMovOriginal && item.descripcionMovOriginal !== undefined) {
             await restaurarMovimiento(item.movId, {
@@ -670,12 +673,18 @@ export default function MovimientosBancariosPage() {
             });
           }
           ok++;
-        } catch {
-          err++;
+        } catch (e) {
+          if (e instanceof Error && /cerrado/i.test(e.message)) cerrados++; else err++;
         }
       }
       await marcarLoteRevertido(lote.id);
-      toast.success(`${ok} movimiento(s) devueltos a ${lote.cuentaBancoNombre}` + (err ? ` — ${err} con error` : ''), { duration: 10000 });
+      toast.success(
+        `${ok} movimiento(s) devueltos a ${lote.cuentaBancoNombre}` +
+        (ambiguos ? ` — ${ambiguos} asiento(s) tienen Bancos y Caja a la vez (p. ej. depósitos) y NO se tocaron: corrígelos a mano en Contabilidad → Asientos` : '') +
+        (cerrados ? ` — ${cerrados} en períodos cerrados (reábrelos para devolverlos)` : '') +
+        (err ? ` — ${err} con error` : ''),
+        { duration: 20000 }
+      );
     } catch (e: any) {
       toast.error(e.message ?? 'Error al deshacer la reclasificación');
     } finally {

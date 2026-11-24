@@ -37,6 +37,14 @@ import {
   crearAsientoMovimientoBancario, crearAsientoReversion, crearAsientoReclasificacionCaja,
 } from '@/lib/contabilidad/motor-asientos';
 import { useAuth } from '@/context/AuthContext';
+import ContracuentasEditor from '@/components/shared/ContracuentasEditor';
+import CuentaCombobox from '@/components/shared/CuentaCombobox';
+import { useOpcionesCuentasMovimiento } from '@/hooks/useOpcionesCuentasMovimiento';
+import {
+  resumirContrapartidas, TIPOS_MOVIMIENTO_BANCO, type LineaContra, type TipoMovimientoBanco,
+} from '@/lib/bancos/contrapartidas';
+import { claveDescripcion, sugerirContrapartida, CUENTAS_SUGERIDAS } from '@/lib/bancos/conciliacion';
+import { asegurarCuenta } from '@/lib/contabilidad/reclasificar-compras';
 import { guardarExtractos } from '@/lib/firebase/extractos-bancarios';
 import { extraerTextoPDF } from '@/lib/bancos/leer-pdf';
 import { interpretarEstadoCuentaPichincha, type ResultadoEstadoCuenta } from '@/lib/bancos/estado-cuenta-pichincha';
@@ -83,16 +91,22 @@ export default function MovimientosBancariosPage() {
   const [dlgPdf,        setDlgPdf]        = useState(false);
   const [pdfRes,        setPdfRes]        = useState<ResultadoEstadoCuenta | null>(null);
   const [importandoPdf, setImportandoPdf] = useState(false);
+  const [progresoPdf,   setProgresoPdf]   = useState({ hechos: 0, total: 0 });
+  /** Contracuenta elegida por tipo de movimiento: clave `${tipo}|${descripción normalizada}` → código ('' = pendiente) */
+  const [contrasPdf,    setContrasPdf]    = useState<Record<string, string>>({});
 
   // Dialog registrar movimiento bancario directo (comisión, cargo, interés…)
   const [dlgMov, setDlgMov] = useState(false);
   const [savingMov, setSavingMov] = useState(false);
-  const [formMov, setFormMov] = useState({
+  const formMovInicial = () => ({
     fecha: format(new Date(), 'yyyy-MM-dd'),
-    concepto: '', monto: '', referencia: '',
-    tipo: 'cargo' as 'cargo' | 'abono',
-    cuentaContrapartidaCodigo: '',
+    tipoMov: 'nota_debito' as TipoMovimientoBanco,
+    concepto: '', monto: '', referencia: '', beneficiario: '',
   });
+  const [formMov, setFormMov] = useState(formMovInicial);
+  // Contracuentas del movimiento manual (una o varias; cualquier cuenta, incluida Caja)
+  const [contrasMov, setContrasMov] = useState<LineaContra[]>([{ codigo: '', monto: '' }]);
+  const opcionesCuentas = useOpcionesCuentasMovimiento();
 
   // Dialog reclasificar saldo completo de la cuenta a Caja General
   const [dlgReclasificar, setDlgReclasificar] = useState(false);
@@ -205,6 +219,33 @@ export default function MovimientosBancariosPage() {
     return { nuevos, yaRegistrados };
   }, [pdfRes, movs, cuentaSel]);
 
+  // Tipos de movimiento del PDF (comisión, IVA, depósito, transferencia…) para elegir su contracuenta de una vez
+  const gruposPdf = useMemo(() => {
+    if (!pdfPlan) return [];
+    const m = new Map<string, { key: string; clave: string; tipo: 'credito' | 'debito'; n: number; total: number }>();
+    for (const mv of pdfPlan.nuevos) {
+      const clave = claveDescripcion(mv.descripcion);
+      const key = `${mv.tipo}|${clave}`;
+      const g = m.get(key) ?? { key, clave, tipo: mv.tipo, n: 0, total: 0 };
+      g.n++; g.total = Math.round((g.total + mv.monto) * 100) / 100;
+      m.set(key, g);
+    }
+    return [...m.values()].sort((a, b) => b.n - a.n);
+  }, [pdfPlan]);
+
+  // Al leer un PDF nuevo se proponen las contracuentas obvias (comisión, IVA, intereses, retención, depósitos → Caja)
+  useEffect(() => {
+    if (!pdfRes) { setContrasPdf({}); return; }
+    const inicial: Record<string, string> = {};
+    for (const p of pdfRes.movimientos) {
+      const tipo = p.debito > 0 ? 'debito' : 'credito';
+      const clave = claveDescripcion(p.descripcion);
+      const sug = sugerirContrapartida(clave, tipo, CUENTAS_SUGERIDAS);
+      if (sug) inicial[`${tipo}|${clave}`] = sug.codigo;
+    }
+    setContrasPdf(inicial);
+  }, [pdfRes]);
+
   // Crear cuenta bancaria
   const handleCrearCuenta = async () => {
     if (!formCuenta.banco || !formCuenta.numeroCuenta) {
@@ -303,8 +344,34 @@ export default function MovimientosBancariosPage() {
   const handleConfirmarPDF = async () => {
     if (!pdfPlan) return;
     setImportandoPdf(true);
+    setProgresoPdf({ hechos: 0, total: 0 });
     try {
-      await importarMovimientosBancarios(pdfPlan.nuevos);
+      const ids = await importarMovimientosBancarios(pdfPlan.nuevos);
+
+      // Contabilizar al importar: los tipos de movimiento con contracuenta elegida generan su asiento
+      // y quedan conciliados; el resto queda pendiente para conciliar.
+      let contabilizados = 0, fallidos = 0;
+      const bancoCodigo = cuentaSelObj?.cuentaContableCodigo;
+      const aContabilizar = pdfPlan.nuevos
+        .map((m, i) => ({ m, i, codigo: contrasPdf[`${m.tipo}|${claveDescripcion(m.descripcion)}`] }))
+        .filter(x => x.codigo);
+      if (aContabilizar.length > 0 && bancoCodigo && user) {
+        setProgresoPdf({ hechos: 0, total: aContabilizar.length });
+        for (const c of new Set(aContabilizar.map(x => x.codigo))) await asegurarCuenta(c);
+        for (let k = 0; k < aContabilizar.length; k++) {
+          const { m, i, codigo } = aContabilizar[k];
+          try {
+            const asientoId = await crearAsientoMovimientoBancario({
+              movId: ids[i], fecha: m.fecha, concepto: m.descripcion, monto: m.monto,
+              cuentaBancoCodigo: bancoCodigo, cuentaContrapartidaCodigo: codigo,
+              tipo: m.tipo === 'debito' ? 'cargo' : 'abono',
+              usuarioId: user.uid, usuarioNombre: user.nombre,
+            });
+            if (asientoId) { await conciliarMovimiento(ids[i], asientoId); contabilizados++; } else fallidos++;
+          } catch { fallidos++; }
+          setProgresoPdf({ hechos: k + 1, total: aContabilizar.length });
+        }
+      }
       // Se guarda también el corte de cada mes (saldos que declara el banco): base de la conciliación mensual
       let extractos = 0;
       try {
@@ -313,9 +380,13 @@ export default function MovimientosBancariosPage() {
         toast.warning('Los movimientos se importaron, pero no se pudieron guardar los saldos de cada mes del banco. Revisa los permisos (reglas de Firestore) y vuelve a importar el PDF.', { duration: 12000 });
       }
       toast.success(
-        `${pdfPlan.nuevos.length} movimientos importados${extractos ? ` en ${extractos} corte(s) mensual(es)` : ''}`,
+        `${pdfPlan.nuevos.length} movimientos importados${extractos ? ` en ${extractos} corte(s) mensual(es)` : ''}` +
+        (contabilizados ? ` · ${contabilizados} contabilizados con su contracuenta` : ''),
         { duration: 12000, action: { label: 'Ir a conciliar', onClick: () => router.push('/conciliacion-bancaria') } }
       );
+      if (fallidos > 0) {
+        toast.warning(`${fallidos} movimiento(s) no se pudieron contabilizar (¿período contable cerrado?). Quedaron pendientes: contabilízalos desde Conciliación Bancaria.`, { duration: 14000 });
+      }
       setDlgPdf(false);
       setPdfRes(null);
     } catch (err: any) {
@@ -328,32 +399,38 @@ export default function MovimientosBancariosPage() {
   // Registrar movimiento bancario directo (comisión, cargo, interés ganado…)
   const handleRegistrarMov = async () => {
     if (!user || !cuentaSelObj?.cuentaContableCodigo) return;
-    const monto = parseFloat(formMov.monto) || 0;
-    if (!formMov.concepto.trim())         { toast.error('Ingresa el concepto'); return; }
-    if (!formMov.fecha)                   { toast.error('Ingresa la fecha'); return; }
-    if (monto <= 0)                       { toast.error('El monto debe ser mayor a 0'); return; }
-    if (!formMov.cuentaContrapartidaCodigo) { toast.error('Selecciona la cuenta contable de contrapartida'); return; }
+    const monto = Math.round((parseFloat(formMov.monto) || 0) * 100) / 100;
+    const tipoInfo = TIPOS_MOVIMIENTO_BANCO.find(t => t.value === formMov.tipoMov)!;
+    if (!formMov.concepto.trim()) { toast.error('Ingresa el detalle del movimiento'); return; }
+    if (!formMov.fecha)           { toast.error('Ingresa la fecha'); return; }
+    const resumen = resumirContrapartidas(monto, contrasMov);
+    if (!resumen.ok)              { toast.error(resumen.error ?? 'Revisa las cuentas contables'); return; }
 
     setSavingMov(true);
     try {
       const fecha = new Date(formMov.fecha + 'T12:00:00');
+      for (const c of new Set(resumen.lineas.map(l => l.codigo))) await asegurarCuenta(c);
+
+      // Se crea pendiente y solo se concilia si el asiento se generó bien
       const movId = await registrarMovimientoBancario({
         cuentaBancariaId: cuentaSel,
         fecha,
         descripcion: formMov.concepto.trim(),
-        tipo:   formMov.tipo === 'cargo' ? 'debito' : 'credito',
+        tipo:   tipoInfo.entra ? 'credito' : 'debito',
         monto,
+        tipoDocumento: formMov.tipoMov,
         ...(formMov.referencia.trim() ? { referencia: formMov.referencia.trim() } : {}),
-        estado: 'conciliado',
+        ...(formMov.beneficiario.trim() ? { beneficiario: formMov.beneficiario.trim() } : {}),
+        estado: 'no_conciliado',
       });
 
       const asientoId = await crearAsientoMovimientoBancario({
         movId, fecha,
         concepto: formMov.concepto.trim(),
         monto,
-        cuentaBancoCodigo:         cuentaSelObj.cuentaContableCodigo,
-        cuentaContrapartidaCodigo: formMov.cuentaContrapartidaCodigo,
-        tipo: formMov.tipo,
+        cuentaBancoCodigo: cuentaSelObj.cuentaContableCodigo,
+        contrapartidas:    resumen.lineas,
+        tipo: tipoInfo.entra ? 'abono' : 'cargo',
         usuarioId: user.uid, usuarioNombre: user.nombre,
       });
 
@@ -361,10 +438,11 @@ export default function MovimientosBancariosPage() {
         await conciliarMovimiento(movId, asientoId);
         toast.success('Movimiento bancario registrado y contabilizado');
       } else {
-        toast.warning('El movimiento se registró, pero el asiento contable NO se pudo generar. Revísalo en Contabilidad → Libro Diario.', { duration: 12000 });
+        toast.warning('El movimiento se registró, pero el asiento contable NO se pudo generar (¿período cerrado?). Queda pendiente: contabilízalo desde Conciliación Bancaria.', { duration: 12000 });
       }
       setDlgMov(false);
-      setFormMov({ fecha: format(new Date(), 'yyyy-MM-dd'), concepto: '', monto: '', referencia: '', tipo: 'cargo', cuentaContrapartidaCodigo: '' });
+      setFormMov(formMovInicial());
+      setContrasMov([{ codigo: '', monto: '' }]);
     } catch (e: any) {
       toast.error(e.message ?? 'Error al registrar el movimiento');
     } finally {
@@ -769,7 +847,7 @@ export default function MovimientosBancariosPage() {
                 disabled={!cuentaSelObj?.cuentaContableCodigo}
                 title={!cuentaSelObj?.cuentaContableCodigo ? 'Primero vincula esta cuenta a una cuenta contable' : undefined}
                 onClick={() => setDlgMov(true)}>
-                <Receipt className="mr-2 h-4 w-4" /> Comisión / Cargo
+                <Receipt className="mr-2 h-4 w-4" /> Movimiento manual
               </Button>
               <Button variant="outline" size="sm"
                 disabled={!cuentaSelObj?.cuentaContableCodigo || saldoCalculado <= 0}
@@ -1021,6 +1099,49 @@ export default function MovimientosBancariosPage() {
               )}
 
               {pdfPlan.nuevos.length > 0 && (
+                <div className="rounded-lg border">
+                  <div className="px-3 py-2 border-b bg-slate-50">
+                    <p className="text-sm font-medium text-slate-700">Contracuenta de cada tipo de movimiento</p>
+                    <p className="text-[11px] text-slate-400">
+                      {cuentaSelObj?.cuentaContableCodigo
+                        ? <>Elige a qué cuenta contable va cada tipo (gastos del banco, Caja, otra cuenta…) y se contabiliza y concilia al importar.
+                            Lo que dejes sin cuenta queda pendiente para conciliar contra un pago o cobro ya registrado. Contabilizar crea un asiento por movimiento,
+                            así que un PDF grande tarda.</>
+                        : 'Vincula esta cuenta bancaria a una cuenta contable para poder contabilizar al importar.'}
+                    </p>
+                  </div>
+                  {cuentaSelObj?.cuentaContableCodigo && (
+                    <div className="max-h-64 overflow-y-auto divide-y">
+                      {gruposPdf.slice(0, 40).map(g => (
+                        <div key={g.key} className="flex flex-wrap items-center gap-3 px-3 py-2">
+                          <div className="min-w-0 flex-1 basis-44">
+                            <p className="text-sm font-medium truncate">{g.clave}</p>
+                            <p className="text-[11px] text-slate-400">
+                              {g.n} movimiento{g.n === 1 ? '' : 's'} · {g.tipo === 'credito' ? 'créditos' : 'débitos'} por {currency(g.total)}
+                            </p>
+                          </div>
+                          <div className="w-full sm:w-72">
+                            <CuentaCombobox
+                              value={contrasPdf[g.key] ?? ''}
+                              onChange={v => setContrasPdf(c => ({ ...c, [g.key]: v }))}
+                              opciones={opcionesCuentas}
+                              vacioLabel="Dejar pendiente (conciliar después)"
+                              placeholder="Dejar pendiente"
+                            />
+                          </div>
+                        </div>
+                      ))}
+                      {gruposPdf.length > 40 && (
+                        <p className="px-3 py-2 text-[11px] text-slate-400">
+                          +{gruposPdf.length - 40} tipos menos frecuentes quedan pendientes.
+                        </p>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {pdfPlan.nuevos.length > 0 && (
                 <div className="max-h-72 overflow-y-auto rounded-lg border">
                   <Table>
                     <TableHeader>
@@ -1064,7 +1185,8 @@ export default function MovimientosBancariosPage() {
               Cancelar
             </Button>
             <Button disabled={importandoPdf || !pdfPlan} onClick={handleConfirmarPDF}>
-              {importandoPdf ? 'Importando…'
+              {importandoPdf
+                ? (progresoPdf.total > 0 ? `Contabilizando ${progresoPdf.hechos} de ${progresoPdf.total}…` : 'Importando…')
                 : (pdfPlan?.nuevos.length ?? 0) > 0 ? `Importar ${pdfPlan?.nuevos.length} movimientos`
                 : 'Guardar los saldos de cada mes'}
             </Button>
@@ -1143,35 +1265,44 @@ export default function MovimientosBancariosPage() {
       </Dialog>
 
       {/* Dialog registrar comisión / cargo / interés bancario */}
-      <Dialog open={dlgMov} onOpenChange={setDlgMov}>
-        <DialogContent className="max-w-md">
+      <Dialog open={dlgMov} onOpenChange={o => { if (!savingMov) setDlgMov(o); }}>
+        <DialogContent className="sm:max-w-2xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle>Registrar Comisión / Cargo Bancario</DialogTitle>
+            <DialogTitle>Registrar movimiento bancario</DialogTitle>
           </DialogHeader>
-          <div className="space-y-3">
-            <div>
-              <Label>Tipo de movimiento *</Label>
-              <Select value={formMov.tipo}
-                onValueChange={v => setFormMov(f => ({ ...f, tipo: v as 'cargo' | 'abono' }))}>
-                <SelectTrigger className="mt-1"><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="cargo">Cargo / Comisión (disminuye el saldo del banco)</SelectItem>
-                  <SelectItem value="abono">Abono / Interés ganado (aumenta el saldo del banco)</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-            <div>
-              <Label>Concepto *</Label>
-              <Input value={formMov.concepto}
-                onChange={e => setFormMov(f => ({ ...f, concepto: e.target.value }))}
-                placeholder="Ej: Comisión mantenimiento de cuenta" className="mt-1" />
-            </div>
+          <div className="space-y-4">
             <div className="grid grid-cols-2 gap-3">
+              <div>
+                <Label>Tipo de movimiento *</Label>
+                <Select value={formMov.tipoMov}
+                  onValueChange={v => setFormMov(f => ({ ...f, tipoMov: v as TipoMovimientoBanco }))}>
+                  <SelectTrigger className="mt-1"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    {TIPOS_MOVIMIENTO_BANCO.map(t => (
+                      <SelectItem key={t.value} value={t.value}>
+                        {t.label} ({t.entra ? '+ entra' : '− sale'})
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
               <div>
                 <Label>Fecha *</Label>
                 <Input type="date" value={formMov.fecha}
                   onChange={e => setFormMov(f => ({ ...f, fecha: e.target.value }))}
                   max={new Date().toISOString().split('T')[0]} className="mt-1" />
+              </div>
+            </div>
+            <p className="-mt-2 text-[11px] text-slate-400">
+              {TIPOS_MOVIMIENTO_BANCO.find(t => t.value === formMov.tipoMov)?.ayuda}
+            </p>
+
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <Label>N° de comprobante / documento</Label>
+                <Input value={formMov.referencia}
+                  onChange={e => setFormMov(f => ({ ...f, referencia: e.target.value }))}
+                  placeholder="N° de nota, cheque o depósito" className="mt-1" />
               </div>
               <div>
                 <Label>Monto *</Label>
@@ -1180,42 +1311,46 @@ export default function MovimientosBancariosPage() {
                   placeholder="0.00" className="mt-1" />
               </div>
             </div>
-            <div>
-              <Label>Referencia / N° comprobante</Label>
-              <Input value={formMov.referencia}
-                onChange={e => setFormMov(f => ({ ...f, referencia: e.target.value }))}
-                placeholder="Opcional — n° de nota de débito del banco, etc." className="mt-1" />
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <Label>Detalle *</Label>
+                <Input value={formMov.concepto}
+                  onChange={e => setFormMov(f => ({ ...f, concepto: e.target.value }))}
+                  placeholder="Ej: Comisión mantenimiento de cuenta" className="mt-1" />
+              </div>
+              <div>
+                <Label>Beneficiario</Label>
+                <Input value={formMov.beneficiario}
+                  onChange={e => setFormMov(f => ({ ...f, beneficiario: e.target.value }))}
+                  placeholder="Opcional" className="mt-1" />
+              </div>
             </div>
-            <div>
-              <Label>Cuenta contable de contrapartida *</Label>
-              <Select value={formMov.cuentaContrapartidaCodigo}
-                onValueChange={v => setFormMov(f => ({ ...f, cuentaContrapartidaCodigo: v }))}>
-                <SelectTrigger className="mt-1">
-                  <SelectValue placeholder={formMov.tipo === 'cargo' ? 'Cuenta de gasto (ej. Gastos Bancarios)…' : 'Cuenta de ingreso (ej. Intereses Ganados)…'} />
-                </SelectTrigger>
-                <SelectContent>
-                  {planCuentas
-                    .filter(c => c.aceptaMovimientos && c.tipo === (formMov.tipo === 'cargo' ? 'gasto' : 'ingreso'))
-                    .map(c => (
-                      <SelectItem key={c.id} value={c.codigo}>
-                        <span className="font-mono text-xs">{c.codigo}</span> · {c.nombre}
-                      </SelectItem>
-                    ))}
-                </SelectContent>
-              </Select>
-              <p className="text-xs text-slate-400 mt-1">
-                {formMov.tipo === 'cargo'
-                  ? 'Ej: comisiones de mantenimiento, cargos por transferencia, IVA sobre comisión.'
-                  : 'Ej: interés ganado por saldo en la cuenta.'}
-              </p>
+
+            <div className="rounded-lg border p-3 space-y-2">
+              <div>
+                <Label>Contracuenta(s) contable(s) *</Label>
+                <p className="text-[11px] text-slate-400">
+                  ¿A dónde va este movimiento? Puede ser cualquier cuenta: un gasto, Caja, otra cuenta de balance… Con «Agregar cuenta» lo repartes
+                  (por ejemplo comisión + IVA).
+                </p>
+              </div>
+              <ContracuentasEditor opciones={opcionesCuentas} total={parseFloat(formMov.monto) || 0}
+                value={contrasMov} onChange={setContrasMov} />
+              <div className="rounded-md bg-slate-50 p-2 text-[11px] text-slate-500">
+                Asiento: {TIPOS_MOVIMIENTO_BANCO.find(t => t.value === formMov.tipoMov)?.entra
+                  ? 'Debe Banco · Haber contracuenta(s)'
+                  : 'Debe contracuenta(s) · Haber Banco'}
+                {' '}({cuentaSelObj?.cuentaContableCodigo}).
+              </div>
             </div>
+
             <div className="bg-slate-50 rounded-lg p-3 text-xs text-slate-500">
               Se creará el movimiento en <strong>{cuentaSelObj?.banco}</strong> ya conciliado con su propio asiento contable
               (no necesitas conciliarlo manualmente después).
             </div>
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setDlgMov(false)}>Cancelar</Button>
+            <Button variant="outline" disabled={savingMov} onClick={() => setDlgMov(false)}>Cancelar</Button>
             <Button onClick={handleRegistrarMov} disabled={savingMov}>
               {savingMov ? 'Registrando…' : 'Registrar'}
             </Button>

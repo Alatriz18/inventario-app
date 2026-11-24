@@ -15,6 +15,7 @@
  */
 
 import type { AsientoContable, MovimientoBancario } from '@/types';
+import { CUENTAS_POR_DEFECTO } from '@/lib/data/plan-cuentas-ecuador';
 
 const redondear = (n: number) => Math.round(n * 100) / 100;
 const MS_DIA = 24 * 60 * 60 * 1000;
@@ -300,3 +301,12 @@ export function agruparPendientes(
   }
   return [...grupos.values()].sort((a, b) => b.movimientos.length - a.movimientos.length);
 }
+
+/** Cuentas con las que se sugiere contabilizar los movimientos típicos del banco. */
+export const CUENTAS_SUGERIDAS = {
+  gastoComisiones:  '520302', // Gastos financieros – comisiones
+  ivaCompras:       CUENTAS_POR_DEFECTO.cuentaIVACompras,
+  interesesGanados: CUENTAS_POR_DEFECTO.cuentaInteresesGanados,
+  retencionFuente:  CUENTAS_POR_DEFECTO.cuentaRetFuenteClientes,
+  caja:             CUENTAS_POR_DEFECTO.cuentaCaja,
+};

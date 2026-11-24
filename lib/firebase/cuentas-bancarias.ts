@@ -116,16 +116,19 @@ export function subscribeToMovimientosBancariosDeCuentas(
 
 export async function importarMovimientosBancarios(
   movimientos: Omit<MovimientoBancario, 'id' | 'createdAt'>[]
-): Promise<void> {
+): Promise<string[]> {
+  const ids: string[] = [];
   // Firestore admite hasta 500 escrituras por lote: un estado de cuenta de varios meses tiene más
   for (let i = 0; i < movimientos.length; i += 400) {
     const batch = writeBatch(db);
     movimientos.slice(i, i + 400).forEach(m => {
       const ref = doc(collection(db, COL_MOVS));
+      ids.push(ref.id);
       batch.set(ref, { ...m, createdAt: serverTimestamp() });
     });
     await batch.commit();
   }
+  return ids; // mismos índices que la lista recibida
 }
 
 /** Registra un solo movimiento bancario (comisión, cargo, interés…) — no requiere lote. */

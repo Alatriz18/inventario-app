@@ -8,7 +8,7 @@ import { toast } from 'sonner';
 import Link from 'next/link';
 
 import PageHeader  from '@/components/shared/PageHeader';
-import CuentaCombobox, { type OpcionCuenta } from '@/components/shared/CuentaCombobox';
+import CuentaCombobox from '@/components/shared/CuentaCombobox';
 import { Button }  from '@/components/ui/button';
 import { Skeleton }from '@/components/ui/skeleton';
 import { Label }   from '@/components/ui/label';
@@ -21,24 +21,24 @@ import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from '@/components/ui/table';
 
-import { CuentaBancaria, MovimientoBancario, AsientoContable, CuentaContable, ExtractoBancario, ConciliacionBancaria, LoteReclasificacion } from '@/types';
+import { CuentaBancaria, MovimientoBancario, AsientoContable, ExtractoBancario, ConciliacionBancaria, LoteReclasificacion } from '@/types';
 import { subscribeToLotesReclasificacion } from '@/lib/firebase/reclasificaciones';
 import {
   subscribeToCuentasBancarias, subscribeToMovimientosBancarios,
   conciliarMovimiento, ignorarMovimiento, revertirConciliacion,
 } from '@/lib/firebase/cuentas-bancarias';
 import { subscribeToAsientos } from '@/lib/firebase/asientos';
-import { subscribeToCuentas } from '@/lib/firebase/plan-cuentas';
 import {
   subscribeToExtractos, subscribeToConciliaciones, cerrarConciliacion, reabrirConciliacion,
 } from '@/lib/firebase/extractos-bancarios';
 import { crearAsientoMovimientoBancario } from '@/lib/contabilidad/motor-asientos';
 import { asegurarCuenta } from '@/lib/contabilidad/reclasificar-compras';
-import { PLAN_CUENTAS_ECUADOR, CUENTAS_POR_DEFECTO } from '@/lib/data/plan-cuentas-ecuador';
+import { CUENTAS_POR_DEFECTO } from '@/lib/data/plan-cuentas-ecuador';
 import {
   aFecha, periodoDe, finDePeriodo, calcularConciliacion, proponerEmparejamientos,
-  agruparPendientes, netoEnCuenta, cruceConCaja, type Emparejamiento, type GrupoMovimientos,
+  agruparPendientes, netoEnCuenta, cruceConCaja, CUENTAS_SUGERIDAS, type Emparejamiento, type GrupoMovimientos,
 } from '@/lib/bancos/conciliacion';
+import { useOpcionesCuentasMovimiento } from '@/hooks/useOpcionesCuentasMovimiento';
 import { useAuth } from '@/context/AuthContext';
 
 const currency = (v: number) => `$${v.toFixed(2)}`;
@@ -47,14 +47,6 @@ const nombreMes = (p: string) => {
   const [y, m] = p.split('-').map(Number);
   const t = format(new Date(y, m - 1, 1), "MMMM 'de' yyyy", { locale: es });
   return t.charAt(0).toUpperCase() + t.slice(1);
-};
-
-const CUENTAS_SUGERIDAS = {
-  gastoComisiones:  '520302', // Gastos financieros – comisiones
-  ivaCompras:       CUENTAS_POR_DEFECTO.cuentaIVACompras,
-  interesesGanados: CUENTAS_POR_DEFECTO.cuentaInteresesGanados,
-  retencionFuente:  CUENTAS_POR_DEFECTO.cuentaRetFuenteClientes,
-  caja:             CUENTAS_POR_DEFECTO.cuentaCaja,
 };
 
 export default function ConciliacionBancariaPage() {
@@ -69,7 +61,6 @@ export default function ConciliacionBancariaPage() {
   const [extractos, setExtractos] = useState<ExtractoBancario[]>([]);
   const [cierres,   setCierres]   = useState<ConciliacionBancaria[]>([]);
   const [lotes,     setLotes]     = useState<LoteReclasificacion[]>([]);
-  const [planCuentas, setPlanCuentas] = useState<CuentaContable[]>([]);
 
   // Conciliar un movimiento con un asiento existente
   const [dlgConciliar, setDlgConciliar] = useState(false);
@@ -94,8 +85,7 @@ export default function ConciliacionBancariaPage() {
   useEffect(() => {
     const u1 = subscribeToCuentasBancarias(setCuentas);
     const u2 = subscribeToAsientos(setAsientos, 10000);
-    const u3 = subscribeToCuentas(setPlanCuentas);
-    return () => { u1(); u2(); u3(); };
+    return () => { u1(); u2(); };
   }, []);
 
   // Con una sola cuenta bancaria activa, se elige sola
@@ -181,14 +171,7 @@ export default function ConciliacionBancariaPage() {
     [movsAgrupados.pendientes]
   );
 
-  const opcionesCuentas: OpcionCuenta[] = useMemo(() => {
-    const ok = (c: { aceptaMovimientos: boolean; codigo: string }) => c.aceptaMovimientos && !c.codigo.includes('.');
-    const delPlan = planCuentas.filter(c => ok(c) && c.activa !== false);
-    const faltantes = PLAN_CUENTAS_ECUADOR.filter(c => ok(c) && !planCuentas.some(p => p.codigo === c.codigo));
-    return [...delPlan, ...faltantes]
-      .sort((a, b) => a.codigo.localeCompare(b.codigo))
-      .map(c => ({ value: c.codigo, label: `${c.codigo} – ${c.nombre}`, grupo: c.tipo.charAt(0).toUpperCase() + c.tipo.slice(1) }));
-  }, [planCuentas]);
+  const opcionesCuentas = useOpcionesCuentasMovimiento();
 
   const puedeCerrar = !!conc && !cierre && lotesAplicados.length === 0 && Math.abs(diferencia) < 0.005
     && movsAgrupados.pendientes.length === 0 && conc.descuadres.length === 0

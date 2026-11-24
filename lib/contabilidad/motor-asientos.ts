@@ -1287,22 +1287,32 @@ interface ParamsMovimientoBancario extends ParamsBase {
   concepto:                  string;
   monto:                     number;
   cuentaBancoCodigo:         string;
-  cuentaContrapartidaCodigo: string;
+  /** Una sola contracuenta por el monto completo (se ignora si se pasa `contrapartidas`). */
+  cuentaContrapartidaCodigo?: string;
+  /** Varias contracuentas que suman el monto (p. ej. comisión + IVA, o Caja + otra cuenta). */
+  contrapartidas?:           { codigo: string; monto: number }[];
   tipo:                      'cargo' | 'abono'; // cargo = disminuye el banco (gasto/comisión), abono = lo aumenta (interés ganado)
 }
 
 export async function crearAsientoMovimientoBancario(p: ParamsMovimientoBancario): Promise<string | null> {
   try {
     const cuentas = await getCuentasCached();
-    const lineas: AsientoLinea[] = p.tipo === 'cargo'
-      ? [
-          buildLinea(cuentas, p.cuentaContrapartidaCodigo, p.monto, 0, p.concepto),
-          buildLinea(cuentas, p.cuentaBancoCodigo,          0, p.monto, p.concepto),
-        ]
-      : [
-          buildLinea(cuentas, p.cuentaBancoCodigo,          p.monto, 0, p.concepto),
-          buildLinea(cuentas, p.cuentaContrapartidaCodigo,  0, p.monto, p.concepto),
-        ];
+    const contras = p.contrapartidas && p.contrapartidas.length > 0
+      ? p.contrapartidas
+      : p.cuentaContrapartidaCodigo ? [{ codigo: p.cuentaContrapartidaCodigo, monto: p.monto }] : [];
+    if (contras.length === 0) return null;
+    // Las contracuentas deben sumar exactamente el monto del movimiento
+    const suma = Math.round(contras.reduce((s, c) => s + c.monto, 0) * 100) / 100;
+    if (Math.abs(suma - p.monto) >= 0.005) return null;
+
+    // cargo: Debe contracuentas / Haber banco · abono: Debe banco / Haber contracuentas
+    const lineaBanco = p.tipo === 'cargo'
+      ? buildLinea(cuentas, p.cuentaBancoCodigo, 0, p.monto, p.concepto)
+      : buildLinea(cuentas, p.cuentaBancoCodigo, p.monto, 0, p.concepto);
+    const lineasContra = contras.map(c => p.tipo === 'cargo'
+      ? buildLinea(cuentas, c.codigo, c.monto, 0, p.concepto)
+      : buildLinea(cuentas, c.codigo, 0, c.monto, p.concepto));
+    const lineas: AsientoLinea[] = p.tipo === 'cargo' ? [...lineasContra, lineaBanco] : [lineaBanco, ...lineasContra];
 
     return await createAsiento({
       fecha:          p.fecha,

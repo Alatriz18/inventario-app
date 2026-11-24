@@ -758,6 +758,9 @@ export interface MovimientoBancario {
   referencia?:    string;
   /** Oficina del banco que registró el movimiento (viene en el estado de cuenta en PDF). */
   oficina?:       string;
+  /** Tipo de documento del banco cuando el movimiento se registró a mano. */
+  tipoDocumento?: 'deposito' | 'nota_credito' | 'nota_debito' | 'cheque';
+  beneficiario?:  string;
   estado:         EstadoConciliacion;
   asientoId?:     string;
   createdAt:      Date;

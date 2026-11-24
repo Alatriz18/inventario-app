@@ -1,11 +1,11 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { Suspense, useEffect, useState } from 'react';
 import { useRouter, usePathname } from 'next/navigation';
 import { useAuth } from '@/context/AuthContext';
 import Sidebar        from '@/components/shared/Sidebar';
 import Header         from '@/components/shared/Header';
-import GuardPermisos  from '@/components/shared/GuardPermisos';
+import PestanasHost   from '@/components/shared/PestanasHost';
 import { Skeleton } from '@/components/ui/skeleton';
 
 function LoadingScreen() {
@@ -68,8 +68,10 @@ export default function DashboardLayout({
       {/* ── Contenido principal ── */}
       <div className="flex-1 flex flex-col overflow-hidden min-w-0">
         <Header onMenuClick={() => setSidebarOpen(!sidebarOpen)} />
-        <main className="flex-1 overflow-y-auto p-4 md:p-6">
-          <GuardPermisos>{children}</GuardPermisos>
+        <main className="flex-1 min-h-0 overflow-hidden">
+          <Suspense fallback={null}>
+            <PestanasHost>{children}</PestanasHost>
+          </Suspense>
         </main>
       </div>
     </div>

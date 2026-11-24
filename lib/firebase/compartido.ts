@@ -22,7 +22,7 @@ import { onAuthStateChanged } from 'firebase/auth';
 import { auth } from './config';
 
 /** Cuánto sigue abierto un listener sin pantallas que lo usen (solo cobra los cambios). */
-const MANTENER_MS = 5 * 60 * 1000;
+const MANTENER_MS = 30 * 60 * 1000;
 
 interface Suscriptor {
   next:   (snap: QuerySnapshot<DocumentData>) => void;

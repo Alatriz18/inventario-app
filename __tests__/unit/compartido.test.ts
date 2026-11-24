@@ -55,7 +55,7 @@ describe('onSnapshot compartido', () => {
   it('cierra el listener cuando pasa el tiempo sin nadie que lo use', () => {
     const baja = onSnapshot(consulta('bodegas'), vi.fn());
     baja();
-    vi.advanceTimersByTime(5 * 60 * 1000 + 1);
+    vi.advanceTimersByTime(30 * 60 * 1000 + 1);
     expect(escuchas[0].cerrada).toBe(true);
     expect(suscripcionesCompartidasAbiertas()).toBe(0);
 

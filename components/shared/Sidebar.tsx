@@ -16,7 +16,7 @@ import {
   DollarSign, ListChecks, Wallet,
 } from 'lucide-react';
 
-interface NavItem {
+export interface NavItem {
   label:     string;
   href?:     string;
   icon:      React.ElementType;
@@ -24,7 +24,7 @@ interface NavItem {
   children?: NavItem[];
 }
 
-const NAV: NavItem[] = [
+export const NAV: NavItem[] = [
   { label: 'Dashboard', href: '/', icon: LayoutDashboard, modulo: 'dashboard' },
   {
     label: 'Inventario', icon: Package,

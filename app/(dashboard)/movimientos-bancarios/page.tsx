@@ -3,6 +3,7 @@
 import { useEffect, useState, useMemo, useRef } from 'react';
 import { useModoMantenimiento } from '@/hooks/useModoMantenimiento';
 import { format } from 'date-fns';
+import { useRouter } from 'next/navigation';
 import { Plus, Upload, Building2, Receipt, Ban, ArrowRightLeft, FileText } from 'lucide-react';
 import { toast } from 'sonner';
 
@@ -51,6 +52,7 @@ const ESTADO_COLOR: Record<string, string> = {
 };
 
 export default function MovimientosBancariosPage() {
+  const router = useRouter();
   const mantenimiento = useModoMantenimiento();
   const { user } = useAuth();
   const [cuentas,   setCuentas]   = useState<CuentaBancaria[]>([]);
@@ -310,7 +312,10 @@ export default function MovimientosBancariosPage() {
       } catch {
         toast.warning('Los movimientos se importaron, pero no se pudieron guardar los saldos de cada mes del banco. Revisa los permisos (reglas de Firestore) y vuelve a importar el PDF.', { duration: 12000 });
       }
-      toast.success(`${pdfPlan.nuevos.length} movimientos importados${extractos ? ` en ${extractos} corte(s) mensual(es)` : ''} — ve a Conciliación Bancaria y concilia mes a mes`);
+      toast.success(
+        `${pdfPlan.nuevos.length} movimientos importados${extractos ? ` en ${extractos} corte(s) mensual(es)` : ''}`,
+        { duration: 12000, action: { label: 'Ir a conciliar', onClick: () => router.push('/conciliacion-bancaria') } }
+      );
       setDlgPdf(false);
       setPdfRes(null);
     } catch (err: any) {

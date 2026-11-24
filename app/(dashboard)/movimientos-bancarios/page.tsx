@@ -45,6 +45,7 @@ import {
 } from '@/lib/bancos/contrapartidas';
 import { claveDescripcion, sugerirContrapartida, CUENTAS_SUGERIDAS } from '@/lib/bancos/conciliacion';
 import { asegurarCuenta } from '@/lib/contabilidad/reclasificar-compras';
+import { planificarImportacion } from '@/lib/bancos/importacion';
 import { guardarExtractos } from '@/lib/firebase/extractos-bancarios';
 import { extraerTextoPDF } from '@/lib/bancos/leer-pdf';
 import { interpretarEstadoCuentaPichincha, type ResultadoEstadoCuenta } from '@/lib/bancos/estado-cuenta-pichincha';
@@ -195,28 +196,7 @@ export default function MovimientosBancariosPage() {
   // Movimientos del PDF separados en nuevos y ya registrados (misma fecha, documento, tipo y monto)
   const pdfPlan = useMemo(() => {
     if (!pdfRes) return null;
-    const clave = (fecha: Date, doc: string, tipo: string, monto: number) =>
-      `${format(fecha, 'yyyy-MM-dd')}|${doc}|${tipo}|${monto.toFixed(2)}`;
-    const existentes = new Set(
-      movs.filter(m => m.estado !== 'anulado').map(m => {
-        const f = m.fecha instanceof Date ? m.fecha : new Date(m.fecha as unknown as string);
-        return clave(f, m.referencia ?? '', m.tipo, m.monto);
-      })
-    );
-    const nuevos: Omit<MovimientoBancario, 'id' | 'createdAt'>[] = [];
-    let yaRegistrados = 0;
-    for (const p of pdfRes.movimientos) {
-      const tipo  = p.debito > 0 ? 'debito' : 'credito';
-      const monto = p.debito > 0 ? p.debito : p.credito;
-      if (monto <= 0) continue;
-      if (existentes.has(clave(p.fecha, p.documento, tipo, monto))) { yaRegistrados++; continue; }
-      nuevos.push({
-        cuentaBancariaId: cuentaSel, fecha: p.fecha, descripcion: p.descripcion, tipo, monto,
-        saldo: p.saldo, referencia: p.documento, oficina: p.oficina, estado: 'no_conciliado',
-      });
-    }
-    nuevos.sort((a, b) => a.fecha.getTime() - b.fecha.getTime());
-    return { nuevos, yaRegistrados };
+    return planificarImportacion({ movimientosPdf: pdfRes.movimientos, existentes: movs, cuentaBancariaId: cuentaSel });
   }, [pdfRes, movs, cuentaSel]);
 
   // Tipos de movimiento del PDF (comisión, IVA, depósito, transferencia…) para elegir su contracuenta de una vez

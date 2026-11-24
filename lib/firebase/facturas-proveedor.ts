@@ -31,6 +31,25 @@ export async function existeFacturaProveedor(
   return false;
 }
 
+/**
+ * De una lista de claves de acceso, devuelve las que YA están registradas como factura de proveedor
+ * (en cualquier estado y de cualquier fecha). Consulta de a 30 claves y solo lee las coincidencias.
+ */
+export async function clavesYaRegistradas(claves: string[]): Promise<Set<string>> {
+  const encontradas = new Set<string>();
+  const unicas = [...new Set(claves.filter(Boolean))];
+  for (let i = 0; i < unicas.length; i += 30) {
+    const snap = await getDocs(query(
+      collection(db, COL), where('claveAcceso', 'in', unicas.slice(i, i + 30))
+    ));
+    snap.docs.forEach(d => {
+      const c = (d.data() as { claveAcceso?: string }).claveAcceso;
+      if (c) encontradas.add(c);
+    });
+  }
+  return encontradas;
+}
+
 export function subscribeToFacturasProveedor(
   callback: (data: FacturaProveedor[]) => void,
   opts?: { desde?: Date; hasta?: Date; limite?: number }

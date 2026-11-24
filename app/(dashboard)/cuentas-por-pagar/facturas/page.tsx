@@ -54,7 +54,7 @@ import {
   registrarPago,
   vincularAsientoPago,
   anularPago, editarPago, reactivarPago, reactivarFactura,
-  buscarFacturaPorNumero, aplicarAjusteDocRecibido,
+  buscarFacturaPorNumero, aplicarAjusteDocRecibido, clavesYaRegistradas,
 } from '@/lib/firebase/facturas-proveedor';
 import { editarAsiento, escalarLineasAsiento, getAsientos } from '@/lib/firebase/asientos';
 import { subscribeToCuentasBancarias, registrarMovimientoBancario, conciliarMovimiento } from '@/lib/firebase/cuentas-bancarias';
@@ -711,7 +711,16 @@ export default function FacturasProveedorPage() {
       const texto = await leerTextoDetectandoCodificacion(file);
       const clavesExistentes = new Set(facturas.map(f => f.claveAcceso).filter(Boolean) as string[]);
       const rucsExistentes   = new Set(proveedores.map(p => p.ruc));
-      const filas = parseRecibidosTxt(texto, clavesExistentes, rucsExistentes);
+      let filas = parseRecibidosTxt(texto, clavesExistentes, rucsExistentes);
+      // La pantalla solo tiene cargadas las facturas activas y las últimas pagadas: se consulta en la
+      // base si las "nuevas" ya estaban registradas (de cualquier fecha o estado) y se vuelve a clasificar
+      const aVerificar = filas.filter(f => f.estado === 'nueva').map(f => f.claveAcceso);
+      if (aVerificar.length > 0) {
+        const enBase = await clavesYaRegistradas(aVerificar);
+        if (enBase.size > 0) {
+          filas = parseRecibidosTxt(texto, new Set([...clavesExistentes, ...enBase]), rucsExistentes);
+        }
+      }
       if (filas.length === 0) {
         toast.error('No se reconoció el formato. Verifica que sea el TXT de "Comprobantes Recibidos" del SRI.');
         return;
@@ -749,12 +758,6 @@ export default function FacturasProveedorPage() {
           await asegurarCuenta(destino);
           cuentasAseguradas.add(destino);
         }
-        if (destino !== 'auto' && !proveedoresActualizados.has(f.rucEmisor)) {
-          await updateProveedor(prov.id, destino === 'inventario'
-            ? { esProveedorInventario: true, cuentaGasto: '' }
-            : { esProveedorInventario: false, cuentaGasto: destino });
-          proveedoresActualizados.add(f.rucEmisor);
-        }
 
         const fechaEmision = parseFecha(f.fechaEmision);
         const subtotal12 = f.iva > 0 ? f.valorSinImpuestos : 0;
@@ -768,6 +771,13 @@ export default function FacturasProveedorPage() {
           notas: 'Importado desde reporte de Comprobantes Recibidos del SRI',
           usuarioId: user.uid, usuarioNombre: user.nombre, createdAt: new Date(),
         });
+        // Solo si la factura se creó (no era repetida): se recuerda el destino en el proveedor
+        if (destino !== 'auto' && !proveedoresActualizados.has(f.rucEmisor)) {
+          await updateProveedor(prov.id, destino === 'inventario'
+            ? { esProveedorInventario: true, cuentaGasto: '' }
+            : { esProveedorInventario: false, cuentaGasto: destino });
+          proveedoresActualizados.add(f.rucEmisor);
+        }
         const asientoId = await crearAsientoCompraFactura({
           facturaId, fecha: fechaEmision, proveedorNombre: f.razonSocialEmisor,
           subtotal: f.valorSinImpuestos, iva: f.iva, total: f.importeTotal, proveedor: prov, cuentaDestino: destino,

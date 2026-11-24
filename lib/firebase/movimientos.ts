@@ -1,7 +1,7 @@
 import {
-  collection, onSnapshot, query, orderBy, where, limit as fsLimit,
-  QueryDocumentSnapshot, DocumentData,
-} from 'firebase/firestore';
+  collection, query, orderBy, where, limit as fsLimit,
+  QueryDocumentSnapshot, DocumentData } from 'firebase/firestore';
+import { onSnapshot } from './compartido';
 import { db } from '@/lib/firebase/config';
 import { Movimiento } from '@/types';
 
@@ -25,4 +25,28 @@ export function subscribeToMovimientos(
       } as Movimiento))
     );
   });
+}
+
+/**
+ * Movimientos de UN producto (para el Kardex). Se filtra solo por productoId — sin orderBy — para
+ * no depender de un índice compuesto; el orden por fecha lo aplica la pantalla.
+ */
+export function subscribeToMovimientosProducto(
+  productoId: string,
+  callback: (data: Movimiento[]) => void,
+  onError?: (error: Error) => void
+): () => void {
+  const q = query(collection(db, COL), where('productoId', '==', productoId));
+  return onSnapshot(
+    q,
+    (snap) => {
+      callback(
+        snap.docs.map((d: QueryDocumentSnapshot<DocumentData>) => ({
+          id: d.id,
+          ...d.data(),
+        } as Movimiento))
+      );
+    },
+    (error) => onError?.(error)
+  );
 }

@@ -1,7 +1,7 @@
 import {
   collection, addDoc, updateDoc, deleteDoc,
-  doc, onSnapshot, query, orderBy, serverTimestamp, limit as fsLimit,
-} from 'firebase/firestore';
+  doc, query, orderBy, serverTimestamp, limit as fsLimit } from 'firebase/firestore';
+import { onSnapshot } from './compartido';
 import { db } from './config';
 import { Bodega } from '@/types';
 

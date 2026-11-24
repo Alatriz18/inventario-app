@@ -1,8 +1,7 @@
 import {
-  collection, doc, addDoc, updateDoc, getDoc, onSnapshot,
-  query, orderBy, where, getDocs, serverTimestamp, Timestamp, limit as fsLimit,
-  runTransaction,
-} from 'firebase/firestore';
+  collection, doc, addDoc, updateDoc, getDoc, query, orderBy, where, getDocs, serverTimestamp, Timestamp, limit as fsLimit,
+  runTransaction } from 'firebase/firestore';
+import { onSnapshot } from './compartido';
 import { db } from '@/lib/firebase/config';
 import { AsientoContable, AsientoLinea, TipoAsiento } from '@/types';
 

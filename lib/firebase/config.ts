@@ -1,6 +1,9 @@
 import { initializeApp, getApps, getApp } from 'firebase/app';
 import { getAuth } from 'firebase/auth';
-import { getFirestore } from 'firebase/firestore';
+import {
+  getFirestore, initializeFirestore, persistentLocalCache, persistentMultipleTabManager,
+  type Firestore,
+} from 'firebase/firestore';
 import { getStorage } from 'firebase/storage';
 
 const firebaseConfig = {
@@ -14,8 +17,25 @@ const firebaseConfig = {
 
 const app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApp();
 
+/**
+ * En el navegador Firestore guarda los datos leídos en IndexedDB (caché persistente, compartida
+ * entre pestañas). Así, al volver a abrir una consulta, solo se cobran los documentos que
+ * cambiaron en vez de releerla completa. En el servidor (SSR) se usa la configuración normal.
+ */
+function crearFirestore(): Firestore {
+  if (typeof window === 'undefined') return getFirestore(app);
+  try {
+    return initializeFirestore(app, {
+      localCache: persistentLocalCache({ tabManager: persistentMultipleTabManager() }),
+    });
+  } catch {
+    // Ya estaba inicializado (recarga en caliente) o el navegador no permite IndexedDB
+    return getFirestore(app);
+  }
+}
+
 export const auth = getAuth(app);
-export const db = getFirestore(app);
+export const db = crearFirestore();
 export const storage = getStorage(app);
 
 export default app;

@@ -1,7 +1,6 @@
 import {
-  collection, doc, addDoc, updateDoc, onSnapshot,
-  query, orderBy, where, getDocs, serverTimestamp, runTransaction, getDoc, limit as fsLimit,
-} from 'firebase/firestore';
+  collection, doc, addDoc, updateDoc, query, orderBy, where, getDocs, serverTimestamp, runTransaction, getDoc, limit as fsLimit } from 'firebase/firestore';
+import { onSnapshot } from './compartido';
 import { db } from '@/lib/firebase/config';
 import { FacturaProveedor, PagoFactura, EstadoFacturaProveedor, AjusteFacturaProveedor } from '@/types';
 

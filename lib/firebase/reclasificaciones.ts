@@ -1,7 +1,6 @@
 import {
-  collection, doc, addDoc, updateDoc, getDoc, onSnapshot,
-  query, where, serverTimestamp,
-} from 'firebase/firestore';
+  collection, doc, addDoc, updateDoc, getDoc, query, where, serverTimestamp } from 'firebase/firestore';
+import { onSnapshot } from './compartido';
 import { db } from './config';
 import { LoteReclasificacion } from '@/types';
 

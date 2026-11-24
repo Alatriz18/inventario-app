@@ -1,7 +1,7 @@
 import {
   collection, doc, addDoc, updateDoc, getDocs,
-  onSnapshot, query, orderBy, writeBatch,
-} from 'firebase/firestore';
+  query, orderBy, writeBatch } from 'firebase/firestore';
+import { onSnapshot } from './compartido';
 import { db } from '@/lib/firebase/config';
 import { CuentaContable } from '@/types';
 import { PLAN_CUENTAS_ECUADOR } from '@/lib/data/plan-cuentas-ecuador';

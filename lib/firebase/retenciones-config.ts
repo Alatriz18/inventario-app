@@ -1,7 +1,7 @@
 import {
   collection, doc, addDoc, updateDoc, deleteDoc,
-  onSnapshot, query, orderBy, writeBatch, getDocs,
-} from 'firebase/firestore';
+  query, orderBy, writeBatch, getDocs } from 'firebase/firestore';
+import { onSnapshot } from './compartido';
 import { db } from '@/lib/firebase/config';
 import { ConfigRetencion, ConfigICE } from '@/types';
 import {

@@ -1,7 +1,7 @@
 import {
   collection, doc, addDoc, updateDoc, deleteDoc,
-  onSnapshot, query, orderBy,
-} from 'firebase/firestore';
+  query, orderBy } from 'firebase/firestore';
+import { onSnapshot } from './compartido';
 import { db } from '@/lib/firebase/config';
 import { CentroCosto } from '@/types';
 

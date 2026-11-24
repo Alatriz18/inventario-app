@@ -1,8 +1,8 @@
 import {
-  collection, doc, onSnapshot, query, orderBy, where,
+  collection, doc, query, orderBy, where,
   serverTimestamp, addDoc, updateDoc, deleteDoc, getDoc,
-  writeBatch, QueryDocumentSnapshot, DocumentData,
-} from 'firebase/firestore';
+  writeBatch, QueryDocumentSnapshot, DocumentData } from 'firebase/firestore';
+import { onSnapshot } from './compartido';
 import { db } from '@/lib/firebase/config';
 import { CuentaBancaria, MovimientoBancario } from '@/types';
 

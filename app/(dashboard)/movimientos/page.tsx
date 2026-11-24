@@ -1,8 +1,10 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { onSnapshot, query, orderBy, collection, where } from 'firebase/firestore';
+import { query, orderBy, collection, where, limit as fsLimit } from 'firebase/firestore';
 import { db } from '@/lib/firebase/config';
+import { onSnapshot } from '@/lib/firebase/compartido';
+import { Button } from '@/components/ui/button';
 import { format } from 'date-fns';
 import { es } from 'date-fns/locale';
 import { ArrowLeftRight, TrendingUp, TrendingDown, RefreshCw } from 'lucide-react';
@@ -61,6 +63,8 @@ const FILTROS_TIPO = [
   { value: 'devolucion_proveedor',label: 'Dev. Proveedores' },
 ];
 
+const TANDA = 300; // movimientos que se cargan cada vez
+
 export default function MovimientosPage() {
   const [movimientos, setMovimientos] = useState<Movimiento[]>([]);
   const [productos,   setProductos]   = useState<Producto[]>([]);
@@ -72,18 +76,30 @@ export default function MovimientosPage() {
   const [filtroCategoria, setFiltroCategoria] = useState('todas');
   const [filtroProducto,  setFiltroProducto]  = useState('todos');
 
+  // Se cargan por tandas (los más recientes primero) en vez de todo el historial;
+  // con una fecha elegida se pide solo ese día.
+  const [limite, setLimite] = useState(TANDA);
+
   useEffect(() => {
-    const q = query(
-      collection(db, 'movimientos'),
-      orderBy('fecha', 'desc')
-    );
+    const restricciones = filtroFecha
+      ? [
+          where('fecha', '>=', new Date(`${filtroFecha}T00:00:00`)),
+          where('fecha', '<=', new Date(`${filtroFecha}T23:59:59.999`)),
+          orderBy('fecha', 'desc'),
+        ]
+      : [orderBy('fecha', 'desc'), fsLimit(limite)];
+    const q = query(collection(db, 'movimientos'), ...restricciones);
     const unsub = onSnapshot(q, (snap) => {
       setMovimientos(snap.docs.map((d) => ({ id: d.id, ...d.data() } as Movimiento)));
       setLoading(false);
     });
+    return unsub;
+  }, [limite, filtroFecha]);
+
+  useEffect(() => {
     const u2 = subscribeToProductos(setProductos);
     const u3 = subscribeToCategorias(setCategorias);
-    return () => { unsub(); u2(); u3(); };
+    return () => { u2(); u3(); };
   }, []);
 
   const productosPorId = new Map(productos.map(p => [p.id, p]));
@@ -293,7 +309,15 @@ export default function MovimientosPage() {
         {/* Footer con conteo */}
         {!loading && filtered.length > 0 && (
           <div className="px-4 py-3 border-t bg-slate-50 text-xs text-slate-400">
-            Mostrando {filtered.length} de {movimientos.length} movimientos
+            Mostrando {filtered.length} de {movimientos.length} movimientos cargados
+          </div>
+        )}
+        {!loading && !filtroFecha && movimientos.length >= limite && (
+          <div className="px-4 py-3 border-t flex items-center justify-between gap-3 text-xs text-slate-500">
+            <span>Se muestran los {limite} más recientes. Elige una fecha para ver un día específico.</span>
+            <Button variant="outline" size="sm" onClick={() => setLimite(l => l + TANDA)}>
+              Cargar {TANDA} más
+            </Button>
           </div>
         )}
       </div>

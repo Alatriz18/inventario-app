@@ -1,4 +1,5 @@
-import { collection, onSnapshot, query, orderBy, doc, getDoc } from 'firebase/firestore';
+import { collection, query, orderBy, doc, getDoc } from 'firebase/firestore';
+import { onSnapshot } from './compartido';
 import { db } from '@/lib/firebase/config';
 import { AppUser } from '@/types';
 

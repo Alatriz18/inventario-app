@@ -1,7 +1,7 @@
 import {
   collection, doc, addDoc, updateDoc,
-  onSnapshot, query, orderBy, getDocs,
-} from 'firebase/firestore';
+  query, orderBy, getDocs } from 'firebase/firestore';
+import { onSnapshot } from './compartido';
 import { db } from '@/lib/firebase/config';
 import { PeriodoContable } from '@/types';
 import { bloquearAsientosDePeriodo } from '@/lib/firebase/asientos';

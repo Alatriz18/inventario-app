@@ -1,9 +1,9 @@
 import {
-  collection, doc, onSnapshot, query, orderBy,
+  collection, doc, query, orderBy,
   serverTimestamp, runTransaction, getDoc, setDoc, updateDoc,
   getDocs, where, writeBatch, Transaction, limit as fsLimit,
-  QueryDocumentSnapshot, DocumentData, QueryConstraint,
-} from 'firebase/firestore';
+  QueryDocumentSnapshot, DocumentData, QueryConstraint } from 'firebase/firestore';
+import { onSnapshot } from './compartido';
 import { db } from '@/lib/firebase/config';
 import { CuentaCobrar, CobroCxC, EstadoCxC } from '@/types';
 
@@ -50,11 +50,15 @@ export function subscribeToCxCActivas(
     emit();
   });
 
-  const qCerradas = query(collection(db, COL), where('estado', 'in', ['pagada', 'anulada']), fsLimit(limiteCerradas));
-  const u2 = onSnapshot(qCerradas, snap => {
-    cerradas = snap.docs.map(d => ({ id: d.id, ...d.data() } as CuentaCobrar));
-    emit();
-  });
+  // Con limiteCerradas = 0 solo se leen las activas (p. ej. el Dashboard, que solo suma saldos pendientes)
+  let u2: () => void = () => {};
+  if (limiteCerradas > 0) {
+    const qCerradas = query(collection(db, COL), where('estado', 'in', ['pagada', 'anulada']), fsLimit(limiteCerradas));
+    u2 = onSnapshot(qCerradas, snap => {
+      cerradas = snap.docs.map(d => ({ id: d.id, ...d.data() } as CuentaCobrar));
+      emit();
+    });
+  }
 
   return () => { u1(); u2(); };
 }

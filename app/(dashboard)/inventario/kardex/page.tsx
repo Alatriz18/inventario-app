@@ -19,7 +19,7 @@ import {
 import { Producto, Categoria, Movimiento } from '@/types';
 import { subscribeToProductos }  from '@/lib/firebase/productos';
 import { subscribeToCategorias } from '@/lib/firebase/categorias';
-import { subscribeToMovimientos } from '@/lib/firebase/movimientos';
+import { subscribeToMovimientosProducto } from '@/lib/firebase/movimientos';
 
 const currency = (v: number) => `$${v.toFixed(2)}`;
 
@@ -53,10 +53,15 @@ export default function KardexPage() {
 
   useEffect(() => {
     const u1 = subscribeToProductos(d => { setProductos(d); setLoading(false); });
-    const u2 = subscribeToMovimientos(setMovimientos);
     const u3 = subscribeToCategorias(setCategorias);
-    return () => { u1(); u2(); u3(); };
+    return () => { u1(); u3(); };
   }, []);
+
+  // Solo los movimientos del producto elegido (antes se leían los de todos los productos)
+  useEffect(() => {
+    if (!productoId) { setMovimientos([]); return; }
+    return subscribeToMovimientosProducto(productoId, setMovimientos, () => setMovimientos([]));
+  }, [productoId]);
 
   const productosParaSelect = useMemo(() => (
     filtroCategoria === 'todas' ? productos : productos.filter(p => p.categoriaId === filtroCategoria)

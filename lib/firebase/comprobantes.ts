@@ -1,7 +1,6 @@
 import {
-  collection, doc, addDoc, updateDoc, onSnapshot,
-  query, orderBy, serverTimestamp, getDoc, where, limit as fsLimit,
-} from 'firebase/firestore';
+  collection, doc, addDoc, updateDoc, query, orderBy, serverTimestamp, getDoc, where, limit as fsLimit } from 'firebase/firestore';
+import { onSnapshot } from './compartido';
 import { db } from '@/lib/firebase/config';
 
 export type TipoComp   = 'factura' | 'nota_venta' | 'nota_credito' | 'nota_debito' | 'retencion' | 'liquidacion' | 'guia';

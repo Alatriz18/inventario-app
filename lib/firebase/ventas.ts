@@ -1,8 +1,7 @@
 import {
-  collection, doc, onSnapshot,
-  query, orderBy, serverTimestamp, runTransaction,
-  where, getDocs, writeBatch, updateDoc, limit as fsLimit,
-} from 'firebase/firestore';
+  collection, doc, query, orderBy, serverTimestamp, runTransaction,
+  where, getDocs, writeBatch, updateDoc, limit as fsLimit } from 'firebase/firestore';
+import { onSnapshot } from './compartido';
 import { db } from './config';
 import { Venta, EstadoCxC } from '@/types';
 

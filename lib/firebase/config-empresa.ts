@@ -1,4 +1,5 @@
-import { doc, getDoc, setDoc, onSnapshot } from 'firebase/firestore';
+import { doc, getDoc, setDoc } from 'firebase/firestore';
+import { onSnapshot } from './compartido';
 import { db } from '@/lib/firebase/config';
 import {
   ConfigEmpresa, RegimenEmpresa,

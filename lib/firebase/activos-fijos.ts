@@ -1,8 +1,8 @@
 import {
-  collection, doc, onSnapshot, query, orderBy,
+  collection, doc, query, orderBy,
   serverTimestamp, addDoc, updateDoc, getDoc,
-  QueryDocumentSnapshot, DocumentData,
-} from 'firebase/firestore';
+  QueryDocumentSnapshot, DocumentData } from 'firebase/firestore';
+import { onSnapshot } from './compartido';
 import { db } from '@/lib/firebase/config';
 import { ActivoFijo, CuotaDepreciacion, MetodoDepreciacion } from '@/types';
 

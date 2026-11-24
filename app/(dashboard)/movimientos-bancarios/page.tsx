@@ -119,6 +119,15 @@ export default function MovimientosBancariosPage() {
     return () => { u1(); u2(); };
   }, []);
 
+  // Si el negocio tiene una sola cuenta bancaria, se elige sola (una vez) para que se vean
+  // de inmediato los botones de importar
+  const autoElegida = useRef(false);
+  useEffect(() => {
+    if (autoElegida.current) return;
+    const activas = cuentas.filter(c => c.activa);
+    if (activas.length === 1) { autoElegida.current = true; setCuentaSel(activas[0].id); }
+  }, [cuentas]);
+
   useEffect(() => {
     if (!cuentaSel) return;
     if (cuentaSel === 'todas' && cuentas.length === 0) return; // esperar a que carguen las cuentas
@@ -761,8 +770,21 @@ export default function MovimientosBancariosPage() {
           <>
             <p className="text-xs text-slate-400 max-w-xs">
               Viendo movimientos de todas las cuentas ({movs.length} registrado{movs.length === 1 ? '' : 's'}).
-              Elige una cuenta específica para importar CSV, registrar comisiones o reclasificar a Caja.
+              {cuentas.length === 0
+                ? ' Primero crea tu cuenta bancaria con «Nueva Cuenta» (arriba a la derecha); luego podrás importar el PDF del banco.'
+                : ' Elige una cuenta específica para importar el PDF o CSV del banco, registrar comisiones o reclasificar a Caja.'}
             </p>
+            <Button variant="outline" size="sm"
+              onClick={() => {
+                if (cuentas.length === 0) {
+                  toast.info('Primero crea la cuenta bancaria: se importa el PDF dentro de una cuenta.');
+                  setDlgCuenta(true);
+                } else {
+                  toast.info('Elige primero la cuenta bancaria a la que pertenece el estado de cuenta.');
+                }
+              }}>
+              <FileText className="mr-2 h-4 w-4" /> Importar PDF del banco
+            </Button>
             {mantenimiento && (
             <Button variant="outline" size="sm" onClick={handleAbrirRecuperar}>
               Recuperar movimientos faltantes

@@ -13,7 +13,7 @@ import {
 
 import { subscribeToProductos } from '@/lib/firebase/productos';
 import { subscribeToVentas }    from '@/lib/firebase/ventas';
-import { subscribeToCxC }       from '@/lib/firebase/cuentas-cobrar';
+import { subscribeToCxCActivas } from '@/lib/firebase/cuentas-cobrar';
 import { Producto, Venta, CuentaCobrar } from '@/types';
 import { tieneAccesoModulo, Modulo } from '@/lib/permisos';
 
@@ -39,7 +39,7 @@ export default function DashboardPage() {
     // Solo se necesita desde el inicio del mes (KPIs de hoy/ayer/mes/semana) —
     // evita releer TODO el historial de ventas cada vez que se abre el dashboard.
     const u2 = verFinanzas ? subscribeToVentas(setVentas, { desde: startOfMonth(new Date()) }) : () => {};
-    const u3 = verCxC      ? subscribeToCxC(setCxc)       : () => {};
+    const u3 = verCxC      ? subscribeToCxCActivas(setCxc, 0) : () => {}; // solo saldos pendientes
     return () => { u1(); u2(); u3(); };
   }, [verFinanzas, verCxC]);
 

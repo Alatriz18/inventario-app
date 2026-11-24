@@ -1,8 +1,8 @@
 import {
-  collection, doc, onSnapshot, query, orderBy, where, getDocs,
+  collection, doc, query, orderBy, where, getDocs,
   serverTimestamp, addDoc, updateDoc, getDoc, limit as fsLimit,
-  QueryDocumentSnapshot, DocumentData,
-} from 'firebase/firestore';
+  QueryDocumentSnapshot, DocumentData } from 'firebase/firestore';
+import { onSnapshot } from './compartido';
 import { db } from '@/lib/firebase/config';
 import { RetencionRecibida } from '@/types';
 

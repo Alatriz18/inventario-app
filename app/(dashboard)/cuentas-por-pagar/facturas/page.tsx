@@ -60,7 +60,7 @@ import { editarAsiento, escalarLineasAsiento, getAsientos } from '@/lib/firebase
 import { subscribeToCuentasBancarias, registrarMovimientoBancario, conciliarMovimiento } from '@/lib/firebase/cuentas-bancarias';
 import { createDocRecibido, updateDocRecibido, getDocsRecibidos } from '@/lib/firebase/docs-recibidos';
 import { createRetencionRecibida } from '@/lib/firebase/retenciones-recibidas';
-import { subscribeToProveedores, getOrCreateProveedorPorRuc } from '@/lib/firebase/proveedores';
+import { subscribeToProveedores, getOrCreateProveedorPorRuc, updateProveedor } from '@/lib/firebase/proveedores';
 import { subscribeToComprobantes, Comprobante } from '@/lib/firebase/comprobantes';
 import { getCxCByVentaId, registrarCobroCxC, vincularAsientoCobro } from '@/lib/firebase/cuentas-cobrar';
 import { getConfigEmail } from '@/lib/firebase/config-email';
@@ -126,6 +126,12 @@ interface FilaRecibidoTxt {
   importeTotal: number;
   estado: 'nueva' | 'duplicada' | 'no_soportado';
   proveedorNuevo: boolean;
+}
+
+/** Texto que explica a dónde irá la compra de un proveedor cuando se deja "Según el proveedor". */
+function describirReglaProveedor(prov: Proveedor | undefined, nombre: string): string {
+  if (prov?.cuentaGasto?.trim()) return `Gasto ${prov.cuentaGasto}`;
+  return esCompraInventario(prov ?? { nombre }) ? 'Inventario' : 'Gastos (por defecto)';
 }
 
 function parseRecibidosTxt(
@@ -248,6 +254,8 @@ export default function FacturasProveedorPage() {
   const [txtDialogOpen, setTxtDialogOpen] = useState(false);
   const [txtFilas,      setTxtFilas]      = useState<FilaRecibidoTxt[]>([]);
   const [txtImporting,  setTxtImporting]  = useState(false);
+  /** Destino elegido por proveedor (RUC → 'auto' | 'inventario' | código de cuenta de gasto) */
+  const [destinosTxt,   setDestinosTxt]   = useState<Record<string, string>>({});
   const [txtProgreso,   setTxtProgreso]   = useState(0);
   const txtRef = useRef<HTMLInputElement>(null);
 
@@ -709,6 +717,7 @@ export default function FacturasProveedorPage() {
         return;
       }
       setTxtFilas(filas);
+      setDestinosTxt({});
       setTxtDialogOpen(true);
     } finally {
       if (txtRef.current) txtRef.current.value = '';
@@ -724,6 +733,8 @@ export default function FacturasProveedorPage() {
     setTxtProgreso(0);
     let ok = 0, err = 0, proveedoresCreados = 0;
     const facturasSinAsiento: string[] = [];
+    const cuentasAseguradas = new Set<string>();   // cuentas de gasto ya verificadas/creadas en el plan
+    const proveedoresActualizados = new Set<string>(); // proveedores cuya regla ya se guardó
 
     for (let i = 0; i < pendientes.length; i++) {
       const f = pendientes[i];
@@ -731,6 +742,19 @@ export default function FacturasProveedorPage() {
         const yaExistia = proveedores.some(p => p.ruc === f.rucEmisor);
         const prov = await getOrCreateProveedorPorRuc(f.rucEmisor, f.razonSocialEmisor);
         if (!yaExistia) proveedoresCreados++;
+
+        // Destino elegido para este proveedor: se aplica a sus facturas y se recuerda en el proveedor
+        const destino = destinosTxt[f.rucEmisor] ?? 'auto';
+        if (destino !== 'auto' && destino !== 'inventario' && !cuentasAseguradas.has(destino)) {
+          await asegurarCuenta(destino);
+          cuentasAseguradas.add(destino);
+        }
+        if (destino !== 'auto' && !proveedoresActualizados.has(f.rucEmisor)) {
+          await updateProveedor(prov.id, destino === 'inventario'
+            ? { esProveedorInventario: true, cuentaGasto: '' }
+            : { esProveedorInventario: false, cuentaGasto: destino });
+          proveedoresActualizados.add(f.rucEmisor);
+        }
 
         const fechaEmision = parseFecha(f.fechaEmision);
         const subtotal12 = f.iva > 0 ? f.valorSinImpuestos : 0;
@@ -746,7 +770,7 @@ export default function FacturasProveedorPage() {
         });
         const asientoId = await crearAsientoCompraFactura({
           facturaId, fecha: fechaEmision, proveedorNombre: f.razonSocialEmisor,
-          subtotal: f.valorSinImpuestos, iva: f.iva, total: f.importeTotal, proveedor: prov,
+          subtotal: f.valorSinImpuestos, iva: f.iva, total: f.importeTotal, proveedor: prov, cuentaDestino: destino,
           usuarioId: user.uid, usuarioNombre: user.nombre,
         });
         if (!asientoId) facturasSinAsiento.push(`${f.razonSocialEmisor} (${f.serieComprobante})`);
@@ -1981,6 +2005,52 @@ export default function FacturasProveedorPage() {
                   <span className="text-slate-500">Total a importar</span>
                   <span className="font-bold text-slate-800">{currency(totalImporte)}</span>
                 </div>
+
+                {/* Destino contable por proveedor: inventario o cuenta de gasto */}
+                {nuevas.length > 0 && (() => {
+                  const porProveedor = new Map<string, { ruc: string; nombre: string; n: number; total: number }>();
+                  for (const f of nuevas) {
+                    const g = porProveedor.get(f.rucEmisor) ?? { ruc: f.rucEmisor, nombre: f.razonSocialEmisor, n: 0, total: 0 };
+                    g.n++; g.total += f.importeTotal;
+                    porProveedor.set(f.rucEmisor, g);
+                  }
+                  const grupos = [...porProveedor.values()].sort((a, b) => b.total - a.total);
+                  return (
+                    <div className="border rounded-lg overflow-hidden">
+                      <div className="px-3 py-2 bg-slate-50 border-b">
+                        <p className="text-sm font-medium text-slate-700">¿A dónde va la compra de cada proveedor?</p>
+                        <p className="text-[11px] text-slate-400">
+                          Elige Inventario (mercadería) o la cuenta de gasto. «Según el proveedor» usa la regla que ya tenga
+                          (Celaysa → inventario, los demás → gasto). Lo que elijas se guarda en el proveedor para las próximas facturas.
+                        </p>
+                      </div>
+                      <div className="max-h-56 overflow-y-auto divide-y">
+                        {grupos.map(g => {
+                          const prov = proveedores.find(p => p.ruc === g.ruc);
+                          const elegido = destinosTxt[g.ruc] ?? 'auto';
+                          return (
+                            <div key={g.ruc} className="flex flex-wrap items-center gap-3 px-3 py-2">
+                              <div className="min-w-0 flex-1 basis-48">
+                                <p className="text-sm font-medium truncate">{g.nombre}</p>
+                                <p className="text-[11px] text-slate-400">
+                                  {g.n} factura{g.n === 1 ? '' : 's'} · {currency(g.total)}
+                                  {elegido === 'auto' && <> · hoy irá a <strong>{describirReglaProveedor(prov, g.nombre)}</strong></>}
+                                </p>
+                              </div>
+                              <div className="w-full sm:w-64">
+                                <CuentaCombobox
+                                  value={elegido}
+                                  onChange={v => setDestinosTxt(d => ({ ...d, [g.ruc]: v }))}
+                                  opciones={opcionesDestino}
+                                />
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  );
+                })()}
 
                 {noSoportadas.length > 0 && (
                   <div className="bg-slate-50 border rounded-lg p-3 text-xs text-slate-500 flex items-start gap-2">

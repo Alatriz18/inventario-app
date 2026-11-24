@@ -39,9 +39,6 @@ service cloud.firestore {
 
     // ── Configuración del sistema ─────────────────────────────────────────
 
-    // config_sri contiene el certificado .p12 — lectura staff (para emitir).
-    // Escritura completa solo admin; el staff solo puede incrementar los
-    // secuenciales al emitir comprobantes (no puede tocar certificado/clave).
     match /config_sri/{id} {
       allow read: if isStaff();
       allow create, delete: if isAdmin();
@@ -64,7 +61,6 @@ service cloud.firestore {
       allow write: if isContador();
     }
 
-    // config_email contiene credenciales SMTP — lectura staff (para enviar), escritura admin
     match /config_email/{id} {
       allow read: if isStaff();
       allow write: if isAdmin();
@@ -161,7 +157,6 @@ service cloud.firestore {
       allow write: if isAdmin() || hasRole('contador') || hasRole('bodeguero') || hasRole('finanzas');
     }
 
-    // Notas de crédito / débito recibidas de proveedores (importadas por XML)
     match /documentos_recibidos/{id} {
       allow read: if isStaff();
       allow write: if isAdmin() || hasRole('contador') || hasRole('bodeguero') || hasRole('finanzas');
@@ -248,18 +243,27 @@ service cloud.firestore {
       allow write: if isAdmin() || hasRole('contador');
     }
 
-    // Cortes mensuales del estado de cuenta y conciliaciones mensuales cerradas
+    match /reclasificaciones_lote/{id} {
+      allow read: if isStaff();
+      allow write: if isAdmin() || hasRole('contador');
+    }
+
+    // Saldos de cada corte mensual del estado de cuenta (se guardan al importar el PDF)
     match /extractos_bancarios/{id} {
       allow read: if isStaff();
       allow write: if isAdmin() || hasRole('contador');
     }
 
+    // Conciliaciones mensuales cerradas
     match /conciliaciones_bancarias/{id} {
+      allow read: if isStaff();
+      allow write: if isAdmin() || hasRole('contador');
+    }
+
+    // Vistos puestos a los asientos del banco al conciliar (el banco ya los reflejó)
+    match /conciliacion_marcas/{id} {
       allow read: if isStaff();
       allow write: if isAdmin() || hasRole('contador');
     }
   }
 }
-
-
-

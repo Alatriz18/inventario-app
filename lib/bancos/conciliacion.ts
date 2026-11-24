@@ -84,6 +84,8 @@ export function calcularConciliacion(p: {
   cuentaCodigo: string;
   movimientos:  MovimientoBancario[];
   asientos:     AsientoContable[];
+  /** Asientos que la contadora marcó con visto como ya reflejados por el banco (sin movimiento del PDF). */
+  marcas?:      MarcaVisto[];
 }): ResultadoConciliacion {
   const { corte, cuentaCodigo } = p;
   const validos = p.asientos.filter(a => a.estado !== 'borrador' && aFecha(a.fecha) <= corte);
@@ -105,6 +107,10 @@ export function calcularConciliacion(p: {
     if (Math.abs(neto - montoBanco) > 0.005) {
       descuadres.push({ movimiento: m, asiento: a, montoBanco, montoLibros: neto });
     }
+  }
+  // Vistos puestos a mano sobre los libros: cuentan como ya reflejados por el banco desde su fecha
+  for (const k of p.marcas ?? []) {
+    if (aFecha(k.fechaBanco) <= corte) compensados.add(k.asientoId);
   }
 
   // Todo asiento contabilizado en el banco que el banco aún no refleja es una partida en tránsito
@@ -227,9 +233,12 @@ export function proponerEmparejamientos(p: {
   asientos:      AsientoContable[];
   cuentaCodigo:  string;
   toleranciaDias?: number;
+  /** Asientos ya marcados con visto: no se vuelven a proponer. */
+  marcas?:       MarcaVisto[];
 }): Emparejamiento[] {
   const tol = p.toleranciaDias ?? 10;
   const usados = new Set(p.movimientos.filter(m => m.asientoId).map(m => m.asientoId as string));
+  for (const k of p.marcas ?? []) usados.add(k.asientoId);
   const libres = p.asientos
     .filter(a => a.estado !== 'borrador' && !usados.has(a.id))
     .map(a => ({ a, neto: netoEnCuenta(a, p.cuentaCodigo), t: aFecha(a.fecha).getTime() }))
@@ -330,3 +339,73 @@ export const CUENTAS_SUGERIDAS = {
   retencionFuente:  CUENTAS_POR_DEFECTO.cuentaRetFuenteClientes,
   caja:             CUENTAS_POR_DEFECTO.cuentaCaja,
 };
+
+// ── Libros del banco: vistos sobre los asientos de la cuenta ────────────────
+
+/** Visto puesto a un asiento: el banco ya lo reflejó (se acreditó el depósito, se cobró el pago…). */
+export interface MarcaVisto {
+  asientoId:  string;
+  /** Fecha desde la que el banco lo refleja; cuenta para los cortes de esa fecha en adelante. */
+  fechaBanco: Date;
+}
+
+export type EstadoLibro = 'en_banco' | 'visto' | 'transito';
+
+export interface FilaLibro {
+  asiento: AsientoContable;
+  /** Efecto neto en el banco: positivo = depósito/ingreso, negativo = pago/egreso. */
+  monto:   number;
+  estado:  EstadoLibro;
+  /** 'en_banco': ya lo respalda un movimiento del estado de cuenta (no se puede desmarcar aquí). */
+  movimiento?: MovimientoBancario;
+  /** 'visto': visto manual puesto en el mes consultado (se puede quitar). */
+  editable: boolean;
+  /** Días que lleva sin reflejarse en el banco al corte. */
+  dias:    number;
+}
+
+/**
+ * Lista de los asientos de la cuenta del banco para conciliar el mes: los del mes y los que vienen
+ * pendientes de meses anteriores. Se omiten los que el banco ya reflejó antes del mes.
+ */
+export function librosDelMes(p: {
+  periodo:      string;
+  cuentaCodigo: string;
+  movimientos:  MovimientoBancario[];
+  asientos:     AsientoContable[];
+  marcas:       MarcaVisto[];
+}): FilaLibro[] {
+  const inicio = inicioDePeriodo(p.periodo), corte = finDePeriodo(p.periodo);
+  const marcaPor = new Map(p.marcas.map(k => [k.asientoId, k]));
+  const movPor = new Map<string, MovimientoBancario>();
+  for (const m of p.movimientos) {
+    if (m.estado === 'conciliado' && m.asientoId && !movPor.has(m.asientoId)) movPor.set(m.asientoId, m);
+  }
+
+  const filas: FilaLibro[] = [];
+  for (const a of p.asientos) {
+    if (a.estado === 'borrador' || aFecha(a.fecha) > corte) continue;
+    const monto = netoEnCuenta(a, p.cuentaCodigo);
+    if (monto === 0) continue;
+
+    const mov = movPor.get(a.id);
+    const marca = marcaPor.get(a.id);
+    const fechaMov = mov ? aFecha(mov.fecha) : undefined;
+    const fechaMarca = marca ? aFecha(marca.fechaBanco) : undefined;
+
+    // Ya reflejado por el banco antes del mes: no es parte de esta conciliación
+    if ((fechaMov && fechaMov < inicio) || (fechaMarca && fechaMarca < inicio)) continue;
+
+    let estado: EstadoLibro = 'transito';
+    if (fechaMov && fechaMov <= corte) estado = 'en_banco';
+    else if (fechaMarca && fechaMarca <= corte) estado = 'visto';
+
+    filas.push({
+      asiento: a, monto, estado,
+      movimiento: estado === 'en_banco' ? mov : undefined,
+      editable: estado !== 'en_banco',
+      dias: Math.max(0, Math.round((corte.getTime() - aFecha(a.fecha).getTime()) / MS_DIA)),
+    });
+  }
+  return filas.sort((x, y) => aFecha(x.asiento.fecha).getTime() - aFecha(y.asiento.fecha).getTime());
+}

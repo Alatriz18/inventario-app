@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import type { AsientoContable, MovimientoBancario } from '@/types';
 import {
-  calcularConciliacion, proponerEmparejamientos, agruparPendientes, claveDescripcion, cruceConCaja,
+  calcularConciliacion, proponerEmparejamientos, agruparPendientes, claveDescripcion, cruceConCaja, librosDelMes,
   finDePeriodo, periodoDe,
 } from '@/lib/bancos/conciliacion';
 
@@ -201,5 +201,51 @@ describe('depósitos y cruce con Caja', () => {
     const movimientos = [mov('i1', '2026-07-31', 'credito', 0.06, 'conciliado', 'I1', 'INTERES A SU FAVOR')];
     const r = cruceConCaja({ periodo: '2026-07', cuentaCodigo: BANCO, cajaCodigo: '1010101', movimientos, asientos: [interes] });
     expect(r).toMatchObject({ creditosViaCaja: 0, trasladosCaja: 0, diferencia: 0 });
+  });
+});
+
+describe('vistos sobre los libros del banco', () => {
+  const asientos = [
+    asiento('JUN', '2026-06-10', 100, 0),   // lo reflejó el banco en junio
+    asiento('A1',  '2026-07-02', 300, 0),   // lo respalda un movimiento del estado de cuenta en julio
+    asiento('A2',  '2026-07-20', 50, 0),    // visto a mano en julio
+    asiento('A3',  '2026-07-28', 0, 80),    // pago que el banco aún no debita
+    asiento('A4',  '2026-08-05', 999, 0),   // posterior al corte de julio
+  ];
+  const movimientos = [
+    mov('mj', '2026-06-12', 'credito', 100, 'conciliado', 'JUN'),
+    mov('m1', '2026-07-03', 'credito', 300, 'conciliado', 'A1'),
+  ];
+  const marcas = [{ asientoId: 'A2', fechaBanco: new Date('2026-07-31T12:00:00') }];
+
+  it('lista los asientos del mes y lo que viene pendiente, sin lo que el banco ya reflejó antes', () => {
+    const filas = librosDelMes({ periodo: '2026-07', cuentaCodigo: BANCO, movimientos, asientos, marcas });
+    expect(filas.map(f => [f.asiento.id, f.estado, f.editable])).toEqual([
+      ['A1', 'en_banco', false],
+      ['A2', 'visto', true],
+      ['A3', 'transito', true],
+    ]);
+    expect(filas.find(f => f.asiento.id === 'A3')?.monto).toBe(-80);
+  });
+
+  it('lo que sigue en tránsito en julio vuelve a aparecer en agosto (arrastre)', () => {
+    const filas = librosDelMes({ periodo: '2026-08', cuentaCodigo: BANCO, movimientos, asientos, marcas });
+    expect(filas.map(f => f.asiento.id)).toEqual(['A3', 'A4']);
+  });
+
+  it('un visto cuenta desde su fecha: en tránsito antes, reflejado después', () => {
+    const base = { cuentaCodigo: BANCO, movimientos, asientos };
+    const julio = calcularConciliacion({ ...base, corte: finDePeriodo('2026-07'), marcas });
+    const antes = calcularConciliacion({ ...base, corte: finDePeriodo('2026-07'), marcas: [] });
+    expect(julio.depositosTransito.map(p => p.asiento.id)).not.toContain('A2');
+    expect(antes.depositosTransito.map(p => p.asiento.id)).toContain('A2');
+    const junio = calcularConciliacion({ ...base, corte: finDePeriodo('2026-06'), marcas });
+    expect(junio.depositosTransito.map(p => p.asiento.id)).not.toContain('A2'); // aún no existía
+  });
+
+  it('el emparejamiento automático no propone asientos ya marcados con visto', () => {
+    const pend = [mov('p', '2026-07-21', 'credito', 50, 'no_conciliado')];
+    expect(proponerEmparejamientos({ movimientos: pend, asientos, cuentaCodigo: BANCO })).toHaveLength(1);
+    expect(proponerEmparejamientos({ movimientos: pend, asientos, cuentaCodigo: BANCO, marcas })).toHaveLength(0);
   });
 });

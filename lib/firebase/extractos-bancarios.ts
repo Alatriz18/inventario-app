@@ -1,10 +1,10 @@
 import {
-  collection, doc, setDoc, deleteDoc, query, where, serverTimestamp,
+  collection, doc, setDoc, deleteDoc, query, where, serverTimestamp, writeBatch,
   type DocumentData, type QueryDocumentSnapshot,
 } from 'firebase/firestore';
 import { onSnapshot } from './compartido';
 import { db } from './config';
-import type { ExtractoBancario, ConciliacionBancaria } from '@/types';
+import type { ExtractoBancario, ConciliacionBancaria, MarcaConciliacion } from '@/types';
 import type { CorteEstadoCuenta } from '@/lib/bancos/estado-cuenta-pichincha';
 import { periodoDe } from '@/lib/bancos/conciliacion';
 
@@ -67,4 +67,45 @@ export async function cerrarConciliacion(data: Omit<ConciliacionBancaria, 'id' |
 
 export async function reabrirConciliacion(cuentaBancariaId: string, periodo: string): Promise<void> {
   await deleteDoc(doc(db, COL_CON, `${cuentaBancariaId}_${periodo}`));
+}
+
+// ── Vistos sobre los asientos del banco ──────────────────────────────────────
+
+const COL_MARCAS = 'conciliacion_marcas';
+const idMarca = (cuentaBancariaId: string, asientoId: string) => `${cuentaBancariaId}_${asientoId}`;
+
+export function subscribeToMarcas(
+  cuentaBancariaId: string,
+  callback: (data: MarcaConciliacion[]) => void,
+  onError?: (e: Error) => void
+): () => void {
+  const q = query(collection(db, COL_MARCAS), where('cuentaBancariaId', '==', cuentaBancariaId));
+  return onSnapshot(
+    q,
+    snap => callback(snap.docs.map((d: QueryDocumentSnapshot<DocumentData>) => ({ id: d.id, ...d.data() } as MarcaConciliacion))),
+    e => onError?.(e)
+  );
+}
+
+/** Pone el visto a varios asientos a la vez (firestore admite 500 escrituras por lote). */
+export async function marcarAsientos(
+  cuentaBancariaId: string, asientoIds: string[], fechaBanco: Date, usuarioNombre: string
+): Promise<void> {
+  for (let i = 0; i < asientoIds.length; i += 400) {
+    const batch = writeBatch(db);
+    asientoIds.slice(i, i + 400).forEach(asientoId => {
+      batch.set(doc(db, COL_MARCAS, idMarca(cuentaBancariaId, asientoId)), {
+        cuentaBancariaId, asientoId, fechaBanco, usuarioNombre, createdAt: serverTimestamp(),
+      });
+    });
+    await batch.commit();
+  }
+}
+
+export async function desmarcarAsientos(cuentaBancariaId: string, asientoIds: string[]): Promise<void> {
+  for (let i = 0; i < asientoIds.length; i += 400) {
+    const batch = writeBatch(db);
+    asientoIds.slice(i, i + 400).forEach(asientoId => batch.delete(doc(db, COL_MARCAS, idMarca(cuentaBancariaId, asientoId))));
+    await batch.commit();
+  }
 }

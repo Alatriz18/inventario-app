@@ -22,7 +22,7 @@ import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from '@/components/ui/table';
 
-import { CuentaBancaria, MovimientoBancario, AsientoContable, ExtractoBancario, ConciliacionBancaria, LoteReclasificacion } from '@/types';
+import { CuentaBancaria, MovimientoBancario, AsientoContable, ExtractoBancario, ConciliacionBancaria, LoteReclasificacion, MarcaConciliacion } from '@/types';
 import { subscribeToLotesReclasificacion } from '@/lib/firebase/reclasificaciones';
 import {
   subscribeToCuentasBancarias, subscribeToMovimientosBancarios,
@@ -31,12 +31,14 @@ import {
 import { subscribeToAsientos } from '@/lib/firebase/asientos';
 import {
   subscribeToExtractos, subscribeToConciliaciones, cerrarConciliacion, reabrirConciliacion,
+  subscribeToMarcas, marcarAsientos, desmarcarAsientos,
 } from '@/lib/firebase/extractos-bancarios';
 import { crearAsientoMovimientoBancario } from '@/lib/contabilidad/motor-asientos';
 import { asegurarCuenta } from '@/lib/contabilidad/reclasificar-compras';
 import { CUENTAS_POR_DEFECTO } from '@/lib/data/plan-cuentas-ecuador';
 import {
-  aFecha, periodoDe, finDePeriodo, calcularConciliacion, proponerEmparejamientos,
+  aFecha, periodoDe, finDePeriodo, calcularConciliacion, proponerEmparejamientos, librosDelMes,
+  type MarcaVisto, type FilaLibro,
   agruparPendientes, netoEnCuenta, cruceConCaja, CUENTAS_SUGERIDAS, type Emparejamiento, type GrupoMovimientos,
 } from '@/lib/bancos/conciliacion';
 import { useOpcionesCuentasMovimiento } from '@/hooks/useOpcionesCuentasMovimiento';
@@ -62,6 +64,8 @@ export default function ConciliacionBancariaPage() {
   const [extractos, setExtractos] = useState<ExtractoBancario[]>([]);
   const [cierres,   setCierres]   = useState<ConciliacionBancaria[]>([]);
   const [lotes,     setLotes]     = useState<LoteReclasificacion[]>([]);
+  const [marcas,    setMarcas]    = useState<MarcaConciliacion[]>([]);
+  const [busquedaLibros, setBusquedaLibros] = useState('');
 
   // Conciliar un movimiento con un asiento existente
   const [dlgConciliar, setDlgConciliar] = useState(false);
@@ -107,14 +111,15 @@ export default function ConciliacionBancariaPage() {
   }, [cuentas, cuentaSel]);
 
   useEffect(() => {
-    if (!cuentaSel) { setMovs([]); setExtractos([]); setCierres([]); setLotes([]); return; }
+    if (!cuentaSel) { setMovs([]); setExtractos([]); setCierres([]); setLotes([]); setMarcas([]); return; }
     setLoading(true);
     const onErr = () => { toast.error('No se pudieron cargar los movimientos'); setLoading(false); };
     const u1 = subscribeToMovimientosBancarios(cuentaSel, d => { setMovs(d); setLoading(false); }, onErr);
     const u2 = subscribeToExtractos(cuentaSel, setExtractos, () => {});
     const u3 = subscribeToConciliaciones(cuentaSel, setCierres, () => {});
     const u4 = subscribeToLotesReclasificacion(cuentaSel, setLotes);
-    return () => { u1(); u2(); u3(); u4(); };
+    const u5 = subscribeToMarcas(cuentaSel, setMarcas, () => {});
+    return () => { u1(); u2(); u3(); u4(); u5(); };
   }, [cuentaSel]);
 
   // Si el historial de este banco se movió a Caja General, los libros ya no tienen el banco:
@@ -167,10 +172,20 @@ export default function ConciliacionBancariaPage() {
     return { valor: Math.round(neto * 100) / 100, origen: 'calculado con los movimientos (sin estado de cuenta de este mes)' as const };
   }, [cuentaObj, periodo, extracto, movs, corte, aperturaRegistrada]);
 
+  // Vistos puestos a los asientos del banco (el banco ya los reflejó)
+  const marcasVisto: MarcaVisto[] = useMemo(
+    () => marcas.map(k => ({ asientoId: k.asientoId, fechaBanco: aFecha(k.fechaBanco) })), [marcas]);
+
   const conc = useMemo(() => {
     if (!cuentaCodigo || !periodo) return null;
-    return calcularConciliacion({ corte, cuentaCodigo, movimientos: movs, asientos });
-  }, [corte, cuentaCodigo, periodo, movs, asientos]);
+    return calcularConciliacion({ corte, cuentaCodigo, movimientos: movs, asientos, marcas: marcasVisto });
+  }, [corte, cuentaCodigo, periodo, movs, asientos, marcasVisto]);
+
+  // Asientos de la cuenta del banco para conciliar el mes (los del mes + los que arrastran de antes)
+  const libros = useMemo(() => {
+    if (!cuentaCodigo || !periodo) return [];
+    return librosDelMes({ periodo, cuentaCodigo, movimientos: movs, asientos, marcas: marcasVisto });
+  }, [cuentaCodigo, periodo, movs, asientos, marcasVisto]);
 
   const diferencia = conc ? conc.diferencia(saldoBanco.valor) : 0;
 
@@ -225,6 +240,7 @@ export default function ConciliacionBancariaPage() {
   const asientosCandidatos = useMemo(() => {
     if (!movConciliar || !cuentaCodigo) return [];
     const yaConciliados = new Set(movs.filter(m => m.asientoId).map(m => m.asientoId));
+    marcas.forEach(k => yaConciliados.add(k.asientoId)); // ya tienen visto manual
     const tm = aFecha(movConciliar.fecha).getTime();
     return asientos
       .filter(a => a.estado !== 'borrador' && !yaConciliados.has(a.id))
@@ -271,7 +287,7 @@ export default function ConciliacionBancariaPage() {
   // ── Emparejamiento automático ──────────────────────────────────────────────
   const abrirAuto = () => {
     if (!cuentaCodigo) { toast.error('Vincula la cuenta bancaria a una cuenta contable primero.'); return; }
-    const ps = proponerEmparejamientos({ movimientos: movsAgrupados.pendientes, asientos, cuentaCodigo, toleranciaDias: 10 });
+    const ps = proponerEmparejamientos({ movimientos: movsAgrupados.pendientes, asientos, cuentaCodigo, toleranciaDias: 10, marcas: marcasVisto });
     if (ps.length === 0) { toast.info('No se encontraron asientos con el mismo monto para los movimientos pendientes de este mes.'); return; }
     setPropuestas(ps);
     setElegidas(new Set(ps.filter(p => p.confianza === 'alta').map(p => p.movimiento.id)));
@@ -348,6 +364,34 @@ export default function ConciliacionBancariaPage() {
     } catch (e: unknown) {
       toast.error(e instanceof Error ? e.message : 'No se pudo cerrar la conciliación');
     } finally { setCerrando(false); }
+  };
+
+  // ── Vistos sobre los libros del banco ──────────────────────────────────────
+  const librosVisibles = useMemo(() => {
+    const q = busquedaLibros.trim().toLowerCase();
+    if (!q) return libros;
+    return libros.filter(f => f.asiento.concepto.toLowerCase().includes(q) || (f.asiento.numero ?? '').toLowerCase().includes(q));
+  }, [libros, busquedaLibros]);
+
+  const resumenLibros = useMemo(() => {
+    const enTransito = libros.filter(f => f.estado === 'transito');
+    return {
+      total: libros.length, vistos: libros.length - enTransito.length,
+      depositos: enTransito.filter(f => f.monto > 0).length, pagos: enTransito.filter(f => f.monto < 0).length,
+    };
+  }, [libros]);
+
+  /** Pone (o quita) el visto: el banco ya reflejó ese asiento a fin del mes que se está conciliando. */
+  const ponerVistos = async (filas: FilaLibro[], poner: boolean) => {
+    if (!user || !cuentaObj) return;
+    const ids = filas.filter(f => (poner ? f.estado === 'transito' : f.estado === 'visto')).map(f => f.asiento.id);
+    if (ids.length === 0) return;
+    try {
+      if (poner) await marcarAsientos(cuentaObj.id, ids, corte, user.nombre);
+      else await desmarcarAsientos(cuentaObj.id, ids);
+    } catch (e: unknown) {
+      toast.error(e instanceof Error ? e.message : 'No se pudo guardar el visto (¿publicaste las reglas de Firestore?)');
+    }
   };
 
   const abrirApertura = () => {
@@ -697,12 +741,110 @@ export default function ConciliacionBancariaPage() {
           )}
 
           {/* ── Movimientos del mes ──────────────────────────────────────── */}
-          <Tabs defaultValue="pendientes">
+          <Tabs defaultValue="libros">
             <TabsList>
+              <TabsTrigger value="libros">
+                Libros del banco ({resumenLibros.vistos}/{resumenLibros.total} con visto)
+              </TabsTrigger>
               <TabsTrigger value="pendientes">Por conciliar ({movsAgrupados.pendientes.length})</TabsTrigger>
               <TabsTrigger value="conciliados">Conciliados ({movsAgrupados.conciliados.length})</TabsTrigger>
               <TabsTrigger value="ignorados">Ignorados ({movsAgrupados.ignorados.length})</TabsTrigger>
             </TabsList>
+
+            <TabsContent value="libros" className="mt-4">
+              <div className="mb-3 bg-white rounded-xl border p-3 space-y-2">
+                <p className="text-xs text-slate-500">
+                  Estos son los depósitos, pagos y notas que tus libros tienen en la cuenta del banco (los del mes y los que vienen pendientes de meses
+                  anteriores). Pon el <strong>visto</strong> a los que ya aparecen en el estado de cuenta; los que queden sin visto son partidas en
+                  tránsito y pasan al mes siguiente. Al terminar, el saldo conciliado debe ser el mismo que el del banco.
+                </p>
+                <div className="flex flex-wrap items-center gap-2">
+                  <Input value={busquedaLibros} onChange={e => setBusquedaLibros(e.target.value)}
+                    placeholder="Buscar por concepto o N° de asiento…" className="h-8 w-72 text-xs" />
+                  {!bloqueado && (
+                    <>
+                      <Button size="sm" variant="outline" className="h-8 text-xs"
+                        onClick={() => ponerVistos(librosVisibles.filter(f => f.monto > 0), true)}>
+                        Marcar depósitos
+                      </Button>
+                      <Button size="sm" variant="outline" className="h-8 text-xs"
+                        onClick={() => ponerVistos(librosVisibles.filter(f => f.monto < 0), true)}>
+                        Marcar pagos
+                      </Button>
+                      <Button size="sm" variant="outline" className="h-8 text-xs"
+                        onClick={() => ponerVistos(librosVisibles, true)}>
+                        Marcar todo lo visible
+                      </Button>
+                      <Button size="sm" variant="ghost" className="h-8 text-xs text-slate-500"
+                        onClick={() => ponerVistos(librosVisibles, false)}>
+                        Quitar vistos
+                      </Button>
+                    </>
+                  )}
+                  <span className="ml-auto text-xs text-slate-500">
+                    {resumenLibros.vistos} de {resumenLibros.total} con visto · en tránsito: {resumenLibros.depositos} depósito(s), {resumenLibros.pagos} pago(s)
+                  </span>
+                </div>
+              </div>
+              <div className="bg-white rounded-xl border overflow-hidden">
+                <div className="overflow-x-auto max-h-[28rem] overflow-y-auto">
+                  <Table>
+                    <TableHeader className="sticky top-0 bg-white">
+                      <TableRow className="bg-slate-50">
+                        <TableHead className="w-10 text-center">Visto</TableHead>
+                        <TableHead>Fecha</TableHead>
+                        <TableHead>N° asiento</TableHead>
+                        <TableHead>Concepto</TableHead>
+                        <TableHead className="text-right">Depósitos / ingresos</TableHead>
+                        <TableHead className="text-right">Pagos / egresos</TableHead>
+                        <TableHead>Estado en el banco</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {librosVisibles.length === 0 ? (
+                        <TableRow>
+                          <TableCell colSpan={7} className="text-center py-10 text-slate-400">
+                            {busquedaLibros ? 'Ningún asiento coincide con la búsqueda.' : 'Tus libros no tienen movimientos en la cuenta del banco para este mes.'}
+                          </TableCell>
+                        </TableRow>
+                      ) : librosVisibles.map(f => {
+                        const delMesAnterior = periodoDe(aFecha(f.asiento.fecha)) !== periodo;
+                        return (
+                          <TableRow key={f.asiento.id} className={f.estado !== 'transito' ? 'bg-emerald-50/50' : undefined}>
+                            <TableCell className="text-center">
+                              <input type="checkbox" aria-label="Visto: el banco ya lo reflejó"
+                                checked={f.estado !== 'transito'}
+                                disabled={bloqueado || !f.editable}
+                                title={f.estado === 'en_banco' ? 'Ya lo respalda un movimiento del estado de cuenta' : undefined}
+                                onChange={e => ponerVistos([f], e.target.checked)} />
+                            </TableCell>
+                            <TableCell className="text-sm text-slate-500 whitespace-nowrap">
+                              {fmt(f.asiento.fecha)}
+                              {delMesAnterior && <span className="ml-1.5 text-[10px] text-amber-600">arrastre</span>}
+                            </TableCell>
+                            <TableCell className="text-xs font-mono text-slate-500">{f.asiento.numero ?? '—'}</TableCell>
+                            <TableCell className="text-sm max-w-80 truncate" title={f.asiento.concepto}>{f.asiento.concepto}</TableCell>
+                            <TableCell className="text-right text-sm text-green-700 tabular-nums">{f.monto > 0 ? currency(f.monto) : ''}</TableCell>
+                            <TableCell className="text-right text-sm text-red-600 tabular-nums">{f.monto < 0 ? currency(-f.monto) : ''}</TableCell>
+                            <TableCell className="text-xs">
+                              {f.estado === 'en_banco' && (
+                                <span className="text-green-700">En el banco · {f.movimiento ? fmt(f.movimiento.fecha) : ''}</span>
+                              )}
+                              {f.estado === 'visto' && <span className="text-emerald-700">Visto</span>}
+                              {f.estado === 'transito' && (
+                                <span className="text-amber-700">
+                                  En tránsito{f.dias > 30 ? ` · ${f.dias} días` : ''}
+                                </span>
+                              )}
+                            </TableCell>
+                          </TableRow>
+                        );
+                      })}
+                    </TableBody>
+                  </Table>
+                </div>
+              </div>
+            </TabsContent>
 
             {(['pendientes', 'conciliados', 'ignorados'] as const).map(tab => {
               const lista = tab === 'pendientes' ? pendientesVisibles : movsAgrupados[tab];

@@ -782,6 +782,16 @@ export interface ExtractoBancario {
   createdAt:        Date;
 }
 
+/** Visto puesto a un asiento de la cuenta del banco: el banco ya lo reflejó (sin movimiento del PDF). */
+export interface MarcaConciliacion {
+  id:               string;   // `${cuentaBancariaId}_${asientoId}`
+  cuentaBancariaId: string;
+  asientoId:        string;
+  fechaBanco:       Date;     // desde cuándo lo refleja el banco
+  usuarioNombre:    string;
+  createdAt:        Date;
+}
+
 /** Conciliación bancaria de un mes cerrada por el contador. */
 export interface ConciliacionBancaria {
   id:               string;   // `${cuentaBancariaId}_${periodo}`

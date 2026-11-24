@@ -20,10 +20,11 @@ import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from '@/components/ui/table';
 
-import { CuentaBancaria, MovimientoBancario, CuentaContable, LoteReclasificacion, ItemLoteReclasificacion } from '@/types';
+import { CuentaBancaria, MovimientoBancario, CuentaContable, LoteReclasificacion, ItemLoteReclasificacion, ExtractoBancario } from '@/types';
 import {
   subscribeToCuentasBancarias, createCuentaBancaria,
   subscribeToMovimientosBancarios, subscribeToMovimientosBancariosDeCuentas, importarMovimientosBancarios,
+  subscribeToMovimientosRango, getMovimientosRango,
   registrarMovimientoBancario, anularMovimientoBancario, conciliarMovimiento,
   marcarMovimientoReclasificado, restaurarMovimiento,
 } from '@/lib/firebase/cuentas-bancarias';
@@ -43,14 +44,18 @@ import { useOpcionesCuentasMovimiento } from '@/hooks/useOpcionesCuentasMovimien
 import {
   resumirContrapartidas, TIPOS_MOVIMIENTO_BANCO, type LineaContra, type TipoMovimientoBanco,
 } from '@/lib/bancos/contrapartidas';
-import { claveDescripcion, sugerirContrapartida, CUENTAS_SUGERIDAS } from '@/lib/bancos/conciliacion';
+import {
+  claveDescripcion, sugerirContrapartida, CUENTAS_SUGERIDAS, periodoDe, inicioDePeriodo, finDePeriodo, aFecha,
+} from '@/lib/bancos/conciliacion';
 import { asegurarCuenta } from '@/lib/contabilidad/reclasificar-compras';
 import { planificarImportacion } from '@/lib/bancos/importacion';
-import { guardarExtractos } from '@/lib/firebase/extractos-bancarios';
+import { guardarExtractos, subscribeToExtractos } from '@/lib/firebase/extractos-bancarios';
 import { extraerTextoPDF } from '@/lib/bancos/leer-pdf';
 import { interpretarEstadoCuentaPichincha, type ResultadoEstadoCuenta } from '@/lib/bancos/estado-cuenta-pichincha';
 
 const currency = (v: number) => `$${v.toFixed(2)}`;
+const MESES_ES = ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'];
+const nombreMesES = (p: string) => { const [y, m] = p.split('-').map(Number); return `${MESES_ES[m - 1]} de ${y}`; };
 
 const ESTADO_LABEL: Record<string, string> = {
   no_conciliado: 'Pendiente', conciliado: 'Conciliado', ignorado: 'Ignorado', anulado: 'Anulado',
@@ -69,6 +74,11 @@ export default function MovimientosBancariosPage() {
   // no obliga a elegir una cuenta primero para poder ver algo).
   const [cuentaSel, setCuentaSel] = useState<string>('todas');
   const [movs,      setMovs]      = useState<MovimientoBancario[]>([]);
+  /** Mes que se está viendo ('yyyy-MM'): solo se leen de la base los movimientos de ese mes. */
+  const [mes,       setMes]       = useState(() => periodoDe(new Date()));
+  const [extractos, setExtractos] = useState<ExtractoBancario[]>([]);
+  /** Movimientos ya registrados en las fechas del PDF que se va a importar (para no duplicar). */
+  const [existentesPdf, setExistentesPdf] = useState<MovimientoBancario[]>([]);
   const [loading,   setLoading]   = useState(false);
   const [filtroEstado, setFiltroEstado] = useState('todos');
 
@@ -146,6 +156,9 @@ export default function MovimientosBancariosPage() {
     if (activas.length === 1) { autoElegida.current = true; setCuentaSel(activas[0].id); }
   }, [cuentas]);
 
+  // Para no gastar lecturas de la base, se carga solo el mes que se está viendo. El modo mantenimiento
+  // (herramientas que necesitan todo el historial) sí lee todo.
+  const cargaCompleta = mantenimiento;
   useEffect(() => {
     if (!cuentaSel) return;
     if (cuentaSel === 'todas' && cuentas.length === 0) return; // esperar a que carguen las cuentas
@@ -154,14 +167,26 @@ export default function MovimientosBancariosPage() {
       toast.error('No se pudieron cargar los movimientos');
       setLoading(false);
     };
-    const unsub = cuentaSel === 'todas'
-      ? subscribeToMovimientosBancariosDeCuentas(
-          cuentas.filter(c => c.activa).map(c => c.id),
-          d => { setMovs(d); setLoading(false); }, onErr
-        )
-      : subscribeToMovimientosBancarios(cuentaSel, d => { setMovs(d); setLoading(false); }, onErr);
-    return unsub;
-  }, [cuentaSel, cuentas]);
+    if (cargaCompleta) {
+      return cuentaSel === 'todas'
+        ? subscribeToMovimientosBancariosDeCuentas(
+            cuentas.filter(c => c.activa).map(c => c.id),
+            d => { setMovs(d); setLoading(false); }, onErr
+          )
+        : subscribeToMovimientosBancarios(cuentaSel, d => { setMovs(d); setLoading(false); }, onErr);
+    }
+    const ids = new Set(cuentaSel === 'todas' ? cuentas.filter(c => c.activa).map(c => c.id) : [cuentaSel]);
+    return subscribeToMovimientosRango(
+      inicioDePeriodo(mes), finDePeriodo(mes),
+      d => { setMovs(d.filter(m => ids.has(m.cuentaBancariaId))); setLoading(false); }, onErr
+    );
+  }, [cuentaSel, cuentas, cargaCompleta, mes]);
+
+  // Saldos que declara el banco al cierre de cada mes (colección pequeña: un registro por mes)
+  useEffect(() => {
+    if (!cuentaSel || cuentaSel === 'todas') { setExtractos([]); return; }
+    return subscribeToExtractos(cuentaSel, setExtractos, () => {});
+  }, [cuentaSel]);
 
   useEffect(() => {
     if (!cuentaSel || cuentaSel === 'todas') { setLotes([]); return; }
@@ -178,6 +203,23 @@ export default function MovimientosBancariosPage() {
     if (filtroEstado === 'todos') return movs;
     return movs.filter(m => m.estado === filtroEstado);
   }, [movs, filtroEstado]);
+
+  // Meses para elegir: los últimos 24 y los que tienen estado de cuenta guardado
+  const opcionesMes = useMemo(() => {
+    const s = new Set<string>([mes]);
+    const hoy = new Date();
+    for (let i = 0; i < 24; i++) s.add(periodoDe(new Date(hoy.getFullYear(), hoy.getMonth() - i, 1)));
+    extractos.forEach(e => s.add(e.periodo));
+    return [...s].sort().reverse();
+  }, [mes, extractos]);
+  const extractoMes = useMemo(() => extractos.find(e => e.periodo === mes), [extractos, mes]);
+  const totalesMes = useMemo(() => {
+    const validos = movs.filter(m => m.estado !== 'anulado' && m.estado !== 'ignorado');
+    return {
+      creditos: validos.filter(m => m.tipo === 'credito').reduce((s, m) => s + m.monto, 0),
+      debitos:  validos.filter(m => m.tipo === 'debito').reduce((s, m) => s + m.monto, 0),
+    };
+  }, [movs]);
 
   const saldoCalculado = useMemo(() => {
     if (!cuentaSelObj) return 0;
@@ -196,8 +238,8 @@ export default function MovimientosBancariosPage() {
   // Movimientos del PDF separados en nuevos y ya registrados (misma fecha, documento, tipo y monto)
   const pdfPlan = useMemo(() => {
     if (!pdfRes) return null;
-    return planificarImportacion({ movimientosPdf: pdfRes.movimientos, existentes: movs, cuentaBancariaId: cuentaSel });
-  }, [pdfRes, movs, cuentaSel]);
+    return planificarImportacion({ movimientosPdf: pdfRes.movimientos, existentes: existentesPdf, cuentaBancariaId: cuentaSel });
+  }, [pdfRes, existentesPdf, cuentaSel]);
 
   // Tipos de movimiento del PDF (comisión, IVA, depósito, transferencia…) para elegir su contracuenta de una vez
   const gruposPdf = useMemo(() => {
@@ -310,6 +352,11 @@ export default function MovimientosBancariosPage() {
         toast.error('No se encontraron movimientos. Verifica que sea el estado de cuenta en PDF del Banco Pichincha.');
         return;
       }
+      // Se leen de la base solo los movimientos de las fechas del PDF, para detectar los que ya están registrados
+      const tiempos = res.movimientos.map(m => m.fecha.getTime());
+      const unDia = 24 * 60 * 60 * 1000;
+      const yaEnBase = await getMovimientosRango(new Date(Math.min(...tiempos) - unDia), new Date(Math.max(...tiempos) + unDia));
+      setExistentesPdf(yaEnBase.filter(m => m.cuentaBancariaId === cuentaSel));
       setPdfRes(res);
       setDlgPdf(true);
     } catch (err) {
@@ -367,6 +414,8 @@ export default function MovimientosBancariosPage() {
       if (fallidos > 0) {
         toast.warning(`${fallidos} movimiento(s) no se pudieron contabilizar (¿período contable cerrado?). Quedaron pendientes: contabilízalos desde Conciliación Bancaria.`, { duration: 14000 });
       }
+      // Se muestra el último mes importado para ver el resultado
+      if (pdfPlan.nuevos.length > 0) setMes(periodoDe(new Date(Math.max(...pdfPlan.nuevos.map(m => m.fecha.getTime())))));
       setDlgPdf(false);
       setPdfRes(null);
     } catch (err: any) {
@@ -421,6 +470,7 @@ export default function MovimientosBancariosPage() {
         toast.warning('El movimiento se registró, pero el asiento contable NO se pudo generar (¿período cerrado?). Queda pendiente: contabilízalo desde Conciliación Bancaria.', { duration: 12000 });
       }
       setDlgMov(false);
+      setMes(periodoDe(fecha)); // se muestra el mes del movimiento registrado
       setFormMov(formMovInicial());
       setContrasMov([{ codigo: '', monto: '' }]);
     } catch (e: any) {
@@ -791,11 +841,30 @@ export default function MovimientosBancariosPage() {
             </SelectContent>
           </Select>
         </div>
+        {cuentaSel && (
+          <div className="min-w-48">
+            <Label className="text-xs">Mes</Label>
+            <Select value={mes} onValueChange={setMes} disabled={cargaCompleta}>
+              <SelectTrigger className="mt-1"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                {opcionesMes.map(p => <SelectItem key={p} value={p}>{nombreMesES(p)}</SelectItem>)}
+              </SelectContent>
+            </Select>
+          </div>
+        )}
         {cuentaSel && cuentaSel !== 'todas' && (
           <>
             <div className="text-sm">
-              <p className="text-xs text-slate-400">Saldo calculado</p>
-              <p className="font-bold text-slate-800">{currency(saldoCalculado)}</p>
+              <p className="text-xs text-slate-400">{cargaCompleta ? 'Saldo calculado' : 'Saldo del banco al cierre del mes'}</p>
+              <p className="font-bold text-slate-800">
+                {cargaCompleta ? currency(saldoCalculado) : extractoMes ? currency(extractoMes.saldoActual) : '—'}
+              </p>
+              {!cargaCompleta && (
+                <p className="text-[10px] text-slate-400">
+                  {extractoMes ? 'según el estado de cuenta · ' : 'sin estado de cuenta de este mes · '}
+                  mes: +{currency(totalesMes.creditos)} / −{currency(totalesMes.debitos)}
+                </p>
+              )}
             </div>
             <div className="flex gap-2">
               <input
@@ -830,8 +899,10 @@ export default function MovimientosBancariosPage() {
                 <Receipt className="mr-2 h-4 w-4" /> Movimiento manual
               </Button>
               <Button variant="outline" size="sm"
-                disabled={!cuentaSelObj?.cuentaContableCodigo || saldoCalculado <= 0}
-                title={!cuentaSelObj?.cuentaContableCodigo ? 'Primero vincula esta cuenta a una cuenta contable' : 'Mueve solo el saldo actual de esta cuenta a Caja General (un asiento nuevo)'}
+                disabled={!cuentaSelObj?.cuentaContableCodigo || !cargaCompleta || saldoCalculado <= 0}
+                title={!cuentaSelObj?.cuentaContableCodigo ? 'Primero vincula esta cuenta a una cuenta contable'
+                  : !cargaCompleta ? 'Necesita todo el historial de la cuenta: se habilita en modo mantenimiento (?mantenimiento=1)'
+                  : 'Mueve solo el saldo actual de esta cuenta a Caja General (un asiento nuevo)'}
                 onClick={() => setDlgReclasificar(true)}>
                 <ArrowRightLeft className="mr-2 h-4 w-4" /> Reclasificar saldo a Caja
               </Button>

@@ -1,7 +1,7 @@
 import {
   collection, doc, query, orderBy, where,
   serverTimestamp, addDoc, updateDoc, deleteDoc, getDoc,
-  writeBatch, QueryDocumentSnapshot, DocumentData } from 'firebase/firestore';
+  writeBatch, getDocs, QueryDocumentSnapshot, DocumentData } from 'firebase/firestore';
 import { onSnapshot } from './compartido';
 import { db } from '@/lib/firebase/config';
 import { CuentaBancaria, MovimientoBancario } from '@/types';
@@ -114,6 +114,28 @@ export function subscribeToMovimientosBancariosDeCuentas(
   return () => unsubs.forEach(u => u());
 }
 
+const mapMov = (d: QueryDocumentSnapshot<DocumentData>) => ({ id: d.id, ...d.data() } as MovimientoBancario);
+
+/**
+ * Movimientos de un rango de fechas (de todas las cuentas). Consulta solo por fecha, que tiene índice
+ * automático: no pide índice compuesto. Quien la usa filtra por cuenta en el cliente. Es la forma de no
+ * leer todo el historial: se pide solo el mes (o el rango) que se está viendo.
+ */
+export function subscribeToMovimientosRango(
+  desde: Date, hasta: Date,
+  callback: (data: MovimientoBancario[]) => void,
+  onError?: (error: Error) => void
+): () => void {
+  const q = query(collection(db, COL_MOVS), where('fecha', '>=', desde), where('fecha', '<=', hasta), orderBy('fecha', 'desc'));
+  return onSnapshot(q, snap => callback(snap.docs.map(mapMov)), err => onError?.(err));
+}
+
+/** Lectura puntual de un rango de fechas (p. ej. para comparar contra un PDF que se va a importar). */
+export async function getMovimientosRango(desde: Date, hasta: Date): Promise<MovimientoBancario[]> {
+  const snap = await getDocs(query(collection(db, COL_MOVS), where('fecha', '>=', desde), where('fecha', '<=', hasta)));
+  return snap.docs.map(mapMov);
+}
+
 export async function importarMovimientosBancarios(
   movimientos: Omit<MovimientoBancario, 'id' | 'createdAt'>[]
 ): Promise<string[]> {
@@ -150,6 +172,11 @@ export async function conciliarMovimiento(
     estado:    'conciliado',
     asientoId,
   });
+}
+
+/** Corrige el monto de un movimiento (p. ej. el saldo inicial registrado con un valor equivocado). */
+export async function actualizarMontoMovimiento(movId: string, monto: number): Promise<void> {
+  await updateDoc(doc(db, COL_MOVS, movId), { monto });
 }
 
 export async function ignorarMovimiento(movId: string): Promise<void> {

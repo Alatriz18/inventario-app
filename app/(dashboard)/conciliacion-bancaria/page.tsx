@@ -26,9 +26,9 @@ import { CuentaBancaria, MovimientoBancario, AsientoContable, ExtractoBancario, 
 import { subscribeToLotesReclasificacion } from '@/lib/firebase/reclasificaciones';
 import {
   subscribeToCuentasBancarias, subscribeToMovimientosBancarios,
-  conciliarMovimiento, ignorarMovimiento, revertirConciliacion, registrarMovimientoBancario,
+  conciliarMovimiento, ignorarMovimiento, revertirConciliacion, registrarMovimientoBancario, actualizarMontoMovimiento,
 } from '@/lib/firebase/cuentas-bancarias';
-import { subscribeToAsientos } from '@/lib/firebase/asientos';
+import { subscribeToAsientos, editarAsiento } from '@/lib/firebase/asientos';
 import {
   subscribeToExtractos, subscribeToConciliaciones, cerrarConciliacion, reabrirConciliacion,
   subscribeToMarcas, marcarAsientos, desmarcarAsientos,
@@ -416,6 +416,32 @@ export default function ConciliacionBancariaPage() {
     }
   };
 
+  /** Cambia el saldo inicial registrado al saldo con el que abrió el banco (edita su asiento y su monto). */
+  const corregirSaldoInicial = async () => {
+    if (!user || !cuentaCodigo || !apertura.desdeBanco) return;
+    const mov = movs.find(m => m.tipoDocumento === 'saldo_inicial' && m.estado !== 'anulado');
+    const orig = mov?.asientoId ? asientos.find(a => a.id === mov.asientoId) : undefined;
+    if (!mov || !orig) { toast.error('No se encontró el asiento del saldo inicial registrado.'); return; }
+    const lineasBanco = orig.lineas.filter(l => l.cuentaCodigo === cuentaCodigo);
+    if (lineasBanco.length !== 1 || orig.lineas.length !== 2) {
+      toast.error('Ese asiento tiene más de dos líneas: edítalo a mano en Contabilidad → Asientos.');
+      return;
+    }
+    const nuevo = Math.round(apertura.monto * 100) / 100;
+    if (!window.confirm(`¿Cambiar el saldo inicial registrado de ${currency(mov.monto)} a ${currency(nuevo)}, que es con lo que abrió el banco?`)) return;
+    try {
+      await editarAsiento(orig.id, {
+        lineas: orig.lineas.map(l => l.cuentaCodigo === cuentaCodigo
+          ? { ...l, debe: nuevo, haber: 0 }
+          : { ...l, debe: 0, haber: nuevo }),
+      }, user.uid, user.nombre);
+      await actualizarMontoMovimiento(mov.id, nuevo);
+      toast.success(`Saldo inicial corregido a ${currency(nuevo)}`);
+    } catch (e: unknown) {
+      toast.error(e instanceof Error ? e.message : 'No se pudo corregir el saldo inicial');
+    }
+  };
+
   const abrirApertura = () => {
     setAperturaMonto(apertura.monto > 0 ? apertura.monto.toFixed(2) : '');
     setAperturaFecha(primerPeriodo ? `${primerPeriodo}-01` : format(new Date(), 'yyyy-MM-dd'));
@@ -632,6 +658,12 @@ export default function ConciliacionBancariaPage() {
                         {a.texto}
                       </p>
                     ))}
+                    {!bloqueado && registradoApertura !== undefined && apertura.desdeBanco
+                      && Math.abs(registradoApertura - apertura.monto) >= 0.005 && (
+                      <Button size="sm" className="h-8 text-xs" onClick={corregirSaldoInicial}>
+                        Corregir el saldo inicial registrado a {currency(apertura.monto)}
+                      </Button>
+                    )}
                   </div>
                 )}
                 {!bloqueado && !aperturaRegistrada && asientosApertura.length === 0 && periodo === primerPeriodo && apertura.monto > 0 && (

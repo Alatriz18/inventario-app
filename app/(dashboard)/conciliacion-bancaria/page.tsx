@@ -12,6 +12,7 @@ import CuentaCombobox from '@/components/shared/CuentaCombobox';
 import { Button }  from '@/components/ui/button';
 import { Skeleton }from '@/components/ui/skeleton';
 import { Label }   from '@/components/ui/label';
+import { Input }   from '@/components/ui/input';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import {
@@ -81,6 +82,10 @@ export default function ConciliacionBancariaPage() {
   const [progresoContab, setProgresoContab] = useState(0);
 
   const [cerrando, setCerrando] = useState(false);
+
+  // Movimientos marcados para contabilizar juntos (p. ej. contra Caja General) y búsqueda en la lista
+  const [seleccion, setSeleccion] = useState<Set<string>>(new Set());
+  const [busqueda, setBusqueda] = useState('');
 
   useEffect(() => {
     const u1 = subscribeToCuentasBancarias(setCuentas);
@@ -165,6 +170,25 @@ export default function ConciliacionBancariaPage() {
     conciliados: movsMes.filter(m => m.estado === 'conciliado'),
     ignorados:   movsMes.filter(m => m.estado === 'ignorado'),
   }), [movsMes]);
+
+  const pendientesVisibles = useMemo(() => {
+    const q = busqueda.trim().toLowerCase();
+    if (!q) return movsAgrupados.pendientes;
+    return movsAgrupados.pendientes.filter(m =>
+      m.descripcion.toLowerCase().includes(q) || (m.referencia ?? '').toLowerCase().includes(q));
+  }, [movsAgrupados.pendientes, busqueda]);
+
+  const seleccionados = useMemo(
+    () => movsAgrupados.pendientes.filter(m => seleccion.has(m.id)),
+    [movsAgrupados.pendientes, seleccion]
+  );
+  const totalSeleccion = useMemo(() => ({
+    creditos: Math.round(seleccionados.filter(m => m.tipo === 'credito').reduce((s, m) => s + m.monto, 0) * 100) / 100,
+    debitos:  Math.round(seleccionados.filter(m => m.tipo === 'debito').reduce((s, m) => s + m.monto, 0) * 100) / 100,
+  }), [seleccionados]);
+
+  // La selección vale para un solo mes y cuenta
+  useEffect(() => { setSeleccion(new Set()); setBusqueda(''); }, [cuentaSel, periodo]);
 
   const grupos: GrupoMovimientos[] = useMemo(
     () => agruparPendientes(movsAgrupados.pendientes, CUENTAS_SUGERIDAS).filter(g => g.movimientos.length > 1),
@@ -284,6 +308,7 @@ export default function ConciliacionBancariaPage() {
     }
     setContabilizando(false);
     setDlgContab(false);
+    setSeleccion(new Set());
     if (ok) toast.success(`${ok} movimiento(s) contabilizados y conciliados`);
     if (err) toast.warning(`${err} no se pudieron contabilizar (¿período contable cerrado?). Revísalos en Contabilidad.`, { duration: 10000 });
   };
@@ -595,13 +620,68 @@ export default function ConciliacionBancariaPage() {
               <TabsTrigger value="ignorados">Ignorados ({movsAgrupados.ignorados.length})</TabsTrigger>
             </TabsList>
 
-            {(['pendientes', 'conciliados', 'ignorados'] as const).map(tab => (
+            {(['pendientes', 'conciliados', 'ignorados'] as const).map(tab => {
+              const lista = tab === 'pendientes' ? pendientesVisibles : movsAgrupados[tab];
+              const conSeleccion = tab === 'pendientes' && !bloqueado;
+              const columnas = conSeleccion ? 8 : 7;
+              return (
               <TabsContent key={tab} value={tab} className="mt-4">
+                {conSeleccion && movsAgrupados.pendientes.length > 0 && (
+                  <div className="mb-3 bg-white rounded-xl border p-3 space-y-2">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <Input value={busqueda} onChange={e => setBusqueda(e.target.value)}
+                        placeholder="Buscar en la descripción (ej. DEPOSITO, TRANSFERENCIA)…" className="h-8 w-80 text-xs" />
+                      <Button size="sm" variant="outline" className="h-8 text-xs"
+                        onClick={() => setSeleccion(new Set(pendientesVisibles.map(m => m.id)))}>
+                        Marcar todos ({pendientesVisibles.length})
+                      </Button>
+                      <Button size="sm" variant="outline" className="h-8 text-xs"
+                        onClick={() => setSeleccion(new Set(pendientesVisibles.filter(m => m.tipo === 'credito').map(m => m.id)))}>
+                        Solo créditos
+                      </Button>
+                      <Button size="sm" variant="outline" className="h-8 text-xs"
+                        onClick={() => setSeleccion(new Set(pendientesVisibles.filter(m => m.tipo === 'debito').map(m => m.id)))}>
+                        Solo débitos
+                      </Button>
+                      <Button size="sm" variant="ghost" className="h-8 text-xs text-slate-500" onClick={() => setSeleccion(new Set())}>
+                        Limpiar
+                      </Button>
+                    </div>
+                    {seleccionados.length > 0 && (
+                      <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg bg-emerald-50 border border-emerald-200 px-3 py-2">
+                        <span className="text-sm text-emerald-800">
+                          <strong>{seleccionados.length}</strong> marcado(s) · créditos {currency(totalSeleccion.creditos)} · débitos {currency(totalSeleccion.debitos)}
+                        </span>
+                        <div className="flex gap-2">
+                          <Button size="sm" className="h-8 text-xs"
+                            onClick={() => abrirContabilizar(seleccionados, `${seleccionados.length} movimientos marcados`, CUENTAS_SUGERIDAS.caja)}>
+                            Contabilizar en Caja General
+                          </Button>
+                          <Button size="sm" variant="outline" className="h-8 text-xs"
+                            onClick={() => abrirContabilizar(seleccionados, `${seleccionados.length} movimientos marcados`, undefined)}>
+                            Otra cuenta…
+                          </Button>
+                        </div>
+                      </div>
+                    )}
+                    <p className="text-[11px] text-slate-400">
+                      Marca los movimientos que van a Caja General (la mayoría). Las comisiones y los valores chicos del banco puedes dejarlos sin marcar
+                      y registrarlos aparte, por grupo o a mano con «Movimiento manual».
+                    </p>
+                  </div>
+                )}
                 <div className="bg-white rounded-xl border overflow-hidden">
                   <div className="overflow-x-auto max-h-[28rem] overflow-y-auto">
                     <Table>
                       <TableHeader className="sticky top-0 bg-white">
                         <TableRow className="bg-slate-50">
+                          {conSeleccion && (
+                            <TableHead className="w-8">
+                              <input type="checkbox" aria-label="Marcar todos los visibles"
+                                checked={pendientesVisibles.length > 0 && pendientesVisibles.every(m => seleccion.has(m.id))}
+                                onChange={e => setSeleccion(e.target.checked ? new Set(pendientesVisibles.map(m => m.id)) : new Set())} />
+                            </TableHead>
+                          )}
                           <TableHead>Fecha</TableHead>
                           <TableHead>Descripción</TableHead>
                           <TableHead>N° documento</TableHead>
@@ -612,14 +692,26 @@ export default function ConciliacionBancariaPage() {
                         </TableRow>
                       </TableHeader>
                       <TableBody>
-                        {movsAgrupados[tab].length === 0 ? (
+                        {lista.length === 0 ? (
                           <TableRow>
-                            <TableCell colSpan={7} className="text-center py-10 text-slate-400">
-                              {tab === 'pendientes' ? 'No quedan movimientos por conciliar en este mes.' : 'No hay movimientos en esta categoría.'}
+                            <TableCell colSpan={columnas} className="text-center py-10 text-slate-400">
+                              {tab === 'pendientes'
+                                ? (busqueda ? 'Ningún movimiento coincide con la búsqueda.' : 'No quedan movimientos por conciliar en este mes.')
+                                : 'No hay movimientos en esta categoría.'}
                             </TableCell>
                           </TableRow>
-                        ) : movsAgrupados[tab].map(m => (
-                          <TableRow key={m.id}>
+                        ) : lista.map(m => (
+                          <TableRow key={m.id} className={conSeleccion && seleccion.has(m.id) ? 'bg-emerald-50/60' : undefined}>
+                            {conSeleccion && (
+                              <TableCell>
+                                <input type="checkbox" aria-label="Marcar movimiento" checked={seleccion.has(m.id)}
+                                  onChange={e => setSeleccion(prev => {
+                                    const n = new Set(prev);
+                                    if (e.target.checked) n.add(m.id); else n.delete(m.id);
+                                    return n;
+                                  })} />
+                              </TableCell>
+                            )}
                             <TableCell className="text-sm text-slate-500 whitespace-nowrap">{fmt(m.fecha)}</TableCell>
                             <TableCell className="text-sm max-w-72 truncate" title={m.descripcion}>{m.descripcion}</TableCell>
                             <TableCell className="text-xs font-mono text-slate-500">{m.referencia ?? '—'}</TableCell>
@@ -663,7 +755,8 @@ export default function ConciliacionBancariaPage() {
                   </div>
                 </div>
               </TabsContent>
-            ))}
+              );
+            })}
           </Tabs>
         </>
       )}

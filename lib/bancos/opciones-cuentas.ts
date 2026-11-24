@@ -23,7 +23,9 @@ export interface OpcionCuentaMovimiento {
 /** Sinónimos de uso común para encontrar cuentas por cómo las llama la gente, no por el nombre oficial. */
 const SINONIMOS_POR_PREFIJO: { prefijo: string; palabras: string[] }[] = [
   { prefijo: '5203', palabras: ['gastos bancarios', 'cargos bancarios', 'comisiones bancarias', 'bancario', 'banco', 'financieros'] },
-  { prefijo: '4302', palabras: ['intereses ganados', 'interes bancario', 'bancario', 'banco'] },
+  { prefijo: '4302', palabras: ['intereses ganados', 'intereses bancarios', 'interes bancario', 'bancario', 'banco'] },
+  { prefijo: '20104', palabras: ['sobregiros bancarios', 'sobregiro', 'prestamos bancarios', 'bancario', 'banco'] },
+  { prefijo: '52030201', palabras: ['servicios bancarios', 'gasto por servicios bancarios'] },
   { prefijo: '1010101', palabras: ['caja general', 'efectivo'] },
   { prefijo: '1010102', palabras: ['bancos', 'banco'] },
 ];

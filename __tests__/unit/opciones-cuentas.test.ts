@@ -23,6 +23,16 @@ describe('armarOpcionesCuentas', () => {
     expect(por('520210').keywords).not.toContain('gastos bancarios');
   });
 
+  it('«Gasto por servicios bancarios» existe bajo Comisiones (gastos financieros) y se encuentra por sus nombres habituales', () => {
+    const c = por('52030201');
+    expect(c.label).toBe('52030201 – Gasto por servicios bancarios');
+    expect(c.contexto).toBe('COMISIONES');
+    expect(c.keywords).toEqual(expect.arrayContaining(['gastos financieros', 'gastos bancarios', 'servicios bancarios']));
+    // sobregiros e intereses bancarios: se llegan a las cuentas oficiales equivalentes
+    expect(por('2010401').keywords).toContain('sobregiros bancarios');
+    expect(por('4302').keywords).toContain('intereses bancarios');
+  });
+
   it('Caja y Bancos se encuentran por su nombre habitual', () => {
     expect(por('1010101').keywords).toContain('caja general');
   });

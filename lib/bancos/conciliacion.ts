@@ -304,7 +304,7 @@ export function agruparPendientes(
 
 /** Cuentas con las que se sugiere contabilizar los movimientos típicos del banco. */
 export const CUENTAS_SUGERIDAS = {
-  gastoComisiones:  '520302', // Gastos financieros – comisiones
+  gastoComisiones:  '52030201', // Gasto por servicios bancarios (subcuenta propia de 520302 Comisiones, Gastos financieros)
   ivaCompras:       CUENTAS_POR_DEFECTO.cuentaIVACompras,
   interesesGanados: CUENTAS_POR_DEFECTO.cuentaInteresesGanados,
   retencionFuente:  CUENTAS_POR_DEFECTO.cuentaRetFuenteClientes,

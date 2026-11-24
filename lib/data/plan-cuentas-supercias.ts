@@ -342,6 +342,7 @@ export const PLAN_CUENTAS_SUPERCIAS: CuentaSupercias[] = [
   { codigo:'5203', nombre:'GASTOS FINANCIEROS', tipo:'gasto', naturaleza:'deudora', nivel:3, aceptaMovimientos:false },
   { codigo:'520301', nombre:'INTERESES', tipo:'gasto', naturaleza:'deudora', nivel:4, aceptaMovimientos:true },
   { codigo:'520302', nombre:'COMISIONES', tipo:'gasto', naturaleza:'deudora', nivel:4, aceptaMovimientos:true },
+  { codigo:'52030201', nombre:'Gasto por servicios bancarios', tipo:'gasto', naturaleza:'deudora', nivel:5, aceptaMovimientos:true, propia:true },
   { codigo:'520303', nombre:'GASTOS DE FINANCIAMIENTO DE ACTIVOS', tipo:'gasto', naturaleza:'deudora', nivel:4, aceptaMovimientos:true },
   { codigo:'520304', nombre:'DIFERENCIA EN CAMBIO', tipo:'gasto', naturaleza:'deudora', nivel:4, aceptaMovimientos:true },
   { codigo:'520305', nombre:'OTROS GASTOS FINANCIEROS', tipo:'gasto', naturaleza:'deudora', nivel:4, aceptaMovimientos:true },

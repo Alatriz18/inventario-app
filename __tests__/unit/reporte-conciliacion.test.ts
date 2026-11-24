@@ -99,7 +99,7 @@ describe('saldoBancoAlCorte', () => {
     const movs = [mov('ap', '2026-01-01', 'credito', 1000, 'conciliado', 'A0'), mov('x', '2026-01-10', 'debito', 100, 'conciliado', 'A1')];
     const corte = finDePeriodo('2026-01');
     expect(saldoBancoAlCorte({ extracto: { saldoActual: 905 }, movimientos: movs, corte, saldoInicialCuenta: 1000, aperturaRegistrada: true }))
-      .toEqual({ valor: 905, desdeEstadoCuenta: true });
+      .toMatchObject({ valor: 905, desdeEstadoCuenta: true, origen: 'estado_de_cuenta' });
     expect(saldoBancoAlCorte({ movimientos: movs, corte, saldoInicialCuenta: 1000, aperturaRegistrada: true }).valor).toBe(900);
     expect(saldoBancoAlCorte({ movimientos: movs, corte, saldoInicialCuenta: 1000, aperturaRegistrada: false }).valor).toBe(1900);
   });

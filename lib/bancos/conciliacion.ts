@@ -70,6 +70,8 @@ export interface ResultadoConciliacion {
   saldoBancoConciliado:  (saldoBanco: number) => number;
   saldoLibrosConciliado: number;
   diferencia: (saldoBanco: number) => number;
+  /** Asientos que el contador sacó de esta conciliación (p. ej. el asiento de apertura general): no cuentan en nada. */
+  excluidos: PartidaAsiento[];
 }
 
 /** Efecto neto de un asiento sobre la cuenta contable del banco (debe − haber). */
@@ -88,7 +90,8 @@ export function calcularConciliacion(p: {
   marcas?:      MarcaVisto[];
 }): ResultadoConciliacion {
   const { corte, cuentaCodigo } = p;
-  const validos = p.asientos.filter(a => a.estado !== 'borrador' && aFecha(a.fecha) <= corte);
+  const idsExcluidos = new Set((p.marcas ?? []).filter(k => k.tipo === 'excluida').map(k => k.asientoId));
+  const validos = p.asientos.filter(a => a.estado !== 'borrador' && aFecha(a.fecha) <= corte && !idsExcluidos.has(a.id));
   const porId = new Map(validos.map(a => [a.id, a]));
 
   // Movimientos del banco hasta el corte
@@ -110,7 +113,7 @@ export function calcularConciliacion(p: {
   }
   // Vistos puestos a mano sobre los libros: cuentan como ya reflejados por el banco desde su fecha
   for (const k of p.marcas ?? []) {
-    if (aFecha(k.fechaBanco) <= corte) compensados.add(k.asientoId);
+    if (k.tipo !== 'excluida' && aFecha(k.fechaBanco) <= corte) compensados.add(k.asientoId);
   }
 
   // Todo asiento contabilizado en el banco que el banco aún no refleja es una partida en tránsito
@@ -148,6 +151,10 @@ export function calcularConciliacion(p: {
     totalTransito, totalPendientes, totalCreditosNR, totalDebitosNR,
     saldoBancoConciliado, saldoLibrosConciliado,
     diferencia: (saldoBanco: number) => redondear(saldoBancoConciliado(saldoBanco) - saldoLibrosConciliado),
+    excluidos: p.asientos
+      .filter(a => idsExcluidos.has(a.id) && aFecha(a.fecha) <= corte)
+      .map(a => ({ asiento: a, monto: netoEnCuenta(a, cuentaCodigo), dias: Math.max(0, Math.round((corte.getTime() - aFecha(a.fecha).getTime()) / MS_DIA)) }))
+      .filter(x => x.monto !== 0),
   };
 }
 
@@ -345,11 +352,13 @@ export const CUENTAS_SUGERIDAS = {
 /** Visto puesto a un asiento: el banco ya lo reflejó (se acreditó el depósito, se cobró el pago…). */
 export interface MarcaVisto {
   asientoId:  string;
+  /** 'visto' (por defecto): el banco ya lo reflejó. 'excluida': el asiento no forma parte de esta conciliación. */
+  tipo?:      'visto' | 'excluida';
   /** Fecha desde la que el banco lo refleja; cuenta para los cortes de esa fecha en adelante. */
   fechaBanco: Date;
 }
 
-export type EstadoLibro = 'en_banco' | 'visto' | 'transito';
+export type EstadoLibro = 'en_banco' | 'visto' | 'transito' | 'excluida';
 
 export interface FilaLibro {
   asiento: AsientoContable;
@@ -388,8 +397,13 @@ export function librosDelMes(p: {
     const monto = netoEnCuenta(a, p.cuentaCodigo);
     if (monto === 0) continue;
 
-    const mov = movPor.get(a.id);
     const marca = marcaPor.get(a.id);
+    if (marca?.tipo === 'excluida') {
+      filas.push({ asiento: a, monto, estado: 'excluida', editable: true,
+        dias: Math.max(0, Math.round((corte.getTime() - aFecha(a.fecha).getTime()) / MS_DIA)) });
+      continue;
+    }
+    const mov = movPor.get(a.id);
     const fechaMov = mov ? aFecha(mov.fecha) : undefined;
     const fechaMarca = marca ? aFecha(marca.fechaBanco) : undefined;
 
@@ -413,8 +427,37 @@ export function librosDelMes(p: {
 // ── Saldo del banco al corte ────────────────────────────────────────────────
 
 /**
- * Saldo del banco al corte: el que declara el estado de cuenta; si ese mes no se guardó, se calcula con
- * los movimientos (y el saldo inicial de la cuenta, salvo que ya esté registrado como movimiento).
+ * Apertura y cierre del banco leídos de los saldos que trae cada movimiento del estado de cuenta.
+ * Cada renglón dice «después de este movimiento el saldo es X»; encadenados, el único saldo que nunca
+ * es el anterior de otro movimiento es el cierre, y el único saldo anterior que nunca es el de otro es la
+ * apertura. Solo se devuelve si la cadena es completa y sin saltos (si falta algún movimiento, null).
+ * Se ignoran los movimientos registrados a mano (no traen saldo del banco).
+ */
+export function cadenaDeSaldos(movimientos: MovimientoBancario[]): { apertura: number; cierre: number } | null {
+  const filas = movimientos.filter(m => m.estado !== 'anulado' && m.saldo != null && !m.tipoDocumento);
+  if (filas.length === 0) return null;
+  const c = (n: number) => Math.round(n * 100);
+  const balance = new Map<number, number>(); // saldo → veces que es saldo final − veces que es saldo previo
+  for (const m of filas) {
+    const final = c(m.saldo as number);
+    const previo = final - (m.tipo === 'credito' ? c(m.monto) : -c(m.monto));
+    balance.set(final, (balance.get(final) ?? 0) + 1);
+    balance.set(previo, (balance.get(previo) ?? 0) - 1);
+  }
+  const abiertos = [...balance].filter(([, v]) => v !== 0);
+  const cierres = abiertos.filter(([, v]) => v === 1);
+  const aperturas = abiertos.filter(([, v]) => v === -1);
+  if (abiertos.length !== 2 || cierres.length !== 1 || aperturas.length !== 1) return null;
+  return { apertura: aperturas[0][0] / 100, cierre: cierres[0][0] / 100 };
+}
+
+export type OrigenSaldo = 'estado_de_cuenta' | 'saldos_del_banco' | 'calculado';
+
+/**
+ * Saldo del banco al corte, de la fuente más confiable disponible:
+ *  1. el estado de cuenta del mes guardado;
+ *  2. el saldo que traen los movimientos del propio estado de cuenta (cadena de saldos);
+ *  3. calculado con los movimientos y el saldo inicial de la cuenta (el menos confiable).
  */
 export function saldoBancoAlCorte(p: {
   extracto?:           { saldoActual: number } | null;
@@ -422,11 +465,17 @@ export function saldoBancoAlCorte(p: {
   corte:               Date;
   saldoInicialCuenta:  number;
   aperturaRegistrada:  boolean;
-}): { valor: number; desdeEstadoCuenta: boolean } {
-  if (p.extracto) return { valor: p.extracto.saldoActual, desdeEstadoCuenta: true };
+}): { valor: number; desdeEstadoCuenta: boolean; origen: OrigenSaldo } {
+  if (p.extracto) return { valor: p.extracto.saldoActual, desdeEstadoCuenta: true, origen: 'estado_de_cuenta' };
+
+  const hastaCorte = p.movimientos.filter(m => m.estado !== 'anulado' && aFecha(m.fecha) <= p.corte);
+  // La cadena se arma con los movimientos del mes del corte: los saldos del banco pueden tener saltos
+  // entre un corte y el siguiente, pero dentro de un mes son continuos.
+  const inicioMes = new Date(p.corte.getFullYear(), p.corte.getMonth(), 1);
+  const cadena = cadenaDeSaldos(hastaCorte.filter(m => aFecha(m.fecha) >= inicioMes));
+  if (cadena) return { valor: cadena.cierre, desdeEstadoCuenta: false, origen: 'saldos_del_banco' };
+
   const base = p.aperturaRegistrada ? 0 : p.saldoInicialCuenta;
-  const neto = p.movimientos
-    .filter(m => m.estado !== 'anulado' && aFecha(m.fecha) <= p.corte)
-    .reduce((s, m) => s + (m.tipo === 'credito' ? m.monto : -m.monto), base);
-  return { valor: redondear(neto), desdeEstadoCuenta: false };
+  const neto = hastaCorte.reduce((s, m) => s + (m.tipo === 'credito' ? m.monto : -m.monto), base);
+  return { valor: redondear(neto), desdeEstadoCuenta: false, origen: 'calculado' };
 }

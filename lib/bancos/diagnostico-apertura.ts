@@ -3,9 +3,16 @@
  * conciliación (apertura duplicada, o con un monto distinto al saldo con que el banco abrió).
  */
 
+import type { MovimientoBancario } from '@/types';
+import { aFecha, cadenaDeSaldos, periodoDe } from '@/lib/bancos/conciliacion';
+
 export interface AvisoApertura { nivel: 'error' | 'info'; texto: string }
 
-export interface AsientoApertura { numero: string; montoBanco: number; visto: boolean }
+export interface AsientoApertura {
+  numero: string; montoBanco: number; visto: boolean;
+  /** Se sacó de la conciliación a propósito: ya no es motivo de aviso. */
+  excluida?: boolean;
+}
 
 const d2 = (n: number) => `$${Math.abs(n).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
@@ -16,11 +23,15 @@ const d2 = (n: number) => `$${Math.abs(n).toLocaleString('en-US', { minimumFract
  */
 export function aperturaDelBanco(
   extractos: { periodo: string; saldoAnterior: number }[],
-  primerPeriodo: string | undefined
+  primerPeriodo: string | undefined,
+  /** Movimientos de la cuenta: si falta el estado de cuenta guardado, la apertura se lee de sus saldos. */
+  movimientos: MovimientoBancario[] = []
 ): number | null {
   if (!primerPeriodo) return null;
   const e = extractos.find(x => x.periodo === primerPeriodo);
-  return e ? e.saldoAnterior : null;
+  if (e) return e.saldoAnterior;
+  const cadena = cadenaDeSaldos(movimientos.filter(m => m.estado !== 'anulado' && periodoDe(aFecha(m.fecha)) === primerPeriodo));
+  return cadena ? cadena.apertura : null;
 }
 
 export function diagnosticarApertura(p: {
@@ -32,7 +43,9 @@ export function diagnosticarApertura(p: {
   asientosApertura: AsientoApertura[];
 }): AvisoApertura[] {
   const avisos: AvisoApertura[] = [];
-  const { aperturaBanco, registrado, asientosApertura } = p;
+  const { aperturaBanco, registrado } = p;
+  // Un asiento excluido de la conciliación ya no cuenta: el saldo inicial del banco manda
+  const asientosApertura = p.asientosApertura.filter(a => !a.excluida);
 
   if (asientosApertura.length > 0 && registrado !== undefined) {
     avisos.push({

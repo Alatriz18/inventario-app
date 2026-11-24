@@ -142,6 +142,8 @@ export function generarPdfMes(cab: CabeceraReporte, det: DetalleMes): Uint8Array
   const delBanco = (l: typeof conc.creditosNoRegistrados) => l.map(m => [fecha(m.fecha), m.descripcion, m.referencia ?? '', dinero(m.monto)]);
   tabla('Creditos del banco sin contabilizar', ['Fecha', 'Descripcion', 'N. documento', 'Monto'], [22, 98, 34, 26], [3], delBanco(conc.creditosNoRegistrados));
   tabla('Debitos del banco sin contabilizar', ['Fecha', 'Descripcion', 'N. documento', 'Monto'], [22, 98, 34, 26], [3], delBanco(conc.debitosNoRegistrados));
+  tabla('Asientos excluidos de la conciliacion (no cuentan en ningun saldo)', ['Fecha', 'N. asiento', 'Concepto', 'Monto'], [22, 28, 100, 30], [3],
+    conc.excluidos.map(x => [fecha(x.asiento.fecha), x.asiento.numero ?? '', x.asiento.concepto, dinero(x.monto)]));
   tabla('Movimientos conciliados con monto distinto al del asiento', ['Fecha', 'Descripcion', 'Banco', 'Libros'], [22, 98, 30, 30], [2, 3],
     conc.descuadres.map(d => [fecha(d.movimiento.fecha), `${d.movimiento.descripcion} (asiento ${d.asiento.numero ?? ''})`, dinero(d.montoBanco), dinero(d.montoLibros)]));
 
@@ -255,6 +257,8 @@ export function descargarExcel(cab: CabeceraReporte, filas: FilaResumen[], det: 
       ...conc.creditosNoRegistrados.map(m => [fecha(m.fecha), m.descripcion, m.referencia ?? '', m.monto]),
       [], ['DEBITOS DEL BANCO SIN CONTABILIZAR'], ['Fecha', 'Descripcion', 'N. documento', 'Monto'],
       ...conc.debitosNoRegistrados.map(m => [fecha(m.fecha), m.descripcion, m.referencia ?? '', m.monto]),
+      [], ['ASIENTOS EXCLUIDOS DE LA CONCILIACION'], ['Fecha', 'N. asiento', 'Concepto', 'Monto'],
+      ...conc.excluidos.map(x => [fecha(x.asiento.fecha), x.asiento.numero ?? '', x.asiento.concepto, x.monto]),
     ];
     XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(d), `Detalle ${fila.periodo}`);
   }

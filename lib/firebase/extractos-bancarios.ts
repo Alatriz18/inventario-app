@@ -89,13 +89,15 @@ export function subscribeToMarcas(
 
 /** Pone el visto a varios asientos a la vez (firestore admite 500 escrituras por lote). */
 export async function marcarAsientos(
-  cuentaBancariaId: string, asientoIds: string[], fechaBanco: Date, usuarioNombre: string
+  cuentaBancariaId: string, asientoIds: string[], fechaBanco: Date, usuarioNombre: string,
+  /** 'visto': el banco ya lo reflejó. 'excluida': el asiento se saca de la conciliación (no cambia la contabilidad). */
+  tipo: 'visto' | 'excluida' = 'visto'
 ): Promise<void> {
   for (let i = 0; i < asientoIds.length; i += 400) {
     const batch = writeBatch(db);
     asientoIds.slice(i, i + 400).forEach(asientoId => {
       batch.set(doc(db, COL_MARCAS, idMarca(cuentaBancariaId, asientoId)), {
-        cuentaBancariaId, asientoId, fechaBanco, usuarioNombre, createdAt: serverTimestamp(),
+        cuentaBancariaId, asientoId, tipo, fechaBanco, usuarioNombre, createdAt: serverTimestamp(),
       });
     });
     await batch.commit();

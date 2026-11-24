@@ -77,7 +77,7 @@ export default function ReporteConciliacionesPage() {
 
   const datos: DatosConciliacion | null = useMemo(() => {
     if (!cuenta?.cuentaContableCodigo) return null;
-    const marcasVisto: MarcaVisto[] = marcas.map(k => ({ asientoId: k.asientoId, fechaBanco: aFecha(k.fechaBanco) }));
+    const marcasVisto: MarcaVisto[] = marcas.map(k => ({ asientoId: k.asientoId, tipo: k.tipo ?? 'visto' as const, fechaBanco: aFecha(k.fechaBanco) }));
     return {
       cuentaCodigo: cuenta.cuentaContableCodigo, saldoInicialCuenta: cuenta.saldoInicial,
       movimientos: movs, asientos, marcas: marcasVisto, extractos, cierres,
@@ -320,6 +320,21 @@ export default function ReporteConciliacionesPage() {
                     </ul>
                   </details>
                 ))}
+                {det.conc.excluidos.length > 0 && (
+                  <details className="px-5 py-2.5">
+                    <summary className="cursor-pointer font-medium text-slate-600">
+                      Asientos excluidos de la conciliación ({det.conc.excluidos.length}): no cuentan en ningún saldo
+                    </summary>
+                    <ul className="mt-2 space-y-1 text-xs text-slate-600">
+                      {det.conc.excluidos.map(x => (
+                        <li key={x.asiento.id} className="flex justify-between gap-3">
+                          <span className="truncate">{fmt(x.asiento.fecha)} · {x.asiento.numero} · {x.asiento.concepto}</span>
+                          <span className="shrink-0 tabular-nums">{currency(x.monto)}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  </details>
+                )}
                 {det.conc.descuadres.length > 0 && (
                   <details className="px-5 py-2.5" open>
                     <summary className="cursor-pointer font-medium text-red-600">

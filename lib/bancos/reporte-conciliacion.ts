@@ -17,8 +17,9 @@ export interface FilaResumen {
   estado:     EstadoMes;
   corte:      Date;
   saldoBanco: number;
-  /** El saldo del banco viene del estado de cuenta guardado (true) o se calculó con los movimientos (false). */
+  /** El saldo del banco es real (estado de cuenta guardado o saldos del propio banco) y no solo calculado. */
   conEstadoCuenta: boolean;
+  origenSaldo: 'estado_de_cuenta' | 'saldos_del_banco' | 'calculado';
   depositosTransito: number;
   nDepositosTransito: number;
   pagosPendientes:   number;
@@ -90,9 +91,9 @@ export function detalleMes(periodo: string, d: DatosConciliacion): DetalleMes {
   const fila: FilaResumen = {
     periodo, corte,
     estado: cierre ? 'cerrada'
-      : !saldo.desdeEstadoCuenta ? 'sin_estado'
+      : saldo.origen === 'calculado' ? 'sin_estado'
       : Math.abs(diferencia) < 0.005 ? 'cuadra' : 'diferencia',
-    saldoBanco: saldo.valor, conEstadoCuenta: saldo.desdeEstadoCuenta,
+    saldoBanco: saldo.valor, conEstadoCuenta: saldo.origen !== 'calculado', origenSaldo: saldo.origen,
     depositosTransito: conc.totalTransito, nDepositosTransito: conc.depositosTransito.length,
     pagosPendientes: conc.totalPendientes, nPagosPendientes: conc.pagosPendientes.length,
     saldoBancoConciliado: conc.saldoBancoConciliado(saldo.valor),

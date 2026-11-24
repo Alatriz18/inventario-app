@@ -787,6 +787,8 @@ export interface MarcaConciliacion {
   id:               string;   // `${cuentaBancariaId}_${asientoId}`
   cuentaBancariaId: string;
   asientoId:        string;
+  /** 'visto' (por defecto): el banco ya lo reflejó. 'excluida': el asiento no forma parte de la conciliación del banco. */
+  tipo?:            'visto' | 'excluida';
   fechaBanco:       Date;     // desde cuándo lo refleja el banco
   usuarioNombre:    string;
   createdAt:        Date;

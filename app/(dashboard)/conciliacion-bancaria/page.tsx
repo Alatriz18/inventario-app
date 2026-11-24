@@ -155,10 +155,10 @@ export default function ConciliacionBancariaPage() {
   const aperturaRegistrada = useMemo(
     () => movs.some(m => m.tipoDocumento === 'saldo_inicial' && m.estado !== 'anulado'), [movs]);
   const apertura = useMemo(() => {
-    const delBanco = aperturaDelBanco(extractos, periodos[0]);
+    const delBanco = aperturaDelBanco(extractos, periodos[0], movs);
     if (delBanco !== null) return { monto: delBanco, desdeBanco: true };
     return { monto: cuentaObj?.saldoInicial ?? 0, desdeBanco: false };
-  }, [extractos, cuentaObj, periodos]);
+  }, [extractos, cuentaObj, periodos, movs]);
   const primerPeriodo = periodos[0];
 
   // ¿Los libros ya tienen un asiento de apertura con el banco? ¿Se registró además un saldo inicial a mano?
@@ -167,9 +167,11 @@ export default function ConciliacionBancariaPage() {
     return asientos
       .filter(a => a.estado !== 'borrador' && (a.tipo === 'apertura' || /apertura/i.test(a.concepto)) && netoEnCuenta(a, cuentaCodigo) !== 0)
       .map(a => ({
+        id: a.id,
         numero: a.numero ?? a.id,
         montoBanco: netoEnCuenta(a, cuentaCodigo),
-        visto: marcas.some(k => k.asientoId === a.id) || movs.some(m => m.asientoId === a.id && m.estado === 'conciliado'),
+        excluida: marcas.some(k => k.asientoId === a.id && k.tipo === 'excluida'),
+        visto: marcas.some(k => k.asientoId === a.id && k.tipo !== 'excluida') || movs.some(m => m.asientoId === a.id && m.estado === 'conciliado'),
       }));
   }, [asientos, cuentaCodigo, marcas, movs]);
   const registradoApertura = useMemo(
@@ -188,15 +190,15 @@ export default function ConciliacionBancariaPage() {
     });
     return {
       valor: s.valor,
-      origen: s.desdeEstadoCuenta
-        ? 'estado de cuenta' as const
-        : 'calculado con los movimientos (sin estado de cuenta de este mes)' as const,
+      origen: s.origen === 'estado_de_cuenta' ? 'estado de cuenta' as const
+        : s.origen === 'saldos_del_banco' ? 'saldos del banco' as const
+        : 'calculado' as const,
     };
   }, [cuentaObj, periodo, extracto, movs, corte, aperturaRegistrada]);
 
   // Vistos puestos a los asientos del banco (el banco ya los reflejó)
   const marcasVisto: MarcaVisto[] = useMemo(
-    () => marcas.map(k => ({ asientoId: k.asientoId, fechaBanco: aFecha(k.fechaBanco) })), [marcas]);
+    () => marcas.map(k => ({ asientoId: k.asientoId, tipo: k.tipo ?? 'visto', fechaBanco: aFecha(k.fechaBanco) })), [marcas]);
 
   const conc = useMemo(() => {
     if (!cuentaCodigo || !periodo) return null;
@@ -254,7 +256,7 @@ export default function ConciliacionBancariaPage() {
   const opcionesCuentas = useOpcionesCuentasMovimiento();
 
   // No se cierra un mes sin el saldo real del estado de cuenta: calculado con los movimientos siempre «cuadra»
-  const puedeCerrar = !!conc && !cierre && !!extracto && lotesAplicados.length === 0 && Math.abs(diferencia) < 0.005
+  const puedeCerrar = !!conc && !cierre && saldoBanco.origen !== 'calculado' && lotesAplicados.length === 0 && Math.abs(diferencia) < 0.005
     && movsAgrupados.pendientes.length === 0 && conc.descuadres.length === 0
     && conc.creditosNoRegistrados.length + conc.debitosNoRegistrados.length === 0;
   const bloqueado = !!cierre;
@@ -397,9 +399,11 @@ export default function ConciliacionBancariaPage() {
   }, [libros, busquedaLibros]);
 
   const resumenLibros = useMemo(() => {
-    const enTransito = libros.filter(f => f.estado === 'transito');
+    const considerados = libros.filter(f => f.estado !== 'excluida');
+    const enTransito = considerados.filter(f => f.estado === 'transito');
     return {
-      total: libros.length, vistos: libros.length - enTransito.length,
+      total: considerados.length, vistos: considerados.length - enTransito.length,
+      excluidos: libros.length - considerados.length,
       depositos: enTransito.filter(f => f.monto > 0).length, pagos: enTransito.filter(f => f.monto < 0).length,
     };
   }, [libros]);
@@ -414,6 +418,17 @@ export default function ConciliacionBancariaPage() {
       else await desmarcarAsientos(cuentaObj.id, ids);
     } catch (e: unknown) {
       toast.error(e instanceof Error ? e.message : 'No se pudo guardar el visto (¿publicaste las reglas de Firestore?)');
+    }
+  };
+
+  /** Saca (o devuelve) asientos de esta conciliación: no cambia la contabilidad, solo deja de contar para el banco. */
+  const excluirAsientos = async (ids: string[], excluir: boolean) => {
+    if (!user || !cuentaObj || ids.length === 0) return;
+    try {
+      if (excluir) await marcarAsientos(cuentaObj.id, ids, corte, user.nombre, 'excluida');
+      else await desmarcarAsientos(cuentaObj.id, ids);
+    } catch (e: unknown) {
+      toast.error(e instanceof Error ? e.message : 'No se pudo guardar (¿publicaste las reglas de Firestore?)');
     }
   };
 
@@ -580,10 +595,16 @@ export default function ConciliacionBancariaPage() {
             </div>
           )}
 
-          {!extracto && (
+          {saldoBanco.origen === 'saldos del banco' && !extracto && (
+            <div className="bg-sky-50 border border-sky-200 rounded-xl p-3 text-xs text-sky-800">
+              El saldo del banco de {nombreMes(periodo)} se tomó de los saldos que trae cada movimiento del estado de cuenta, que es el del propio banco.
+              Para dejarlo registrado, importa el PDF otra vez en Movimientos Bancarios (el botón pasa a «Guardar los saldos de cada mes»).
+            </div>
+          )}
+          {saldoBanco.origen === 'calculado' && (
             <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 text-xs text-amber-800">
-              No hay guardado el saldo del estado de cuenta de {nombreMes(periodo)}, así que el saldo del banco se calculó con los movimientos y puede
-              no coincidir con el real. Importa el PDF en{' '}
+              No hay forma de conocer el saldo real del banco de {nombreMes(periodo)}: no está guardado el estado de cuenta y los movimientos no traen sus saldos,
+              así que se calculó con los movimientos y puede no coincidir con el real. Importa el PDF en{' '}
               <Link href="/movimientos-bancarios" className="underline font-medium">Movimientos Bancarios → Importar PDF del banco</Link>:
               si los movimientos ya están cargados, el botón pasa a «Guardar los saldos de cada mes» y solo guarda los saldos.
             </div>
@@ -604,7 +625,7 @@ export default function ConciliacionBancariaPage() {
                 <span className="inline-flex items-center gap-1.5 text-xs font-medium px-2.5 py-1 rounded-full bg-green-100 text-green-700">
                   <Lock className="h-3 w-3" /> Cerrada por {cierre.usuarioNombre}
                 </span>
-              ) : !extracto ? (
+              ) : saldoBanco.origen === 'calculado' ? (
                 <span className="text-xs font-medium px-2.5 py-1 rounded-full bg-amber-100 text-amber-700"
                   title="El saldo del banco está calculado con los movimientos, no es el del estado de cuenta">
                   Sin estado de cuenta
@@ -621,9 +642,9 @@ export default function ConciliacionBancariaPage() {
               <div className="p-5">
                 <p className="text-xs font-semibold uppercase tracking-wide text-slate-400 mb-1">Según el banco</p>
                 <Fila etiqueta="Saldo según estado de cuenta" valor={saldoBanco.valor}
-                  detalle={saldoBanco.origen === 'estado de cuenta'
-                    ? 'Tomado del estado de cuenta del banco'
-                    : <span className="text-amber-600">{saldoBanco.origen}</span>} />
+                  detalle={saldoBanco.origen === 'estado de cuenta' ? 'Tomado del estado de cuenta del banco'
+                    : saldoBanco.origen === 'saldos del banco' ? 'Saldo que trae el último movimiento del estado de cuenta'
+                    : <span className="text-amber-600">calculado con los movimientos (sin estado de cuenta de este mes)</span>} />
                 <Fila etiqueta={`Depósitos en tránsito (${conc.depositosTransito.length})`} valor={conc.totalTransito} signo="+"
                   detalle="Registrados en libros, el banco aún no los acredita" />
                 <Fila etiqueta={`Pagos y cheques no cobrados (${conc.pagosPendientes.length})`} valor={conc.totalPendientes} signo="−"
@@ -663,6 +684,13 @@ export default function ConciliacionBancariaPage() {
                         a.nivel === 'error' ? 'border-red-300 bg-white text-red-800' : 'border-sky-200 bg-white text-sky-800'}`}>
                         {a.texto}
                       </p>
+                    ))}
+                    {!bloqueado && asientosApertura.filter(a => !a.excluida).map(a => (
+                      <Button key={a.id} size="sm" variant="outline" className="h-8 text-xs"
+                        title="No cambia la contabilidad: solo saca ese asiento de la conciliación del banco"
+                        onClick={() => excluirAsientos([a.id], true)}>
+                        Excluir el asiento de apertura {a.numero} de la conciliación
+                      </Button>
                     ))}
                     {!bloqueado && registradoApertura !== undefined && apertura.desdeBanco
                       && Math.abs(registradoApertura - apertura.monto) >= 0.005 && (
@@ -868,12 +896,13 @@ export default function ConciliacionBancariaPage() {
                         <TableHead className="text-right">Depósitos / ingresos</TableHead>
                         <TableHead className="text-right">Pagos / egresos</TableHead>
                         <TableHead>Estado en el banco</TableHead>
+                        <TableHead className="w-28" />
                       </TableRow>
                     </TableHeader>
                     <TableBody>
                       {librosVisibles.length === 0 ? (
                         <TableRow>
-                          <TableCell colSpan={7} className="text-center py-10 text-slate-400">
+                          <TableCell colSpan={8} className="text-center py-10 text-slate-400">
                             {busquedaLibros ? 'Ningún asiento coincide con la búsqueda.' : 'Tus libros no tienen movimientos en la cuenta del banco para este mes.'}
                           </TableCell>
                         </TableRow>
@@ -905,6 +934,18 @@ export default function ConciliacionBancariaPage() {
                                 <span className="text-amber-700">
                                   En tránsito{f.dias > 30 ? ` · ${f.dias} días` : ''}
                                 </span>
+                              )}
+                              {f.estado === 'excluida' && <span className="text-slate-500">Excluido de la conciliación</span>}
+                            </TableCell>
+                            <TableCell className="text-right">
+                              {!bloqueado && f.estado === 'transito' && (
+                                <Button size="sm" variant="ghost" className="h-7 text-xs text-slate-500"
+                                  title="Sacar este asiento de la conciliación (no cambia la contabilidad)"
+                                  onClick={() => excluirAsientos([f.asiento.id], true)}>Excluir</Button>
+                              )}
+                              {!bloqueado && f.estado === 'excluida' && (
+                                <Button size="sm" variant="ghost" className="h-7 text-xs text-slate-500"
+                                  onClick={() => excluirAsientos([f.asiento.id], false)}>Volver a incluir</Button>
                               )}
                             </TableCell>
                           </TableRow>

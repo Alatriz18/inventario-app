@@ -37,12 +37,13 @@ import { crearAsientoMovimientoBancario } from '@/lib/contabilidad/motor-asiento
 import { asegurarCuenta } from '@/lib/contabilidad/reclasificar-compras';
 import { CUENTAS_POR_DEFECTO } from '@/lib/data/plan-cuentas-ecuador';
 import {
-  aFecha, periodoDe, finDePeriodo, calcularConciliacion, proponerEmparejamientos, librosDelMes,
+  aFecha, periodoDe, finDePeriodo, inicioDePeriodo, calcularConciliacion, proponerEmparejamientos, librosDelMes,
   saldoBancoAlCorte, type MarcaVisto, type FilaLibro,
   agruparPendientes, netoEnCuenta, cruceConCaja, CUENTAS_SUGERIDAS, type Emparejamiento, type GrupoMovimientos,
 } from '@/lib/bancos/conciliacion';
 import { useOpcionesCuentasMovimiento } from '@/hooks/useOpcionesCuentasMovimiento';
 import { diagnosticarApertura, aperturaDelBanco } from '@/lib/bancos/diagnostico-apertura';
+import { saltoEntreMeses } from '@/lib/bancos/salto-meses';
 import { useAuth } from '@/context/AuthContext';
 
 const currency = (v: number) => `$${v.toFixed(2)}`;
@@ -89,6 +90,10 @@ export default function ConciliacionBancariaPage() {
   const [cerrando, setCerrando] = useState(false);
 
   // Registrar el saldo con el que el banco abrió (el que los libros no tienen)
+  // Ajuste por el salto entre el cierre del mes anterior y la apertura de este mes en los saldos del banco
+  const [dlgAjuste, setDlgAjuste] = useState(false);
+  const [ajusteContra, setAjusteContra] = useState('');
+  const [guardandoAjuste, setGuardandoAjuste] = useState(false);
   const [dlgApertura, setDlgApertura] = useState(false);
   const [aperturaMonto, setAperturaMonto] = useState('');
   const [aperturaFecha, setAperturaFecha] = useState('');
@@ -458,6 +463,44 @@ export default function ConciliacionBancariaPage() {
     }
   };
 
+  const salto = useMemo(() => (periodo ? saltoEntreMeses({ periodo, extractos, movimientos: movs }) : null), [periodo, extractos, movs]);
+
+  const abrirAjuste = () => {
+    if (!salto) return;
+    // Sugerencia: un crédito del banco se registra como interés ganado; un débito, como gasto por servicios bancarios
+    setAjusteContra(salto.monto > 0 ? CUENTAS_SUGERIDAS.interesesGanados : CUENTAS_SUGERIDAS.gastoComisiones);
+    setDlgAjuste(true);
+  };
+
+  const registrarAjuste = async () => {
+    if (!user || !cuentaObj || !cuentaCodigo || !salto || !ajusteContra) return;
+    const monto = Math.round(Math.abs(salto.monto) * 100) / 100;
+    const entra = salto.monto > 0;
+    const fecha = new Date(inicioDePeriodo(periodo).getTime() + 12 * 60 * 60 * 1000);
+    const detalle = `Ajuste: el banco cerró ${nombreMes(salto.previo)} y abrió ${nombreMes(periodo)} con ${currency(monto)} de diferencia`;
+    setGuardandoAjuste(true);
+    try {
+      await asegurarCuenta(ajusteContra);
+      const movId = await registrarMovimientoBancario({
+        cuentaBancariaId: cuentaObj.id, fecha, descripcion: detalle, tipo: entra ? 'credito' : 'debito', monto,
+        tipoDocumento: entra ? 'nota_credito' : 'nota_debito', estado: 'no_conciliado',
+      });
+      const asientoId = await crearAsientoMovimientoBancario({
+        movId, fecha, concepto: detalle, monto, cuentaBancoCodigo: cuentaCodigo, cuentaContrapartidaCodigo: ajusteContra,
+        tipo: entra ? 'abono' : 'cargo', usuarioId: user.uid, usuarioNombre: user.nombre,
+      });
+      if (asientoId) {
+        await conciliarMovimiento(movId, asientoId);
+        toast.success(`Ajuste de ${currency(monto)} registrado y contabilizado`);
+      } else {
+        toast.warning('El ajuste se registró, pero el asiento NO se pudo generar (¿período contable cerrado?). Queda pendiente: contabilízalo desde esta pantalla.', { duration: 12000 });
+      }
+      setDlgAjuste(false);
+    } catch (e: unknown) {
+      toast.error(e instanceof Error ? e.message : 'No se pudo registrar el ajuste');
+    } finally { setGuardandoAjuste(false); }
+  };
+
   const abrirApertura = () => {
     setAperturaMonto(apertura.monto > 0 ? apertura.monto.toFixed(2) : '');
     setAperturaFecha(primerPeriodo ? `${primerPeriodo}-01` : format(new Date(), 'yyyy-MM-dd'));
@@ -676,6 +719,19 @@ export default function ConciliacionBancariaPage() {
                     Si es la primera conciliación, suele ser el saldo inicial: el saldo de libros al empezar no coincide con el del banco
                     (revisa el asiento de apertura). Si es un mes posterior, revisa los movimientos conciliados con monto distinto.
                   </p>
+                )}
+                {!bloqueado && salto && Math.abs(diferencia - salto.monto) < 0.01 && (
+                  <div className="mt-2 max-w-2xl rounded-lg border border-amber-300 bg-white p-2.5 text-xs text-amber-900">
+                    <p>
+                      El banco cerró {nombreMes(salto.previo)} y abrió {nombreMes(periodo)} con <strong>{currency(Math.abs(salto.monto))}</strong>{' '}
+                      {salto.monto > 0 ? 'más' : 'menos'} que el cierre. Esos {currency(Math.abs(salto.monto))} no están en ningún movimiento del estado de cuenta
+                      (suele ser un interés o un cargo que el banco aplicó después del corte): por eso los libros no igualan al banco.
+                      Se corrige registrándolos una sola vez; los meses siguientes ya cuadran.
+                    </p>
+                    <Button size="sm" className="mt-2 h-8 text-xs" onClick={abrirAjuste}>
+                      Registrar el ajuste de {currency(Math.abs(salto.monto))}
+                    </Button>
+                  </div>
                 )}
                 {avisosApertura.length > 0 && (
                   <div className="mt-2 max-w-2xl space-y-1.5">
@@ -1191,6 +1247,34 @@ export default function ConciliacionBancariaPage() {
             <Button variant="outline" disabled={aplicandoAuto} onClick={() => setDlgAuto(false)}>Cancelar</Button>
             <Button disabled={aplicandoAuto || elegidas.size === 0} onClick={aplicarAuto}>
               {aplicandoAuto ? 'Conciliando…' : `Conciliar ${elegidas.size}`}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* ── Ajuste por salto entre meses ────────────────────────────────── */}
+      <Dialog open={dlgAjuste} onOpenChange={o => !guardandoAjuste && setDlgAjuste(o)}>
+        <DialogContent className="sm:max-w-xl">
+          <DialogHeader><DialogTitle>Registrar ajuste entre meses</DialogTitle></DialogHeader>
+          {salto && (
+            <div className="space-y-3">
+              <p className="text-xs text-slate-500">
+                Se registra como {salto.monto > 0 ? 'una nota de crédito' : 'una nota de débito'} de <strong>{currency(Math.abs(salto.monto))}</strong> el primer
+                día de {nombreMes(periodo)}, y su asiento: {salto.monto > 0 ? 'Debe Banco / Haber la cuenta que elijas' : 'Debe la cuenta que elijas / Haber Banco'}.
+              </p>
+              <div className="space-y-1.5">
+                <Label>Cuenta contable de contrapartida *</Label>
+                <CuentaCombobox value={ajusteContra} onChange={setAjusteContra} opciones={opcionesCuentas} placeholder="Elegir cuenta…" />
+                <p className="text-[11px] text-slate-400">
+                  Por defecto: {salto.monto > 0 ? 'intereses ganados (un crédito del banco)' : 'gasto por servicios bancarios (un débito del banco)'}. Cámbiala si la contadora sabe de qué es.
+                </p>
+              </div>
+            </div>
+          )}
+          <DialogFooter>
+            <Button variant="outline" disabled={guardandoAjuste} onClick={() => setDlgAjuste(false)}>Cancelar</Button>
+            <Button disabled={guardandoAjuste || !ajusteContra} onClick={registrarAjuste}>
+              {guardandoAjuste ? 'Registrando…' : 'Registrar ajuste'}
             </Button>
           </DialogFooter>
         </DialogContent>

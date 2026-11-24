@@ -26,7 +26,7 @@ import { CuentaBancaria, MovimientoBancario, AsientoContable, ExtractoBancario, 
 import { subscribeToLotesReclasificacion } from '@/lib/firebase/reclasificaciones';
 import {
   subscribeToCuentasBancarias, subscribeToMovimientosBancarios,
-  conciliarMovimiento, ignorarMovimiento, revertirConciliacion,
+  conciliarMovimiento, ignorarMovimiento, revertirConciliacion, registrarMovimientoBancario,
 } from '@/lib/firebase/cuentas-bancarias';
 import { subscribeToAsientos } from '@/lib/firebase/asientos';
 import {
@@ -83,6 +83,13 @@ export default function ConciliacionBancariaPage() {
 
   const [cerrando, setCerrando] = useState(false);
 
+  // Registrar el saldo con el que el banco abrió (el que los libros no tienen)
+  const [dlgApertura, setDlgApertura] = useState(false);
+  const [aperturaMonto, setAperturaMonto] = useState('');
+  const [aperturaFecha, setAperturaFecha] = useState('');
+  const [aperturaContra, setAperturaContra] = useState('');
+  const [guardandoApertura, setGuardandoApertura] = useState(false);
+
   // Movimientos marcados para contabilizar juntos (p. ej. contra Caja General) y búsqueda en la lista
   const [seleccion, setSeleccion] = useState<Set<string>>(new Set());
   const [busqueda, setBusqueda] = useState('');
@@ -138,15 +145,27 @@ export default function ConciliacionBancariaPage() {
   const extracto = extractos.find(e => e.periodo === periodo);
   const corte = useMemo(() => periodo ? finDePeriodo(periodo) : new Date(), [periodo]);
 
+  // Saldo inicial del banco: ¿ya está registrado como movimiento? ¿cuánto era según el primer estado de cuenta?
+  const aperturaRegistrada = useMemo(
+    () => movs.some(m => m.tipoDocumento === 'saldo_inicial' && m.estado !== 'anulado'), [movs]);
+  const apertura = useMemo(() => {
+    const primero = [...extractos].sort((a, b) => a.periodo.localeCompare(b.periodo))[0];
+    if (primero) return { monto: primero.saldoAnterior, desdeBanco: true };
+    return { monto: cuentaObj?.saldoInicial ?? 0, desdeBanco: false };
+  }, [extractos, cuentaObj]);
+  const primerPeriodo = periodos[0];
+
   // Saldo del banco al corte: el que declara el estado de cuenta; si no hay, se calcula con los movimientos
   const saldoBanco = useMemo(() => {
     if (!cuentaObj || !periodo) return { valor: 0, origen: 'sin datos' as const };
     if (extracto) return { valor: extracto.saldoActual, origen: 'estado de cuenta' as const };
+    // Sin el estado de cuenta del mes se calcula; si el saldo inicial ya está como movimiento, no se suma dos veces
+    const base = aperturaRegistrada ? 0 : cuentaObj.saldoInicial;
     const neto = movs
       .filter(m => m.estado !== 'anulado' && aFecha(m.fecha) <= corte)
-      .reduce((s, m) => s + (m.tipo === 'credito' ? m.monto : -m.monto), cuentaObj.saldoInicial);
+      .reduce((s, m) => s + (m.tipo === 'credito' ? m.monto : -m.monto), base);
     return { valor: Math.round(neto * 100) / 100, origen: 'calculado con los movimientos (sin estado de cuenta de este mes)' as const };
-  }, [cuentaObj, periodo, extracto, movs, corte]);
+  }, [cuentaObj, periodo, extracto, movs, corte, aperturaRegistrada]);
 
   const conc = useMemo(() => {
     if (!cuentaCodigo || !periodo) return null;
@@ -331,6 +350,44 @@ export default function ConciliacionBancariaPage() {
     } finally { setCerrando(false); }
   };
 
+  const abrirApertura = () => {
+    setAperturaMonto(apertura.monto > 0 ? apertura.monto.toFixed(2) : '');
+    setAperturaFecha(primerPeriodo ? `${primerPeriodo}-01` : format(new Date(), 'yyyy-MM-dd'));
+    setAperturaContra('');
+    setDlgApertura(true);
+  };
+
+  const registrarApertura = async () => {
+    if (!user || !cuentaObj || !cuentaCodigo) return;
+    const monto = Math.round((parseFloat(aperturaMonto) || 0) * 100) / 100;
+    if (monto <= 0) { toast.error('Ingresa el saldo inicial del banco'); return; }
+    if (!aperturaFecha) { toast.error('Ingresa la fecha'); return; }
+    if (!aperturaContra) { toast.error('Elige la cuenta contable de contrapartida'); return; }
+    setGuardandoApertura(true);
+    try {
+      await asegurarCuenta(aperturaContra);
+      const fecha = new Date(`${aperturaFecha}T12:00:00`);
+      const movId = await registrarMovimientoBancario({
+        cuentaBancariaId: cuentaObj.id, fecha, descripcion: 'Saldo inicial del banco',
+        tipo: 'credito', monto, tipoDocumento: 'saldo_inicial', estado: 'no_conciliado',
+      });
+      const asientoId = await crearAsientoMovimientoBancario({
+        movId, fecha, concepto: 'Saldo inicial del banco', monto,
+        cuentaBancoCodigo: cuentaCodigo, cuentaContrapartidaCodigo: aperturaContra, tipo: 'abono',
+        usuarioId: user.uid, usuarioNombre: user.nombre,
+      });
+      if (asientoId) {
+        await conciliarMovimiento(movId, asientoId);
+        toast.success('Saldo inicial del banco registrado y contabilizado');
+      } else {
+        toast.warning('El saldo inicial se registró, pero el asiento NO se pudo generar (¿período contable cerrado?). Queda pendiente: contabilízalo desde esta pantalla.', { duration: 12000 });
+      }
+      setDlgApertura(false);
+    } catch (e: unknown) {
+      toast.error(e instanceof Error ? e.message : 'No se pudo registrar el saldo inicial');
+    } finally { setGuardandoApertura(false); }
+  };
+
   const reabrirMes = async () => {
     if (!cuentaObj || !periodo) return;
     await accion(() => reabrirConciliacion(cuentaObj.id, periodo));
@@ -430,6 +487,15 @@ export default function ConciliacionBancariaPage() {
             </div>
           )}
 
+          {!extracto && (
+            <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 text-xs text-amber-800">
+              No hay guardado el saldo del estado de cuenta de {nombreMes(periodo)}, así que el saldo del banco se calculó con los movimientos y puede
+              no coincidir con el real. Importa el PDF en{' '}
+              <Link href="/movimientos-bancarios" className="underline font-medium">Movimientos Bancarios → Importar PDF del banco</Link>:
+              si los movimientos ya están cargados, el botón pasa a «Guardar los saldos de cada mes» y solo guarda los saldos.
+            </div>
+          )}
+
           {/* ── Estado de la conciliación del mes ─────────────────────────── */}
           <div className="bg-white rounded-xl border overflow-hidden">
             <div className="px-5 py-3 border-b bg-slate-50 flex flex-wrap items-center justify-between gap-3">
@@ -492,6 +558,21 @@ export default function ConciliacionBancariaPage() {
                     (revisa el asiento de apertura). Si es un mes posterior, revisa los movimientos conciliados con monto distinto.
                   </p>
                 )}
+                {!bloqueado && !aperturaRegistrada && periodo === primerPeriodo && apertura.monto > 0 && (
+                  <div className={`mt-2 max-w-xl rounded-lg border p-2.5 text-xs ${
+                    Math.abs(diferencia - apertura.monto) <= 1 ? 'border-red-300 bg-white text-slate-700' : 'border-slate-200 bg-white text-slate-500'}`}>
+                    <p>
+                      El banco abrió con <strong>{currency(apertura.monto)}</strong>
+                      {apertura.desdeBanco ? ' (según el primer estado de cuenta)' : ' (saldo inicial de la cuenta; importa el PDF para tomar el del banco)'}.
+                      {Math.abs(diferencia - apertura.monto) <= 1
+                        ? ' La diferencia es justamente ese saldo: tus libros no lo tienen.'
+                        : ' Si tus libros ya tienen ese saldo en un asiento de apertura, no lo registres otra vez.'}
+                    </p>
+                    <Button size="sm" className="mt-2 h-8 text-xs" onClick={abrirApertura}>
+                      Registrar saldo inicial del banco
+                    </Button>
+                  </div>
+                )}
               </div>
               <div className="flex flex-wrap gap-2">
                 {!bloqueado && (
@@ -531,7 +612,7 @@ export default function ConciliacionBancariaPage() {
                 )}
                 {([['Depósitos en tránsito', conc.depositosTransito], ['Pagos y cheques no cobrados', conc.pagosPendientes]] as const).map(([titulo, lista]) =>
                   lista.length > 0 && (
-                    <details key={titulo} className="px-5 py-2.5">
+                    <details key={titulo} className="px-5 py-2.5" open={Math.abs(diferencia) >= 0.005}>
                       <summary className="cursor-pointer text-slate-600 font-medium">{titulo} ({lista.length})</summary>
                       <ul className="mt-2 space-y-1 text-xs text-slate-600 max-h-48 overflow-y-auto">
                         {lista.map(p => (
@@ -550,16 +631,19 @@ export default function ConciliacionBancariaPage() {
           </div>
 
           {/* ── Cruce Bancos ↔ Caja ─────────────────────────────────────── */}
-          {cruce && (cruce.depositosBanco > 0 || cruce.trasladosCaja > 0) && (
+          {cruce && (cruce.creditosViaCaja > 0 || cruce.trasladosCaja > 0) && (
             <div className="bg-white rounded-xl border p-4">
               <p className="text-sm font-semibold text-slate-800">Cruce Bancos ↔ Caja del mes</p>
               <p className="text-xs text-slate-400 mb-3">
-                El efectivo y los cheques que el banco recibió como depósito deben ser lo mismo que los libros sacaron de Caja hacia Bancos.
+                Todo lo que los libros sacaron de Caja hacia Bancos debe estar respaldado por un crédito del banco.
               </p>
               <div className="grid sm:grid-cols-3 gap-3 text-sm">
                 <div className="rounded-lg border p-3">
-                  <p className="text-xs text-slate-400">Depósitos según el banco ({cruce.nDepositosBanco})</p>
-                  <p className="font-semibold tabular-nums">{currency(cruce.depositosBanco)}</p>
+                  <p className="text-xs text-slate-400">Créditos del banco que pasaron por Caja ({cruce.nCreditosViaCaja})</p>
+                  <p className="font-semibold tabular-nums">{currency(cruce.creditosViaCaja)}</p>
+                  <p className="text-[11px] text-slate-400">
+                    depósitos y cheques {currency(cruce.efectivo)} · transferencias y otros {currency(cruce.transferencias)}
+                  </p>
                 </div>
                 <div className="rounded-lg border p-3">
                   <p className="text-xs text-slate-400">Salidas de Caja a Bancos en libros</p>
@@ -573,8 +657,8 @@ export default function ConciliacionBancariaPage() {
               {Math.abs(cruce.diferencia) >= 0.005 && (
                 <p className="text-[11px] text-slate-500 mt-2">
                   {cruce.diferencia > 0
-                    ? 'El banco recibió más efectivo del que se registró como salida de Caja: contabiliza los depósitos pendientes con «Contabilizar» eligiendo la cuenta Caja, o revisa que las ventas en efectivo estén en Caja.'
-                    : 'Los libros registran más salidas de Caja a Bancos de las que el banco muestra como depósito: puede haber depósitos aún no acreditados (tránsito) o un registro duplicado.'}
+                    ? 'Los libros registran salidas de Caja a Bancos que ningún movimiento del banco respalda: pueden ser depósitos aún no acreditados (están en «Depósitos en tránsito») o un registro duplicado.'
+                    : 'El banco muestra más créditos contabilizados contra Caja que salidas registradas en libros: revisa si algún asiento fue editado o si falta registrar un depósito.'}
                 </p>
               )}
             </div>
@@ -854,6 +938,45 @@ export default function ConciliacionBancariaPage() {
             <Button variant="outline" disabled={aplicandoAuto} onClick={() => setDlgAuto(false)}>Cancelar</Button>
             <Button disabled={aplicandoAuto || elegidas.size === 0} onClick={aplicarAuto}>
               {aplicandoAuto ? 'Conciliando…' : `Conciliar ${elegidas.size}`}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* ── Saldo inicial del banco ─────────────────────────────────────── */}
+      <Dialog open={dlgApertura} onOpenChange={o => !guardandoApertura && setDlgApertura(o)}>
+        <DialogContent className="sm:max-w-xl">
+          <DialogHeader><DialogTitle>Registrar saldo inicial del banco</DialogTitle></DialogHeader>
+          <div className="space-y-3">
+            <p className="text-xs text-slate-500">
+              Es el saldo con el que el banco abrió el período (el del primer estado de cuenta). Se registra como un movimiento de crédito y su
+              asiento: Debe Banco ({cuentaCodigo}) / Haber la cuenta que elijas. Solo hazlo si tus libros todavía no tienen ese saldo.
+            </p>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <Label>Saldo inicial *</Label>
+                <Input type="number" min="0" step="0.01" value={aperturaMonto}
+                  onChange={e => setAperturaMonto(e.target.value)} className="mt-1" placeholder="0.00" />
+              </div>
+              <div>
+                <Label>Fecha *</Label>
+                <Input type="date" value={aperturaFecha} onChange={e => setAperturaFecha(e.target.value)} className="mt-1" />
+              </div>
+            </div>
+            <div className="space-y-1.5">
+              <Label>Cuenta contable de contrapartida *</Label>
+              <CuentaCombobox value={aperturaContra} onChange={setAperturaContra} opciones={opcionesCuentas}
+                placeholder="¿De dónde sale ese saldo?" />
+              <p className="text-[11px] text-slate-400">
+                Si ese dinero estaba en Caja General (porque el historial del banco se llevó a Caja), elige Caja. Si es el saldo de años anteriores,
+                una cuenta de patrimonio como Resultados acumulados. Confírmalo con la contadora.
+              </p>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" disabled={guardandoApertura} onClick={() => setDlgApertura(false)}>Cancelar</Button>
+            <Button disabled={guardandoApertura} onClick={registrarApertura}>
+              {guardandoApertura ? 'Registrando…' : 'Registrar saldo inicial'}
             </Button>
           </DialogFooter>
         </DialogContent>

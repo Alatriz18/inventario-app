@@ -148,18 +148,24 @@ export function calcularConciliacion(p: {
 // ── Cruce Bancos ↔ Caja ──────────────────────────────────────────────────────
 
 export interface CruceCaja {
-  /** Depósitos en efectivo/cheques que muestra el estado de cuenta en el mes. */
-  depositosBanco: number;
-  nDepositosBanco: number;
-  /** Lo que los libros registraron en el mes como salida de Caja hacia Bancos. */
-  trasladosCaja: number;
-  /** Positivo: el banco recibió más efectivo del que se registró como salida de Caja. */
-  diferencia: number;
+  /** Créditos del banco del mes ya contabilizados contra Caja (los que salieron de Caja hacia Bancos). */
+  creditosViaCaja:  number;
+  nCreditosViaCaja: number;
+  /** De esos, los que son depósitos de efectivo o cheques… */
+  efectivo:         number;
+  nEfectivo:        number;
+  /** …y el resto (transferencias recibidas y otros créditos). */
+  transferencias:   number;
+  /** Lo que los libros registraron en el mes como salida de Caja hacia Bancos (Debe Bancos / Haber Caja). */
+  trasladosCaja:    number;
+  /** Libros − banco: positivo = hay salidas de Caja a Bancos en libros que ningún movimiento del banco respalda. */
+  diferencia:       number;
 }
 
 /**
- * Control del efectivo: lo que el banco recibió como depósito en el mes debe ser lo mismo que
- * los libros sacaron de Caja hacia Bancos (asientos Debe Bancos / Haber Caja).
+ * Control del efectivo: toda salida de Caja hacia Bancos que figura en libros debe estar respaldada
+ * por un crédito del banco. Se compara por movimiento (no por la descripción), de modo que sirve tanto
+ * si solo los depósitos pasan por Caja como si también las transferencias recibidas se llevan a Caja.
  */
 export function cruceConCaja(p: {
   periodo:       string;
@@ -170,22 +176,36 @@ export function cruceConCaja(p: {
 }): CruceCaja {
   const desde = inicioDePeriodo(p.periodo), hasta = finDePeriodo(p.periodo);
   const enMes = (f: unknown) => { const t = aFecha(f); return t >= desde && t <= hasta; };
+  const cajaHaber = (a: AsientoContable) =>
+    a.lineas.filter(l => l.cuentaCodigo === p.cajaCodigo).reduce((s, l) => s + l.haber - l.debe, 0);
+  const porId = new Map(p.asientos.map(a => [a.id, a]));
 
-  const dep = p.movimientos.filter(m =>
-    m.estado !== 'anulado' && m.tipo === 'credito' && enMes(m.fecha)
-    && ES_DEPOSITO_EFECTIVO.test(claveDescripcion(m.descripcion)));
-  const depositosBanco = redondear(dep.reduce((s, m) => s + m.monto, 0));
+  let creditosViaCaja = 0, nCreditosViaCaja = 0, efectivo = 0, nEfectivo = 0;
+  for (const m of p.movimientos) {
+    if (m.estado !== 'conciliado' || m.tipo !== 'credito' || !m.asientoId || !enMes(m.fecha)) continue;
+    const a = porId.get(m.asientoId);
+    if (!a || cajaHaber(a) <= 0) continue;
+    creditosViaCaja += m.monto; nCreditosViaCaja++;
+    if (ES_DEPOSITO_EFECTIVO.test(claveDescripcion(m.descripcion))) { efectivo += m.monto; nEfectivo++; }
+  }
 
   let trasladosCaja = 0;
   for (const a of p.asientos) {
     if (a.estado === 'borrador' || !enMes(a.fecha)) continue;
     if (netoEnCuenta(a, p.cuentaCodigo) <= 0) continue;                // entra dinero al banco
-    const caja = a.lineas.filter(l => l.cuentaCodigo === p.cajaCodigo).reduce((s, l) => s + l.haber - l.debe, 0);
+    const caja = cajaHaber(a);
     if (caja > 0) trasladosCaja += caja;                                // …y sale de Caja
   }
-  trasladosCaja = redondear(trasladosCaja);
 
-  return { depositosBanco, nDepositosBanco: dep.length, trasladosCaja, diferencia: redondear(depositosBanco - trasladosCaja) };
+  creditosViaCaja = redondear(creditosViaCaja);
+  efectivo = redondear(efectivo);
+  trasladosCaja = redondear(trasladosCaja);
+  return {
+    creditosViaCaja, nCreditosViaCaja, efectivo, nEfectivo,
+    transferencias: redondear(creditosViaCaja - efectivo),
+    trasladosCaja,
+    diferencia: redondear(trasladosCaja - creditosViaCaja),
+  };
 }
 
 // ── Emparejamiento automático movimiento del banco ↔ asiento contable ────────

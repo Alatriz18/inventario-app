@@ -71,6 +71,36 @@ describe('calcularConciliacion', () => {
   });
 });
 
+describe('caso enero: saldo inicial que los libros no tenían', () => {
+  const corte = finDePeriodo('2026-01');
+  // El banco abrió con 4369.82 y cerró enero en 779.26 (movimiento neto −3590.56)
+  const movimientos = [
+    mov('mov-enero', '2026-01-15', 'debito', 3590.56, 'conciliado', 'A1'),
+  ];
+  const asientosSinApertura = [
+    asiento('A1', '2026-01-15', 0, 3590.56),   // el neto de enero ya está contabilizado
+    asiento('A10000', '2026-01-20', 10000, 0), // un asiento de 10 000 que el banco no muestra
+  ];
+
+  it('sin el saldo inicial la diferencia es justamente ese saldo', () => {
+    const r = calcularConciliacion({ corte, cuentaCodigo: BANCO, movimientos, asientos: asientosSinApertura });
+    expect(r.saldoLibros).toBe(6409.44);
+    expect(r.diferencia(779.26)).toBe(4369.82);
+  });
+
+  it('registrado el saldo inicial como movimiento conciliado, la diferencia queda en cero y los 10 000 quedan a la vista', () => {
+    const apertura = mov('apertura', '2026-01-01', 'credito', 4369.82, 'conciliado', 'A0');
+    const r = calcularConciliacion({
+      corte, cuentaCodigo: BANCO, movimientos: [apertura, ...movimientos],
+      asientos: [asiento('A0', '2026-01-01', 4369.82, 0), ...asientosSinApertura],
+    });
+    expect(r.diferencia(779.26)).toBe(0);
+    expect(r.totalTransito).toBe(10000);                       // lo que explica que libros (10 779.26) ≠ banco (779.26)
+    expect(r.saldoLibros).toBe(10779.26);
+    expect(r.depositosTransito.map(p => p.asiento.id)).toEqual(['A10000']);
+  });
+});
+
 describe('proponerEmparejamientos', () => {
   const asientos = [asiento('A3', '2026-07-31', 200, 0), asiento('A9', '2026-07-01', 0, 75)];
 
@@ -137,19 +167,39 @@ describe('depósitos y cruce con Caja', () => {
     expect(g.find(x => x.clave === 'DEP CNB')?.sugerencia?.codigo).toBe('1010101');
   });
 
-  it('compara los depósitos del banco con lo que los libros sacaron de Caja', () => {
-    const traslado = {
-      ...asiento('T1', '2026-07-03', 500, 0),
-      lineas: [
-        { cuentaCodigo: BANCO, cuentaNombre: 'Banco', debe: 500, haber: 0, descripcion: '' },
-        { cuentaCodigo: '1010101', cuentaNombre: 'Caja', debe: 0, haber: 500, descripcion: '' },
-      ],
-    } as unknown as AsientoContable;
+  // Asiento Debe Bancos / Haber Caja (el dinero que llega al banco se contabiliza saliendo de Caja)
+  const viaCaja = (id: string, fecha: string, monto: number) => ({
+    ...asiento(id, fecha, monto, 0),
+    lineas: [
+      { cuentaCodigo: BANCO, cuentaNombre: 'Banco', debe: monto, haber: 0, descripcion: '' },
+      { cuentaCodigo: '1010101', cuentaNombre: 'Caja', debe: 0, haber: monto, descripcion: '' },
+    ],
+  } as unknown as AsientoContable);
+
+  it('cuando todo el dinero que llega al banco pasa por Caja (depósitos y transferencias) el cruce cuadra', () => {
+    const asientos = [viaCaja('T1', '2026-07-03', 520), viaCaja('T2', '2026-07-10', 1000)];
     const movimientos = [
-      mov('d1', '2026-07-03', 'credito', 520, 'no_conciliado', undefined, 'DEPOSITO 6386'),
-      mov('d2', '2026-07-10', 'credito', 1000, 'no_conciliado', undefined, 'TRANSFERENCIA INTERNET'), // no es efectivo
+      mov('d1', '2026-07-03', 'credito', 520, 'conciliado', 'T1', 'DEPOSITO 6386'),
+      mov('d2', '2026-07-10', 'credito', 1000, 'conciliado', 'T2', 'TRANSFERENCIA INTERNET'),
     ];
-    const r = cruceConCaja({ periodo: '2026-07', cuentaCodigo: BANCO, cajaCodigo: '1010101', movimientos, asientos: [traslado] });
-    expect(r).toMatchObject({ depositosBanco: 520, nDepositosBanco: 1, trasladosCaja: 500, diferencia: 20 });
+    const r = cruceConCaja({ periodo: '2026-07', cuentaCodigo: BANCO, cajaCodigo: '1010101', movimientos, asientos });
+    expect(r).toMatchObject({
+      creditosViaCaja: 1520, nCreditosViaCaja: 2, efectivo: 520, nEfectivo: 1, transferencias: 1000,
+      trasladosCaja: 1520, diferencia: 0,
+    });
+  });
+
+  it('avisa las salidas de Caja a Bancos en libros que ningún movimiento del banco respalda', () => {
+    const asientos = [viaCaja('T1', '2026-07-03', 520), viaCaja('T9', '2026-07-20', 200)];
+    const movimientos = [mov('d1', '2026-07-03', 'credito', 520, 'conciliado', 'T1', 'DEPOSITO 6386')];
+    const r = cruceConCaja({ periodo: '2026-07', cuentaCodigo: BANCO, cajaCodigo: '1010101', movimientos, asientos });
+    expect(r).toMatchObject({ creditosViaCaja: 520, trasladosCaja: 720, diferencia: 200 });
+  });
+
+  it('un crédito contabilizado contra otra cuenta (intereses) no cuenta como Caja', () => {
+    const interes = asiento('I1', '2026-07-31', 0.06, 0); // Debe Banco / Haber cuenta 999
+    const movimientos = [mov('i1', '2026-07-31', 'credito', 0.06, 'conciliado', 'I1', 'INTERES A SU FAVOR')];
+    const r = cruceConCaja({ periodo: '2026-07', cuentaCodigo: BANCO, cajaCodigo: '1010101', movimientos, asientos: [interes] });
+    expect(r).toMatchObject({ creditosViaCaja: 0, trasladosCaja: 0, diferencia: 0 });
   });
 });

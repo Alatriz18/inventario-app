@@ -28,7 +28,9 @@ import {
   subscribeToCuentasBancarias, subscribeToMovimientosBancarios,
   conciliarMovimiento, ignorarMovimiento, revertirConciliacion, registrarMovimientoBancario, actualizarMontoMovimiento,
 } from '@/lib/firebase/cuentas-bancarias';
-import { subscribeToAsientos, editarAsiento } from '@/lib/firebase/asientos';
+import { editarAsiento } from '@/lib/firebase/asientos';
+import { useAsientosDeCuenta } from '@/hooks/useAsientosDeCuenta';
+import AvisoPrepararAsientos from '@/components/shared/AvisoPrepararAsientos';
 import {
   subscribeToExtractos, subscribeToConciliaciones, cerrarConciliacion, reabrirConciliacion,
   subscribeToMarcas, marcarAsientos, desmarcarAsientos,
@@ -62,7 +64,6 @@ export default function ConciliacionBancariaPage() {
   const [periodo,   setPeriodo]   = useState<string>('');
   const [movs,      setMovs]      = useState<MovimientoBancario[]>([]);
   const [loading,   setLoading]   = useState(false);
-  const [asientos,  setAsientos]  = useState<AsientoContable[]>([]);
   const [extractos, setExtractos] = useState<ExtractoBancario[]>([]);
   const [cierres,   setCierres]   = useState<ConciliacionBancaria[]>([]);
   const [lotes,     setLotes]     = useState<LoteReclasificacion[]>([]);
@@ -105,9 +106,7 @@ export default function ConciliacionBancariaPage() {
   const [busqueda, setBusqueda] = useState('');
 
   useEffect(() => {
-    const u1 = subscribeToCuentasBancarias(setCuentas);
-    const u2 = subscribeToAsientos(setAsientos, 10000);
-    return () => { u1(); u2(); };
+    return subscribeToCuentasBancarias(setCuentas);
   }, []);
 
   // Con una sola cuenta bancaria activa, se elige sola
@@ -134,6 +133,15 @@ export default function ConciliacionBancariaPage() {
 
   const cuentaObj = useMemo(() => cuentas.find(c => c.id === cuentaSel) ?? null, [cuentas, cuentaSel]);
   const cuentaCodigo = cuentaObj?.cuentaContableCodigo ?? '';
+
+  // Solo los asientos que tocan la cuenta del banco (más los enlazados a movimientos o con visto),
+  // no toda la colección: ver useAsientosDeCuenta.
+  const puedeEditarAsientos = user?.rol === 'admin' || user?.rol === 'contador';
+  const idsEnlazados = useMemo(
+    () => [...movs.map(m => m.asientoId ?? ''), ...marcas.map(k => k.asientoId)].filter(Boolean),
+    [movs, marcas]);
+  const indiceAsientos = useAsientosDeCuenta({ codigos: [cuentaCodigo], idsExtra: idsEnlazados, puedeEditar: puedeEditarAsientos });
+  const asientos: AsientoContable[] = indiceAsientos.asientos;
 
   // Meses disponibles: los que tienen movimientos o un corte del banco
   const periodos = useMemo(() => {
@@ -570,6 +578,8 @@ export default function ConciliacionBancariaPage() {
           </Link>
         }
       />
+
+      <AvisoPrepararAsientos {...indiceAsientos} puedePreparar={puedeEditarAsientos} />
 
       <div className="bg-white rounded-xl border p-4 flex flex-wrap gap-4 items-end">
         <div className="flex-1 min-w-64">

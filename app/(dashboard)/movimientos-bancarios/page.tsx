@@ -29,7 +29,7 @@ import {
   marcarMovimientoReclasificado, restaurarMovimiento,
 } from '@/lib/firebase/cuentas-bancarias';
 import { subscribeToCuentas }  from '@/lib/firebase/plan-cuentas';
-import { reclasificarCuentaEnAsiento, reclasificarCuentaEnAsientoSiEsUnica, getAsientos } from '@/lib/firebase/asientos';
+import { reclasificarCuentaEnAsiento, reclasificarCuentaEnAsientoSiEsUnica, getAsientosQueTocan } from '@/lib/firebase/asientos';
 import { getOrCreateConfigContable } from '@/lib/firebase/config-contable';
 import {
   crearLoteReclasificacion, subscribeToLotesReclasificacion, marcarLoteRevertido,
@@ -577,7 +577,7 @@ export default function MovimientosBancariosPage() {
     // queda con referenciaTipo 'cxc' o 'factura_proveedor', no 'cobro_cliente'/
     // 'pago_proveedor' — filtrar por tipo dejaba fuera la mayoría del historial real.
     // Lo único que importa es si el asiento efectivamente toca una cuenta de banco.
-    const todosAsientos = await getAsientos();
+    const todosAsientos = await getAsientosQueTocan([...cuentaPorCodigo.keys()]);
     const candidatos = todosAsientos.filter(a =>
       !existentes.has(a.id) &&
       a.lineas.some(l => cuentaPorCodigo.has(l.cuentaCodigo))
@@ -666,7 +666,7 @@ export default function MovimientosBancariosPage() {
       const codigosBanco = new Set([bancoCodigo, config.cuentaBancos].filter(Boolean));
 
       // 1) Todos los asientos del sistema que tocan la cuenta de este banco
-      const todosAsientos = await getAsientos();
+      const todosAsientos = await getAsientosQueTocan([...codigosBanco]);
       const asientosDelBanco = todosAsientos.filter(a =>
         a.lineas.some(l => codigosBanco.has(l.cuentaCodigo))
       );

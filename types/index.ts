@@ -411,6 +411,8 @@ export interface AsientoContable {
   referenciaId?:  string;   // ID del documento origen (venta, entrada, pago, etc.)
   referenciaTipo?:string;   // 'venta' | 'entrada' | 'factura_proveedor' | etc.
   lineas:         AsientoLinea[];
+  /** Códigos de cuenta que usan las líneas (para consultar solo los asientos de una cuenta). */
+  cuentasCodigos?: string[];
   totalDebe:      number;
   totalHaber:     number;
   estado:         'borrador' | 'confirmado';

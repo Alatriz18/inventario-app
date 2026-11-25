@@ -89,7 +89,7 @@ export async function POST(req: NextRequest) {
     const dogeProds = prodSnap.docs.filter(d => esDoge(d.data().nombre) || esDoge(d.data().sku));
     if (dogeProds.length > 0) {
       const batch = db.batch();
-      dogeProds.forEach(d => batch.update(d.ref, { stockActual: 0 }));
+      dogeProds.forEach(d => batch.update(d.ref, { stockActual: 0, updatedAt: new Date() }));
       await batch.commit();
       log.push(`✓ producto DOGE: stock reseteado a 0`);
     } else {

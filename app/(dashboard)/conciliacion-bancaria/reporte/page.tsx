@@ -18,7 +18,9 @@ import type {
   MarcaConciliacion, MovimientoBancario,
 } from '@/types';
 import { subscribeToCuentasBancarias, subscribeToMovimientosBancarios } from '@/lib/firebase/cuentas-bancarias';
-import { subscribeToAsientos } from '@/lib/firebase/asientos';
+import { useAsientosDeCuenta } from '@/hooks/useAsientosDeCuenta';
+import AvisoPrepararAsientos from '@/components/shared/AvisoPrepararAsientos';
+import { useAuth } from '@/context/AuthContext';
 import { getConfigEmpresa } from '@/lib/firebase/config-empresa';
 import { subscribeToConciliaciones, subscribeToExtractos, subscribeToMarcas } from '@/lib/firebase/extractos-bancarios';
 import { aFecha, type MarcaVisto } from '@/lib/bancos/conciliacion';
@@ -41,7 +43,6 @@ export default function ReporteConciliacionesPage() {
   const [cuentas,   setCuentas]   = useState<CuentaBancaria[]>([]);
   const [cuentaSel, setCuentaSel] = useState('');
   const [movs,      setMovs]      = useState<MovimientoBancario[]>([]);
-  const [asientos,  setAsientos]  = useState<AsientoContable[]>([]);
   const [extractos, setExtractos] = useState<ExtractoBancario[]>([]);
   const [cierres,   setCierres]   = useState<ConciliacionBancaria[]>([]);
   const [marcas,    setMarcas]    = useState<MarcaConciliacion[]>([]);
@@ -52,9 +53,8 @@ export default function ReporteConciliacionesPage() {
 
   useEffect(() => {
     const u1 = subscribeToCuentasBancarias(setCuentas);
-    const u2 = subscribeToAsientos(setAsientos, 10000);
     getConfigEmpresa().then(setEmpresa).catch(() => {});
-    return () => { u1(); u2(); };
+    return u1;
   }, []);
 
   useEffect(() => {
@@ -74,6 +74,17 @@ export default function ReporteConciliacionesPage() {
   }, [cuentaSel]);
 
   const cuenta = useMemo(() => cuentas.find(c => c.id === cuentaSel) ?? null, [cuentas, cuentaSel]);
+
+  // Solo los asientos de la cuenta del banco (más los enlazados a movimientos o con visto)
+  const { user } = useAuth();
+  const puedeEditarAsientos = user?.rol === 'admin' || user?.rol === 'contador';
+  const idsEnlazados = useMemo(
+    () => [...movs.map(m => m.asientoId ?? ''), ...marcas.map(k => k.asientoId)].filter(Boolean),
+    [movs, marcas]);
+  const indiceAsientos = useAsientosDeCuenta({
+    codigos: [cuenta?.cuentaContableCodigo ?? ''], idsExtra: idsEnlazados, puedeEditar: puedeEditarAsientos,
+  });
+  const asientos: AsientoContable[] = indiceAsientos.asientos;
 
   const datos: DatosConciliacion | null = useMemo(() => {
     if (!cuenta?.cuentaContableCodigo) return null;
@@ -130,6 +141,8 @@ export default function ReporteConciliacionesPage() {
           <Link href="/conciliacion-bancaria"><Button variant="outline" size="sm">Ir a Conciliación</Button></Link>
         }
       />
+
+      <AvisoPrepararAsientos {...indiceAsientos} puedePreparar={puedeEditarAsientos} />
 
       <div className="bg-white rounded-xl border p-4 flex flex-wrap gap-4 items-end">
         <div className="flex-1 min-w-64">

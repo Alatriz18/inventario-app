@@ -9,13 +9,14 @@
  */
 
 import {
-  collection, getDocs, doc, writeBatch, setDoc, DocumentData,
+  collection, getDocs, doc, writeBatch, setDoc, DocumentData, serverTimestamp,
 } from 'firebase/firestore';
 import { db } from '@/lib/firebase/config';
 import { CuentaContable, AsientoLinea } from '@/types';
 import { PLAN_CUENTAS_SUPERCIAS } from '@/lib/data/plan-cuentas-supercias';
 import { MAPEO_PLAN_ANTERIOR, CONFIG_CONTABLE_DEFAULT } from '@/lib/data/plan-cuentas-ecuador';
 import { invalidarCacheCuentas, invalidarCacheConfigContable } from '@/lib/contabilidad/motor-asientos';
+import { codigosDeLineas } from '@/lib/contabilidad/cuentas-codigos';
 
 const LOTE_BATCH = 400;
 
@@ -186,7 +187,11 @@ export async function aplicarMigracion(
           if (e.col === 'cuentas_bancarias') data[`${base}Nombre`] = nuevas.get(nuevo)!.nombre;
         }
       });
-      if (Object.keys(data).length) cambios.push({ col: e.col, id: d.id, data });
+      if (Object.keys(data).length) {
+        // Clientes y productos se sincronizan por updatedAt (ver lib/firebase/catalogo.ts)
+        if (e.col === 'clientes') data.updatedAt = serverTimestamp();
+        cambios.push({ col: e.col, id: d.id, data });
+      }
     });
     otros += await escribirLotes(cambios);
   }
@@ -226,7 +231,7 @@ export async function aplicarMigracion(
       const c = nuevas.get(nuevo)!;
       return { ...l, cuentaCodigo: nuevo, cuentaNombre: c.nombre, cuentaId: c.id };
     });
-    cambiosAsientos.push({ col: 'asientos', id: a.id, data: { lineas } });
+    cambiosAsientos.push({ col: 'asientos', id: a.id, data: { lineas, cuentasCodigos: codigosDeLineas(lineas) } });
   });
   let asientosActualizados = 0;
   for (let i = 0; i < cambiosAsientos.length; i += LOTE_BATCH) {

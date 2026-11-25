@@ -1,11 +1,167 @@
 import {
-  collection, doc, addDoc, updateDoc, getDoc, query, orderBy, where, getDocs, serverTimestamp, Timestamp, limit as fsLimit,
-  runTransaction } from 'firebase/firestore';
+  collection, doc, updateDoc, getDoc, setDoc, query, orderBy, where, getDocs, serverTimestamp, Timestamp, limit as fsLimit,
+  runTransaction, writeBatch, documentId, startAfter, type QueryDocumentSnapshot, type DocumentData,
+} from 'firebase/firestore';
 import { onSnapshot } from './compartido';
 import { db } from '@/lib/firebase/config';
-import { AsientoContable, AsientoLinea, TipoAsiento } from '@/types';
+import { AsientoContable, AsientoLinea } from '@/types';
+import { codigosDeLineas, codigosAlDia, tocaCuentas, unirAsientos } from '@/lib/contabilidad/cuentas-codigos';
 
 const COL = 'asientos';
+
+// ── Asientos por cuenta (para no leer toda la colección) ──────────────────
+//
+// Cada asiento guarda `cuentasCodigos` (las cuentas de sus líneas) y así se le puede pedir a
+// Firestore solo los de una cuenta. Los asientos anteriores a este cambio no lo tienen: hay que
+// "prepararlos" una sola vez (lee toda la colección una vez y les escribe el campo). Mientras no
+// se haga, las pantallas siguen leyendo como antes, así nunca muestran datos incompletos.
+//
+// Para no depender de que TODO asiento nuevo traiga el campo (pestañas con la versión anterior
+// del sistema, procesos del servidor), a lo leído por cuenta se suman los asientos creados o
+// editados desde la última revisión (`revisadoHasta`), filtrados aquí por sus líneas.
+
+const REF_INDICES = doc(db, 'config_contable', 'indices');
+const CLAVE_LOCAL = 'asientosPorCuenta';
+/** Margen para relojes desajustados entre computadores y el servidor. */
+const MARGEN_MS = 30 * 60 * 1000;
+
+export interface EstadoIndiceAsientos {
+  /** true si los asientos ya tienen guardadas sus cuentas. */
+  listo:         boolean;
+  /** Desde cuándo hay que sumar los asientos creados o editados (sin confiar en su campo). */
+  revisadoHasta: Date | null;
+}
+
+function leerEstado(data: DocumentData | undefined): EstadoIndiceAsientos {
+  const r = data?.revisadoHasta;
+  return {
+    listo: data?.asientosPorCuenta === true,
+    revisadoHasta: r instanceof Timestamp ? r.toDate() : r ? new Date(r) : null,
+  };
+}
+
+/** Escucha si los asientos ya están preparados para consultarse por cuenta. */
+export function subscribeEstadoIndiceAsientos(callback: (e: EstadoIndiceAsientos) => void): () => void {
+  return onSnapshot(REF_INDICES, snap => {
+    const e = leerEstado(snap.data());
+    try { if (e.listo) localStorage.setItem(CLAVE_LOCAL, '1'); } catch { /* sin almacenamiento */ }
+    callback(e);
+  }, () => callback({ listo: false, revisadoHasta: null }));
+}
+
+export async function getEstadoIndiceAsientos(): Promise<EstadoIndiceAsientos> {
+  return leerEstado((await getDoc(REF_INDICES)).data());
+}
+
+/** Asientos que usan alguna de estas cuentas (máx. 30 cuentas por consulta, límite de Firestore). */
+export function subscribeToAsientosDeCuentas(
+  codigos: string[],
+  callback: (data: AsientoContable[]) => void,
+  onError?: (e: Error) => void
+): () => void {
+  const lista = [...new Set(codigos.filter(Boolean))].slice(0, 30);
+  if (lista.length === 0) { callback([]); return () => {}; }
+  const q = query(collection(db, COL), where('cuentasCodigos', 'array-contains-any', lista));
+  return onSnapshot(q, snap => callback(snap.docs.map(fromDoc)), err => onError?.(err));
+}
+
+/** Asientos creados o editados desde una fecha (dos consultas pequeñas, unidas). */
+export function subscribeToAsientosRecientes(
+  desde: Date,
+  callback: (data: AsientoContable[]) => void,
+  onError?: (e: Error) => void
+): () => void {
+  let creados: AsientoContable[] = [], editados: AsientoContable[] = [];
+  const emitir = () => callback(unirAsientos(creados, editados));
+  const u1 = onSnapshot(query(collection(db, COL), where('createdAt', '>=', desde)),
+    snap => { creados = snap.docs.map(fromDoc); emitir(); }, err => onError?.(err));
+  const u2 = onSnapshot(query(collection(db, COL), where('updatedAt', '>=', desde)),
+    snap => { editados = snap.docs.map(fromDoc); emitir(); }, err => onError?.(err));
+  return () => { u1(); u2(); };
+}
+
+/** Lee asientos puntuales por su id (de a 30, límite de Firestore). */
+export async function getAsientosPorIds(ids: string[]): Promise<AsientoContable[]> {
+  const unicos = [...new Set(ids.filter(Boolean))];
+  const salida: AsientoContable[] = [];
+  for (let i = 0; i < unicos.length; i += 30) {
+    const snap = await getDocs(query(collection(db, COL), where(documentId(), 'in', unicos.slice(i, i + 30))));
+    salida.push(...snap.docs.map(fromDoc));
+  }
+  return salida;
+}
+
+/**
+ * Lectura puntual de los asientos que usan alguna de estas cuentas. Si los asientos aún no están
+ * preparados, lee todos y filtra (como antes), así el resultado siempre es completo.
+ */
+export async function getAsientosQueTocan(codigos: string[]): Promise<AsientoContable[]> {
+  const lista = [...new Set(codigos.filter(Boolean))];
+  if (lista.length === 0) return [];
+  const estado = await getEstadoIndiceAsientos();
+  if (!estado.listo || lista.length > 30) {
+    return (await getAsientos()).filter(a => tocaCuentas(a, lista));
+  }
+  const porCuenta = await getDocs(query(collection(db, COL), where('cuentasCodigos', 'array-contains-any', lista)));
+  const desde = estado.revisadoHasta ?? new Date(0);
+  const [creados, editados] = await Promise.all([
+    getDocs(query(collection(db, COL), where('createdAt', '>=', desde))),
+    getDocs(query(collection(db, COL), where('updatedAt', '>=', desde))),
+  ]);
+  const recientes = [...creados.docs, ...editados.docs].map(fromDoc).filter(a => tocaCuentas(a, lista));
+  // Si una edición quitó la cuenta, el asiento llega por la consulta por cuenta pero ya no la toca
+  return unirAsientos(porCuenta.docs.map(fromDoc), recientes).filter(a => tocaCuentas(a, lista));
+}
+
+/**
+ * Guarda `cuentasCodigos` en los asientos que no lo tienen al día (solo escribe los que cambian) y
+ * corre la marca de revisión. Lo usan la preparación inicial y la revisión de lo reciente.
+ */
+async function escribirCodigos(asientos: AsientoContable[]): Promise<number> {
+  const pendientes = asientos.filter(a => !codigosAlDia(a));
+  for (let i = 0; i < pendientes.length; i += 400) {
+    const lote = writeBatch(db);
+    pendientes.slice(i, i + 400).forEach(a => lote.update(doc(db, COL, a.id), { cuentasCodigos: codigosDeLineas(a.lineas) }));
+    await lote.commit();
+  }
+  return pendientes.length;
+}
+
+/**
+ * Preparación única: recorre todos los asientos (en páginas de 500) y les guarda sus cuentas.
+ * Cuesta una lectura por asiento, una sola vez. Se puede repetir sin problema: solo escribe lo
+ * que falte.
+ */
+export async function prepararAsientosPorCuenta(
+  onProgreso?: (leidos: number, actualizados: number) => void
+): Promise<{ leidos: number; actualizados: number }> {
+  const inicio = new Date(Date.now() - MARGEN_MS);
+  let leidos = 0, actualizados = 0;
+  let ultimo: QueryDocumentSnapshot<DocumentData> | undefined;
+  for (;;) {
+    const partes = [orderBy(documentId()), fsLimit(500), ...(ultimo ? [startAfter(ultimo)] : [])];
+    const snap = await getDocs(query(collection(db, COL), ...partes));
+    if (snap.empty) break;
+    leidos += snap.size;
+    actualizados += await escribirCodigos(snap.docs.map(fromDoc));
+    onProgreso?.(leidos, actualizados);
+    ultimo = snap.docs[snap.docs.length - 1];
+    if (snap.size < 500) break;
+  }
+  await setDoc(REF_INDICES, { asientosPorCuenta: true, revisadoHasta: Timestamp.fromDate(inicio), preparadoEn: serverTimestamp() }, { merge: true });
+  try { localStorage.setItem(CLAVE_LOCAL, '1'); } catch { /* sin almacenamiento */ }
+  return { leidos, actualizados };
+}
+
+/**
+ * Revisión de lo reciente (la hace quien puede editar asientos al abrir la conciliación): guarda
+ * las cuentas en los asientos recientes que no las tengan y adelanta la marca, para que la
+ * consulta de "recientes" siga siendo pequeña.
+ */
+export async function revisarAsientosRecientes(recientes: AsientoContable[]): Promise<void> {
+  await escribirCodigos(recientes);
+  await setDoc(REF_INDICES, { revisadoHasta: Timestamp.fromDate(new Date(Date.now() - MARGEN_MS)) }, { merge: true });
+}
 
 // ── helpers ───────────────────────────────────────────────────────────────
 
@@ -98,6 +254,7 @@ export async function createAsiento(
     tx.set(counterRef, { valor: siguiente }, { merge: true });
     tx.set(nuevoRef, {
       ...data,
+      cuentasCodigos: codigosDeLineas(data.lineas),
       numero,
       bloqueado:          data.bloqueado          ?? false,
       editadoManualmente: data.editadoManualmente ?? false,
@@ -159,6 +316,7 @@ export async function editarAsiento(
       ...(cambios.concepto && { concepto: cambios.concepto }),
       ...(cambios.fecha    && { fecha:    cambios.fecha }),
       lineas:             cambios.lineas,
+      cuentasCodigos:     codigosDeLineas(cambios.lineas),
       totalDebe:          totalDebe2,
       totalHaber:         totalHaber2,
       editadoManualmente: true,
@@ -254,6 +412,7 @@ export async function reclasificarCuentaEnAsiento(
 
   await updateDoc(doc(db, COL, id), {
     lineas: nuevasLineas,
+    cuentasCodigos:       codigosDeLineas(nuevasLineas),
     editadoManualmente:   true,
     updatedAt:            serverTimestamp(),
     usuarioEdicionId:     usuarioId,
@@ -307,6 +466,7 @@ export async function recalcularAsientoDeDocumento(params: {
 
   await updateDoc(doc(db, COL, asiento.id), {
     lineas:     params.nuevasLineas,
+    cuentasCodigos: codigosDeLineas(params.nuevasLineas),
     totalDebe,
     totalHaber,
     ...(params.nuevoConcepto && { concepto: params.nuevoConcepto }),
@@ -332,17 +492,9 @@ export async function bloquearAsientosDePeriodo(
   const inicio = new Date(anio, mes - 1, 1);
   const fin    = new Date(anio, mes,     0, 23, 59, 59);
 
-  const snap = await getDocs(query(collection(db, COL), orderBy('fecha')));
-  const batch: Promise<void>[] = [];
-
-  for (const d of snap.docs) {
-    const a = fromDoc(d);
-    if (a.fecha >= inicio && a.fecha <= fin) {
-      batch.push(updateDoc(doc(db, COL, d.id), { bloqueado: bloquear }));
-    }
-  }
-
-  await Promise.all(batch);
+  // Solo los asientos del mes (antes se leía toda la colección para filtrar aquí)
+  const snap = await getDocs(query(collection(db, COL), where('fecha', '>=', inicio), where('fecha', '<=', fin)));
+  await Promise.all(snap.docs.map(d => updateDoc(doc(db, COL, d.id), { bloqueado: bloquear })));
 }
 
 /**

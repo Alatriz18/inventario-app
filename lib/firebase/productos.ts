@@ -2,6 +2,7 @@ import {
   collection, addDoc, updateDoc, deleteDoc,
   doc, query, orderBy, serverTimestamp, limit as fsLimit } from 'firebase/firestore';
 import { onSnapshot } from './compartido';
+import { suscribirCatalogo } from './catalogo';
 import { db } from './config';
 import { Producto } from '@/types';
 
@@ -22,11 +23,14 @@ export function subscribeToProductos(
   limite = LIMITE_DEFAULT,
   opciones: { incluirGastos?: boolean } = {}
 ): () => void {
-  const q = query(collection(db, COL), orderBy('nombre'), fsLimit(limite));
-  return onSnapshot(q, (snap) => {
-    const todos = snap.docs.map((d) => ({ id: d.id, ...d.data() } as Producto));
+  const entregar = (todos: Producto[]) =>
     callback(opciones.incluirGastos ? todos : todos.filter((p) => p.tipoItem !== 'gasto'));
-  });
+  // Catálogo completo: desde la caché del navegador + solo los cambios (ver catalogo.ts)
+  if (limite === LIMITE_DEFAULT) {
+    return suscribirCatalogo({ coleccion: COL, ordenarPor: 'nombre', limite }, docs => entregar(docs as Producto[]));
+  }
+  const q = query(collection(db, COL), orderBy('nombre'), fsLimit(limite));
+  return onSnapshot(q, (snap) => entregar(snap.docs.map((d) => ({ id: d.id, ...d.data() } as Producto))));
 }
 
 /**

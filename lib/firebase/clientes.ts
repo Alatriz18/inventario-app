@@ -2,6 +2,7 @@ import {
   collection, addDoc, updateDoc, deleteDoc,
   doc, query, orderBy, where, getDocs, serverTimestamp, limit as fsLimit } from 'firebase/firestore';
 import { onSnapshot } from './compartido';
+import { suscribirCatalogo } from './catalogo';
 import { db } from './config';
 import { Cliente } from '@/types';
 
@@ -16,6 +17,10 @@ export function subscribeToClientes(
   callback: (data: Cliente[]) => void,
   limite = LIMITE_DEFAULT
 ): () => void {
+  // Catálogo completo: desde la caché del navegador + solo los cambios (ver catalogo.ts)
+  if (limite === LIMITE_DEFAULT) {
+    return suscribirCatalogo({ coleccion: COL, ordenarPor: 'nombre', limite }, docs => callback(docs as Cliente[]));
+  }
   const q = query(collection(db, COL), orderBy('nombre'), fsLimit(limite));
   return onSnapshot(q, (snap) => {
     callback(snap.docs.map((d) => ({ id: d.id, ...d.data() } as Cliente)));
@@ -53,18 +58,20 @@ export async function getOrCreateClientePorIdentificacion(
     tipoPago:    'contado',
     activo:      true,
     createdAt:   serverTimestamp(),
+    updatedAt:   serverTimestamp(),
   });
   return { id: ref.id, nombre, identificacion };
 }
 
 export async function createCliente(data: Omit<Cliente, 'id'>): Promise<void> {
-  await addDoc(collection(db, COL), { ...data, createdAt: serverTimestamp() });
+  await addDoc(collection(db, COL), { ...data, createdAt: serverTimestamp(), updatedAt: serverTimestamp() });
 }
 
 export async function updateCliente(
   id: string, data: Partial<Omit<Cliente, 'id'>>
 ): Promise<void> {
-  await updateDoc(doc(db, COL, id), data);
+  // updatedAt: las pantallas piden a Firebase solo los clientes que cambiaron (ver catalogo.ts)
+  await updateDoc(doc(db, COL, id), { ...data, updatedAt: serverTimestamp() });
 }
 
 export async function deleteCliente(id: string): Promise<void> {
